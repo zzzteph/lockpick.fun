@@ -1171,17 +1171,45 @@ export function drawResults(c: ShellContext): void {
     }
   }
 
+  /**
+   * Bench, Again, and — the point of this row — **Next lock**.
+   *
+   * Opening a lock used to leave two ways forward: do that one again, or go back to the bench and
+   * hunt for the next one. The second is a trip through a menu to answer a question the game can
+   * already answer, and it is the trip you make after *every* open. Asked for as *"once you open
+   * the lock user must see the button 'next', so they will continue without exiting to the bench
+   * section"*. `Progress.nextLockAfter` decides which one; this only draws it (D-121).
+   *
+   * It is the primary action and `Again` gives that up, because carrying on is what most players
+   * do most of the time and the primary fill should sit under the button most likely to be
+   * pressed. The lock's *name* goes under the row rather than in the label: a 240px button cannot
+   * hold "Kestrel Serrated Trainer", and pressing `Next lock` without knowing where it goes is the
+   * kind of button people learn not to press.
+   */
+  const next = progress.nextLockAfter(outcome.lock)
   const bw = 240
-  const by = LOGICAL_HEIGHT - MARGIN - 100
-  if (button(vp, p, ui, { x: LOGICAL_WIDTH / 2 - bw - 12, y: by, w: bw, h: 52 }, 'Bench')) {
-    actions.goto('bench')
-  }
-  if (
-    button(vp, p, ui, { x: LOGICAL_WIDTH / 2 + 12, y: by, w: bw, h: 52 }, 'Again', {
-      primary: true,
-    })
-  ) {
+  const gap = 24
+  const count = next ? 3 : 2
+  const rowW = bw * count + gap * (count - 1)
+  let bx2 = LOGICAL_WIDTH / 2 - rowW / 2
+  const by = LOGICAL_HEIGHT - MARGIN - 130
+
+  if (button(vp, p, ui, { x: bx2, y: by, w: bw, h: 52 }, 'Bench')) actions.goto('bench')
+  bx2 += bw + gap
+  if (button(vp, p, ui, { x: bx2, y: by, w: bw, h: 52 }, 'Again', { primary: !next })) {
     actions.restart()
+  }
+  if (next) {
+    bx2 += bw + gap
+    if (button(vp, p, ui, { x: bx2, y: by, w: bw, h: 52 }, 'Next lock', { primary: true })) {
+      actions.startLock(next)
+    }
+    label(ctx, next.name, LOGICAL_WIDTH / 2, by + 84, {
+      font: font(TYPE.body),
+      size: TYPE.body,
+      color: p.inkLight,
+      align: 'center',
+    })
   }
 }
 

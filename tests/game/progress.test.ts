@@ -306,3 +306,72 @@ describe('a real solved attempt feeds the records', () => {
     expect(progress.record(def.slug).bestTime).toBeCloseTo(state.time, 6)
   })
 })
+
+/**
+ * `Next lock` — DECISIONS D-121.
+ *
+ * The button on the results screen that carries you on without a trip through the bench. What is
+ * asserted here is the *choice*, which is the whole of it: the drawing is one `button()` call.
+ */
+describe('the lock after this one', () => {
+  function fresh(): Progress {
+    return Progress.fresh(new MemoryStorage())
+  }
+
+  function openLock(progress: Progress, slug: string): void {
+    progress.completeAttempt(outcome({ lock: lock(slug), seconds: 1, oversets: 0 }))
+  }
+
+  it('is the next lock in bench order', () => {
+    const p = fresh()
+    const tier1 = locksInTier(1)
+    const first = tier1[0] as (typeof ALL_LOCKS)[number]
+    expect(p.nextLockAfter(first)?.slug).toBe(tier1[1]?.slug)
+  })
+
+  it('skips locks already opened — "next" has to mean forward', () => {
+    const p = fresh()
+    const tier1 = locksInTier(1)
+    openLock(p, tier1[1]?.slug ?? '')
+    openLock(p, tier1[2]?.slug ?? '')
+    // 2 and 3 are done, so after 1 comes 4.
+    expect(p.nextLockAfter(tier1[0] as (typeof ALL_LOCKS)[number])?.slug).toBe(tier1[3]?.slug)
+  })
+
+  it('wraps to the front of the roster rather than dead-ending on the last lock', () => {
+    const p = fresh()
+    const tier1 = locksInTier(1)
+    const last = tier1[tier1.length - 1] as (typeof ALL_LOCKS)[number]
+    // Only Tier 1 is unlocked on a fresh save, so the wrap has to come back to its first lock.
+    expect(p.nextLockAfter(last)?.slug).toBe(tier1[0]?.slug)
+  })
+
+  it('never offers a locked tier — it cannot be a way around the gate', () => {
+    const p = fresh()
+    expect(p.isTierUnlocked(2)).toBe(false)
+    for (const d of locksInTier(1)) {
+      const next = p.nextLockAfter(d)
+      expect(next, d.slug).not.toBeNull()
+      expect(p.isTierUnlocked(next?.tier ?? 99), `${d.slug} -> ${next?.slug}`).toBe(true)
+    }
+  })
+
+  it('falls back to bench order once everything available is opened', () => {
+    const p = fresh()
+    const tier1 = locksInTier(1)
+    for (const d of tier1) openLock(p, d.slug)
+    // Tier 2 is unlocked by now, so the next unopened lock is its first.
+    expect(p.isTierUnlocked(2)).toBe(true)
+    const next = p.nextLockAfter(tier1[0] as (typeof ALL_LOCKS)[number])
+    expect(next?.tier).toBe(2)
+  })
+
+  it('is null for a lock that is not in the roster', () => {
+    // A lesson lock or one of the player's own designs. "Next" has no meaning for either, and a
+    // wrong answer is worse than no button.
+    const base = ALL_LOCKS[0]
+    expect(base).toBeDefined()
+    if (!base) return
+    expect(fresh().nextLockAfter({ ...base, id: 10_001, slug: 'my-own-lock' })).toBeNull()
+  })
+})

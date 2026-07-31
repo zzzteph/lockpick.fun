@@ -233,6 +233,30 @@ export class Progress {
     return ALL_LOCKS.filter((d) => this.isTierUnlocked(d.tier))
   }
 
+  /**
+   * The lock the `Next lock` button on the results screen goes to, or null if there is not one.
+   *
+   * Opening a lock and then being returned to the bench to find the next one is a trip through a
+   * menu to answer a question the game can already answer. So it answers it (D-121).
+   *
+   * **Unopened first, in bench order, wrapping.** "Next" has to mean forward: the next lock you
+   * have not beaten, starting after this one and coming round the front if the rest of the tier is
+   * done. Only when everything available is opened does it fall back to plain bench order, which
+   * turns the button into "keep going" for somebody chasing ranks rather than dead-ending them.
+   *
+   * Never a locked tier — the button cannot be a way around the gate the bench enforces. And null
+   * rather than a wrong answer in two cases: a lock that is not in the roster at all (a lesson, or
+   * one of the player's own designs, where "next" has no meaning), and a roster with nothing else
+   * available, where the button would just restart what you finished.
+   */
+  nextLockAfter(def: LockDef): LockDef | null {
+    const here = ALL_LOCKS.findIndex((d) => d.slug === def.slug)
+    if (here < 0) return null
+    const rotated = [...ALL_LOCKS.slice(here + 1), ...ALL_LOCKS.slice(0, here)]
+    const available = rotated.filter((d) => this.isTierUnlocked(d.tier))
+    return available.find((d) => !this.hasOpened(d.slug)) ?? available[0] ?? null
+  }
+
   /** Apply a finished attempt. Returns what it earned, or null when the lock was not opened. */
   completeAttempt(outcome: AttemptOutcome, today?: string): AttemptResult | null {
     if (!outcome.opened) return null

@@ -67,8 +67,8 @@ exactly one thing:
 
 | level | what you get |
 |---|---|
-| **Training** | Everything. The binding pin is bracketed, the capture window is marked, the overset zone is shaded red before you reach it, and the arrow keys trim your lift for you. |
-| **Easy** | The readouts, plus a progress dot on each pin. The default. |
+| **Training** | Everything, and where you start. The binding pin is bracketed, the capture window is marked, the overset zone is shaded red before you reach it, and the arrow keys trim your lift for you. |
+| **Easy** | The readouts, plus a progress dot on each pin. |
 | **Medium** | No pin dots. The meters and the pick's flex. |
 | **Hard** | No cutaway at all. The lock's face, your hands, and what you can hear. |
 

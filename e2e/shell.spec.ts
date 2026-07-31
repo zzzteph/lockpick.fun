@@ -281,3 +281,49 @@ test('@screenshot phase-07 results', async ({ page }) => {
   await captureStage(page, 'phase-07-results')
   watcher.assertClean()
 })
+
+/**
+ * `Next lock` carries you on without a trip through the bench — DECISIONS D-121.
+ *
+ * The unit tests decide *which* lock is next; this proves the button is on screen, that pressing it
+ * starts that lock, and — the actual request — that the bench is never visited on the way. Clicked
+ * through the dev hook at the row's own arithmetic rather than at a remembered pixel, and the row
+ * is mirrored here so the test fails if the renderer moves it.
+ */
+test('the results screen offers the next lock, and taking it never visits the bench', async ({
+  page,
+}) => {
+  const watcher = await bootGame(page, { frames: 3 })
+  await setManual(page, true)
+  await loadLock(page, 1, 5)
+
+  const opened = await openCurrentLock(page)
+  expect(opened.opened, `states: ${opened.chambers.map((c) => c.state).join(',')}`).toBe(true)
+  await advanceSeconds(page, 2.6)
+  expect(await screen(page)).toBe('results')
+
+  // Mirrors `drawResults`: three 240px buttons, 24px apart, centred, 130px off the bottom.
+  const BW = 240
+  const GAP = 24
+  const rowW = BW * 3 + GAP * 2
+  const left = 1920 / 2 - rowW / 2
+  const nextCentre = { x: left + BW * 2 + GAP * 2 + BW / 2, y: 1080 - 24 - 130 + 26 }
+
+  await renderOnce(page)
+  await page.evaluate((at) => {
+    globalThis.__shearline?.clickAt(at.x, at.y)
+  }, nextCentre)
+  await renderOnce(page)
+
+  // Straight into the next lock. Not the bench, and not the one just finished.
+  expect(await screen(page), 'Next lock should start a lock, not a menu').toBe('pick')
+  const now = await getState(page)
+  expect(now.lock.slug, 'the first unopened lock in bench order').toBe('clear-practice-cutaway-ii')
+  expect(now.opened, 'and it should be a fresh attempt').toBe(false)
+
+  // The lock that was just beaten kept its record — starting the next one banked nothing extra.
+  const save = await getSave(page)
+  expect(save.records['clear-practice-cutaway']?.opens).toBe(1)
+  expect(save.records['clear-practice-cutaway-ii']).toBeUndefined()
+  watcher.assertClean()
+})
