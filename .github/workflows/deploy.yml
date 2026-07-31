@@ -1,0 +1,146 @@
+# Build, verify, publish to Pages, and roll the download — on every push to main.
+#
+# The job this replaces uploaded `path: '.'`, the whole repository, to Pages. The root
+# `index.html` ends in `<script type="module" src="/src/main.ts">`, and a browser cannot execute
+# TypeScript — so every deploy this workflow ran served a blank canvas and a console error. It
+# never worked and could not have: the thing that runs is `dist/`, which is built, and which
+# `.gitignore` correctly keeps out of the repository. Nothing uploaded it because nothing built it.
+name: build, deploy and release
+
+on:
+  push:
+    branches: ['main']
+    # A `v*` tag additionally cuts a permanent, versioned release.
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write # creating releases and uploading their assets
+  pages: write
+  id-token: write
+
+# Never two deploys at once, and never cancel one in flight — a half-finished deploy is a broken
+# site, and this one is production.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: verify and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Chromium only — the suite runs nowhere else. `--with-deps` pulls the system libraries a
+      # headless browser needs on a bare runner.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # typecheck, lint, unit tests, build, browser tests.
+      #
+      # `perf` is deliberately not in this gate. It asserts a 16.67ms frame budget, and a budget
+      # measured on a shared runner with no GPU measures the runner — the argument of D-022 and
+      # D-038 applied to a machine those entries did not anticipate. It stays in `npm run verify`
+      # for a real one. See DECISIONS D-119.
+      - name: Verify
+        run: npm run verify:ci
+
+      # `verify:ci` already built. Nothing is rebuilt here on purpose: what gets deployed is the
+      # same bytes that were tested, rather than a second build that ought to match.
+      - name: Check the bundle came out
+        run: |
+          test -f dist/index.html
+          test -f dist/CNAME
+          test -n "$(ls dist/assets/*.js 2>/dev/null)"
+
+      - name: Package the downloadable build
+        run: |
+          set -euo pipefail
+          cd dist && zip -qr "../shear-line-${GITHUB_SHA:0:7}.zip" . && cd ..
+          ls -la shear-line-*.zip
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-zip
+          path: shear-line-*.zip
+          retention-days: 7
+          if-no-files-found: error
+
+  deploy:
+    name: deploy to Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+      - id: deployment
+        uses: actions/deploy-pages@v5
+
+  release:
+    name: roll the download
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-zip
+
+      # A rolling `latest`, replaced on every push, rather than a release per commit — which would
+      # be hundreds of releases of a game nobody is versioning yet. Deleted and recreated so the
+      # tag follows `main` instead of pointing at whichever commit first made it.
+      #
+      # It is what a browser game's release should be: `dist/` is portable to `file://` (D-037), so
+      # unzip and open `index.html` is the whole of the install.
+      - name: Update the rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo 'The current build of SHEAR LINE, from the latest commit on `main`.'
+            echo
+            echo 'Play it in the browser at **https://lockpick.fun** — or download the zip below,'
+            echo 'unpack it and open `index.html`. It needs no server, no install and no network:'
+            echo 'everything you see and hear is generated in code.'
+            echo
+            echo 'This release is replaced on every push. For a build that will not move under you,'
+            echo 'use a tagged version.'
+            echo
+            echo "Built from ${GITHUB_SHA}."
+          } > notes.md
+
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest shear-line-*.zip \
+            --title 'Latest build' \
+            --notes-file notes.md \
+            --prerelease \
+            --target "$GITHUB_SHA"
+
+      # A `v*` tag additionally makes a permanent release, so a version can be pointed at and stay
+      # put. Nothing here runs on an ordinary push.
+      - name: Publish a tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" shear-line-*.zip \
+            --title "SHEAR LINE $GITHUB_REF_NAME" \
+            --generate-notes

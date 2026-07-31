@@ -18,7 +18,11 @@ Twenty-two pin tumblers across four tiers, and a pick that bends when the lock p
 It runs in the browser at **[lockpick.fun](https://lockpick.fun)** — nothing to install, no account,
 no network traffic once the page has loaded.
 
-Or run it yourself:
+Or take it with you: every build is attached to the
+[latest release](../../releases/latest) as a zip. Unpack it, open `index.html`, and it runs off the
+disk with no server — there is nothing in it to fetch.
+
+Or run it from source:
 
 ```
 npm install

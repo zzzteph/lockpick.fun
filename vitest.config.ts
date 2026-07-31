@@ -1,14 +1,14 @@
 import { defineConfig } from 'vitest/config'
 
-// Worker count is roughly half the 12 detected cores (PLATFORM.md §7). Vitest 4 replaced
-// the `--poolOptions.forks.maxForks` CLI flag from VERIFICATION.md §1 with top-level
-// `maxWorkers`; it lives here rather than in the npm script. See DECISIONS D-003.
+// Worker count is roughly half the 12 detected cores, and two on a CI runner, which has far fewer
+// (D-119). Vitest 4 replaced the `--poolOptions.forks.maxForks` CLI flag from VERIFICATION.md §1
+// with top-level `maxWorkers`; it lives here rather than in the npm script. See DECISIONS D-003.
 export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],
     environment: 'node',
     pool: 'forks',
-    maxWorkers: 6,
+    maxWorkers: process.env.CI ? 2 : 6,
     /**
      * Vitest's default is 5 seconds, and for this suite that number measures the *machine*.
      *

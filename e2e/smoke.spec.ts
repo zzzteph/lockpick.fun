@@ -67,9 +67,17 @@ test('rescales without distortion at every common screen size', async ({ page })
     await page.waitForFunction((expected) => {
       const c = document.getElementById('stage') as HTMLCanvasElement
       const rect = c.getBoundingClientRect()
+      const dpr = window.devicePixelRatio
       if (rect.width < 1 || rect.height < 1) return false
       if (Math.abs(rect.width - expected.width) > 1) return false
-      return c.width === Math.round(rect.width * window.devicePixelRatio)
+      // **Both** axes, because both are asserted below. Waiting on the width and then asserting on
+      // the width *and the height* is a race, and it is one this test lost: going from 3440x1440
+      // to 1920x1200 the width settled a frame before the height, and `backingOk` read false at
+      // 1920x1200 every time. It only showed up when the run got *faster* — two workers instead of
+      // six — which is the sort of race that reaches CI green and fails there.
+      return (
+        c.width === Math.round(rect.width * dpr) && c.height === Math.round(rect.height * dpr)
+      )
     }, size)
     const vp = await page.evaluate(() => {
       const c = document.getElementById('stage') as HTMLCanvasElement

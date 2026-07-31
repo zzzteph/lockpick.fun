@@ -14,7 +14,8 @@
     "e2e": "playwright test",
     "perf": "playwright test --config playwright.perf.config.ts",
     "shots": "playwright test --grep @screenshot",
-    "verify": "npm run typecheck && npm run lint && npm run test && npm run build && npm run e2e && npm run perf"
+    "verify": "npm run typecheck && npm run lint && npm run test && npm run build && npm run e2e && npm run perf",
+    "verify:ci": "npm run typecheck && npm run lint && npm run test && npm run build && npm run e2e"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
