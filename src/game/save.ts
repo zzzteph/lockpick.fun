@@ -77,7 +77,19 @@ export const DEFAULT_SETTINGS: SettingsData = {
   reducedMotion: false,
   continuousTones: false,
   subtitles: false,
-  assist: 'easy',
+  /**
+   * **Training**, not Easy — a new save starts on the rung that explains itself (D-120).
+   *
+   * Easy draws one pin, the one under the tip. Training draws the whole cutaway, brackets the
+   * binding chamber, marks the capture window, shades the overset zone before you reach it, and
+   * gives the arrow keys a lift trim (D-111). Somebody opening this for the first time has never
+   * seen a pin stack, and the level that shows them one is the level to open on. Every rung is one
+   * click away in Settings and nothing is gated behind difficulty.
+   *
+   * Note what this also does to the clock: `ASSIST_PAR_SCALE.training` is 0.6, so a Training
+   * attempt is ranked against 60% of the lock's par. See D-120 for why that is left alone.
+   */
+  assist: 'training',
   // Left by default because that is what the lock has always been drawn as; right-handed is
   // one click away in Settings. Flipping the *default* is a bigger change than it looks —
   // every geometry assertion in the suite is written against one orientation.
