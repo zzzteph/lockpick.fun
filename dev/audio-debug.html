@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SHEAR LINE — audio debug</title>
+    <style>
+      :root {
+        --paper: #f4f1ea;
+        --paper-shade: #e7e2d8;
+        --ink: #1c1b19;
+        --ink-light: #666460;
+        --rule: #c9c3b6;
+        --amber: #d98324;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: ui-monospace, 'Cascadia Code', 'SF Mono', Consolas, monospace;
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
+      }
+      header {
+        padding: 24px 24px 12px;
+        border-bottom: 1px solid var(--rule);
+      }
+      h1 {
+        margin: 0;
+        font-size: 28px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-weight: 600;
+      }
+      header p {
+        margin: 6px 0 0;
+        color: var(--ink-light);
+      }
+      #grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+        gap: 16px;
+        padding: 24px;
+      }
+      .card {
+        border: 1px solid var(--rule);
+        background: var(--paper-shade);
+        padding: 12px;
+      }
+      .card h2 {
+        margin: 0 0 2px;
+        font-size: 13px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-weight: 600;
+      }
+      .card .desc {
+        margin: 0 0 8px;
+        color: var(--ink-light);
+        min-height: 32px;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 96px;
+        background: var(--paper);
+        border: 1px solid var(--rule);
+      }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 2px 12px;
+        margin: 8px 0 0;
+        color: var(--ink-light);
+        font-size: 11px;
+      }
+      .stats b {
+        color: var(--ink);
+        font-weight: 600;
+      }
+      button {
+        margin-top: 8px;
+        font: inherit;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        background: var(--paper);
+        color: var(--ink);
+        border: 1px solid var(--ink);
+        padding: 4px 12px;
+        cursor: pointer;
+      }
+      button:hover {
+        background: var(--amber);
+      }
+      #status {
+        padding: 0 24px 24px;
+        color: var(--ink-light);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Audio debug</h1>
+      <p>
+        Every sound in <code>docs/AUDIO.md §3</code>, rendered offline and plotted. Press play
+        to hear one — the audio context is only created on that first click.
+      </p>
+    </header>
+    <div id="grid"></div>
+    <p id="status">rendering…</p>
+    <script type="module" src="/src/audio-debug.ts"></script>
+  </body>
+</html>

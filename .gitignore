@@ -1,0 +1,70 @@
+# What belongs in this repository is the source of the game and the documents that explain it.
+# Everything below is something a machine wrote, something a tool cached, or something that is
+# nobody's business but the machine it was made on.
+
+# ── Dependencies and build output ───────────────────────────────────────────────────────
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# ── Test and measurement output ─────────────────────────────────────────────────────────
+coverage/
+playwright-report/
+test-results/
+blob-report/
+.playwright/
+
+# Every PNG in here is written by the browser suite, and `difficulty-curve.txt`, `economy.txt` and
+# `frame-histogram.txt` by the tests that measure them. Regenerate the gallery any time with
+# `npm run shots`. Committed, they put a diff on the repo every time the suite runs.
+#
+# The picture the README points at lives at `.github/screenshot.png` instead, and is checked in on
+# purpose: a README whose image is gitignored shows a broken box to everybody except its author,
+# who is the one reader with the file on disk.
+screenshots/
+
+# ── The workshop, not the game ──────────────────────────────────────────────────────────
+# The specification the game was built from, the instructions for building it, and the log of
+# having built it. None of it is needed to build, run, play or verify.
+#
+# `DECISIONS.md` goes with them. Comments throughout `src/`, `tests/` and `e2e/` cite it by number
+# — "see DECISIONS D-105" and the like, around five hundred times — and those citations stay. A
+# decision number is a stable identifier for a piece of reasoning whether or not the log travels
+# with the code, and a comment that says *which* decision it came from is more use than one that
+# says nothing. They are not broken links; there is simply no link.
+docs/
+BUILD.md
+START-HERE.md
+PROGRESS.md
+CHANGELOG.md
+DECISIONS.md
+
+# One-off image-generation scripts. `dev/audio-debug.html` is NOT ignored and must not be: it is a
+# bench instrument, but `e2e/audio.spec.ts` navigates to it, so ignoring the folder wholesale would
+# leave a cloned repo unable to run the gate the README documents.
+dev/*.ps1
+
+# Scratch from measurement and probe runs.
+probe-out.txt
+*.log
+
+# ── Agent and editor working state ──────────────────────────────────────────────────────
+# Session data, local settings, memory and scratchpads: how the work was done, not what was made.
+.claude/
+.cursor/
+.aider*
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Local-only and OS ───────────────────────────────────────────────────────────────────
+*.local
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+desktop.ini

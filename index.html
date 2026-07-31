@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      `user-scalable=no` and `viewport-fit=cover` are the two that matter on a phone: a game whose
+      controls are drag gestures cannot afford double-tap zoom or pinch, and the stage should reach
+      into the notch cut-outs rather than sitting in a letterbox inside a letterbox. `theme-color`
+      matches the letterbox so the browser chrome does not stripe the top of the screen.
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#14171a" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <title>SHEAR LINE</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #14171a;
+        /* A drag that starts on the lock must not become a pull-to-refresh or a rubber-band. */
+        overscroll-behavior: none;
+        /* Long-pressing a pin is a lift, not a text selection or a share sheet. */
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      body {
+        font-family: ui-monospace, 'Cascadia Code', 'SF Mono', Consolas, monospace;
+      }
+      /*
+       * The cursor is set from `app.ts` per screen, not here. It used to be `cursor: none`
+       * for every screen on the theory that the drawn pick *is* the cursor — which is wrong
+       * twice over: the menus are made of buttons and are unusable without a pointer, and
+       * even while picking the drawn pick is a quantised version of where the hand actually
+       * is (X snaps to a chamber, Y runs through the sensitivity setting), so hiding the real
+       * pointer loses the player their own hand.
+       */
+      #stage {
+        display: block;
+        width: 100vw;
+        /* `dvh` follows the browser bar as it hides, so the stage does not jump mid-drag. The
+           `vh` above it is the fallback for anything that has not got `dvh`. */
+        height: 100vh;
+        height: 100dvh;
+        touch-action: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="stage"></canvas>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
