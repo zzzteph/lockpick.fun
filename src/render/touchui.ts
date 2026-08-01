@@ -8,8 +8,16 @@
  * See DECISIONS D-082.
  */
 
-import { TENSION_STEPS, tensionForStep } from '../ui/input'
-import { PAUSE_PAD, WITHDRAW_PAD, WRENCH_SLIDER, yForStep, type TouchState } from '../ui/touch'
+import { TENSION_STEPS } from '../ui/input'
+import {
+  LIFT_PAD,
+  PAUSE_PAD,
+  WITHDRAW_PAD,
+  WRENCH_SLIDER,
+  mirrorRect,
+  yForStep,
+  type TouchState,
+} from '../ui/touch'
 import { hatchRect, label, text } from './draw'
 import { STROKE, TYPE, alpha, font, readableAccents, type Palette } from './palette'
 import { snapX, snapY, typeFor, type Viewport } from './viewport'
@@ -68,15 +76,55 @@ export function drawTouchControls(
   vp: Viewport,
   p: Palette,
   touch: TouchState,
-  opts: { tensionHeld: boolean } = { tensionHeld: false },
+  opts: { tensionHeld: boolean; mirrored?: boolean } = { tensionHeld: false },
 ): void {
   if (!touch.active) return
   const { ctx } = vp
   const readable = readableAccents(p)
+  /**
+   * Every control is placed through `mirrorRect` — DECISIONS D-130.
+   *
+   * Right-handed means the lock is held in the right hand, so the wrench belongs under the right
+   * thumb. The cutaway has mirrored on this setting since it existed; the controls never did.
+   */
+  const flip = opts.mirrored ?? false
+  const slider = mirrorRect(WRENCH_SLIDER, flip)
+  const lift = mirrorRect(LIFT_PAD, flip)
 
-  pad(vp, p, PAUSE_PAD, 'pause')
+  pad(vp, p, mirrorRect(PAUSE_PAD, flip), 'pause')
 
-  label(ctx, 'wrench', WRENCH_SLIDER.x + WRENCH_SLIDER.w / 2, WRENCH_SLIDER.y - 12, {
+  /**
+   * The lift strip, opposite the wrench.
+   *
+   * Drawn as a dashed outline rather than a solid pad because it is not a button — it is somewhere
+   * to *drag*, and a solid frame beside a solid wrench slider would read as a second thing to
+   * press. The caption is the whole of the discoverability: nobody would find "you may drag here
+   * instead" on their own, and the alternative is a tutorial line for a control that should
+   * explain itself.
+   */
+  ctx.save()
+  ctx.setLineDash([10, 8])
+  ctx.lineWidth = STROKE.hairline
+  ctx.strokeStyle = touch.liftPointer !== null ? p.ink : p.rule
+  ctx.strokeRect(snapX(vp, lift.x, 1), snapY(vp, lift.y, 1), lift.w, lift.h)
+  ctx.restore()
+  {
+    const s = typeFor(vp, TYPE.dimension)
+    label(ctx, 'drag', lift.x + lift.w / 2, lift.y + lift.h / 2 - s * 0.7, {
+      font: font(s),
+      size: s,
+      color: p.inkLight,
+      align: 'center',
+    })
+    label(ctx, 'to lift', lift.x + lift.w / 2, lift.y + lift.h / 2 + s * 0.6, {
+      font: font(s),
+      size: s,
+      color: p.inkLight,
+      align: 'center',
+    })
+  }
+
+  label(ctx, 'wrench', slider.x + slider.w / 2, slider.y - 12, {
     font: font(typeFor(vp, TYPE.dimension)),
     size: typeFor(vp, TYPE.dimension),
     color: p.inkLight,
@@ -85,7 +133,7 @@ export function drawTouchControls(
 
   ctx.save()
   ctx.fillStyle = p.paperShade
-  ctx.fillRect(WRENCH_SLIDER.x, WRENCH_SLIDER.y, WRENCH_SLIDER.w, WRENCH_SLIDER.h)
+  ctx.fillRect(slider.x, slider.y, slider.w, slider.h)
   ctx.restore()
 
   // Eleven bands: off, then the ten pressure steps.
@@ -97,8 +145,8 @@ export function drawTouchControls(
     ctx.save()
     if (filled) {
       ctx.fillStyle = alpha(readable.amber, 0.75)
-      ctx.fillRect(WRENCH_SLIDER.x, top, WRENCH_SLIDER.w, h)
-      hatchRect(ctx, WRENCH_SLIDER.x, top, WRENCH_SLIDER.w, h, {
+      ctx.fillRect(slider.x, top, slider.w, h)
+      hatchRect(ctx, slider.x, top, slider.w, h, {
         spacing: 5,
         angleDeg: 0,
         color: alpha(p.ink, 0.35),
@@ -108,14 +156,14 @@ export function drawTouchControls(
     ctx.lineWidth = STROKE.hairline
     ctx.strokeStyle = p.rule
     ctx.strokeRect(
-      snapX(vp, WRENCH_SLIDER.x, STROKE.hairline),
+      snapX(vp, slider.x, STROKE.hairline),
       snapY(vp, top, STROKE.hairline),
-      WRENCH_SLIDER.w,
+      slider.w,
       h,
     )
     ctx.restore()
     if (step === 0) {
-      label(ctx, 'off', WRENCH_SLIDER.x + WRENCH_SLIDER.w / 2, bottom - h / 2 + 6, {
+      label(ctx, 'off', slider.x + slider.w / 2, bottom - h / 2 + 6, {
         font: font(typeFor(vp, TYPE.dimension)),
         size: typeFor(vp, TYPE.dimension),
         color: touch.step === 0 ? p.ink : p.inkLight,
@@ -129,10 +177,10 @@ export function drawTouchControls(
   ctx.lineWidth = STROKE.standard
   ctx.strokeStyle = opts.tensionHeld ? p.ink : p.rule
   ctx.strokeRect(
-    snapX(vp, WRENCH_SLIDER.x, STROKE.standard),
-    snapY(vp, WRENCH_SLIDER.y, STROKE.standard),
-    WRENCH_SLIDER.w,
-    WRENCH_SLIDER.h,
+    snapX(vp, slider.x, STROKE.standard),
+    snapY(vp, slider.y, STROKE.standard),
+    slider.w,
+    slider.h,
   )
   ctx.restore()
 
@@ -140,21 +188,23 @@ export function drawTouchControls(
   text(
     ctx,
     touch.step === 0 ? '—' : String(touch.step),
-    WRENCH_SLIDER.x + WRENCH_SLIDER.w / 2,
-    WRENCH_SLIDER.y - 34,
+    slider.x + slider.w / 2,
+    slider.y - 34,
     { font: font(typeFor(vp, TYPE.heading)), color: touch.step > 0 ? readable.amber : p.inkLight, align: 'center' },
   )
-  if (touch.step > 0) {
-    text(
-      ctx,
-      tensionForStep(touch.step).toFixed(2),
-      WRENCH_SLIDER.x + WRENCH_SLIDER.w / 2,
-      WRENCH_SLIDER.y + WRENCH_SLIDER.h + 26,
-      { font: font(typeFor(vp, TYPE.dimension)), color: p.inkLight, align: 'center' },
-    )
-  }
+  /*
+   * The 0..1 value used to be printed under the slider, at `y + h + 26` = 864 — **inside**
+   * `WITHDRAW_PAD`, which spans 854 to 932. Reported as *"pick out overlaps with the value of the
+   * tension wrench"*, and it is not a consequence of moving the slider in D-129: the old geometry
+   * was `178 + 660 + 26`, which is also 864. It has collided since the touch scheme was written.
+   *
+   * It is simply deleted rather than moved. The slider's job is the **step**, which is drawn large
+   * above it, and the same 0.45 is already in the footer beside `wrench 5 of 10`. A number printed
+   * twice on one screen, one of them on top of a button, is not a readout worth finding room for.
+   * See DECISIONS D-130.
+   */
 
-  pad(vp, p, WITHDRAW_PAD, 'pick out', touch.liftPointer !== null)
+  pad(vp, p, mirrorRect(WITHDRAW_PAD, flip), 'pick out', touch.liftPointer !== null)
 }
 
 /**

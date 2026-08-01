@@ -130,6 +130,31 @@ export function typeFor(vp: Viewport, size: number): number {
 }
 
 /**
+ * The smallest a control may be, in **CSS pixels**, before a fingertip cannot reliably hit it.
+ *
+ * 44 is Apple's floor; Material asks 48. An adult fingertip's contact patch is 10-14mm, which is
+ * 45-55 CSS px, so this is not a guideline with margin in it — it is roughly the size of the thing
+ * doing the pointing.
+ */
+export const TOUCH_FLOOR_CSS = 44
+
+/**
+ * That floor in logical px, for the current viewport.
+ *
+ * The companion to `typeFor`, and the reason it has to exist: D-122 scaled *glyphs* on a small
+ * screen and never touched a hit rect, so compact mode made every control legible and left every
+ * one of them unhittable. An audit of every interactive rect in the game found exactly one — the
+ * bench card — clearing 44 CSS px on a mid-sized phone; menu buttons came to 30, settings toggles
+ * to 12, the paging arrows that are the only way to reach trophy pages 2-4 to 14.
+ *
+ * The rows are at desktop pitch, which is right for a cursor with one-pixel precision and wrong by
+ * about 3x for a thumb. See DECISIONS D-131.
+ */
+export function touchFloorFor(vp: Viewport): number {
+  return TOUCH_FLOOR_CSS / Math.max(vp.scale, 0.01)
+}
+
+/**
  * Put the context into logical space: origin at the top-left of the 1920x1080 stage,
  * one unit = one logical pixel. Call once per frame before drawing anything.
  */

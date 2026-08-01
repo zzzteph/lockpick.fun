@@ -63,6 +63,15 @@ export interface SettingsData {
    * simulation never learns which way round it is being drawn. See DECISIONS D-047.
    */
   handedness: 'left' | 'right'
+  /**
+   * Vibrate on the events a hand would feel — pins setting, oversets, a cascade.
+   *
+   * On by default: this is a game about touch, and the one device with a motor in it is the one
+   * where the pick and the wrench are both blunt instruments. Does nothing where
+   * `navigator.vibrate` is missing, which is every iPhone (D-131), and the settings screen says so
+   * rather than showing a switch that cannot do anything.
+   */
+  haptics: boolean
   theme: ThemeName
 }
 
@@ -94,6 +103,9 @@ export const DEFAULT_SETTINGS: SettingsData = {
   // one click away in Settings. Flipping the *default* is a bigger change than it looks —
   // every geometry assertion in the suite is written against one orientation.
   handedness: 'left',
+  // On where there is a motor, absent where there is not. No save migration needed: `loadSave`
+  // spreads `DEFAULT_SETTINGS` under whatever it read, so an old save picks this up as true.
+  haptics: true,
   theme: 'drafting',
 }
 

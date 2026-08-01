@@ -136,6 +136,22 @@ export interface HudOptions {
    * does not have is worse than no caption at all.
    */
   readonly tensionHint: string
+  /**
+   * What to say while the wrench *is* held, when there is something better than the default.
+   *
+   * Supplied only while it is worth saying — the two-thumb prompt on a phone, until the player has
+   * held the wrench and lifted a pin at the same time. Absent everywhere else, which leaves the
+   * notch explanation in place. See DECISIONS D-131.
+   */
+  readonly heldHint?: string
+  /**
+   * True when the player holds the lock right-handed, which mirrors the whole screen (D-130).
+   *
+   * The readouts move with the controls. If they did not, the wrench would land on top of them the
+   * moment it crossed to the other gutter — the two are the only tenants of those two strips, and
+   * they have to swap together or not at all.
+   */
+  readonly mirrored?: boolean
   /** The lock's par time in seconds, which is what the rank ladder is measured against. */
   readonly par: number
   /**
@@ -601,16 +617,31 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
    * The wrench is the only thing in the game that has a pressure, and the reason a player cannot
    * infer that is that they have never seen it named next to the meter it drives (D-107).
    */
+  /*
+   * Step 0 is a real state and has to read like one — DECISIONS D-131.
+   *
+   * The touch slider folds "how hard" and "at all" into one control, so its step can be zero, and
+   * `wrench 0 of 10` beside a slider whose bottom band says OFF is two names for the same thing.
+   * The keyboard never sends 0 here, so this costs the flat layout nothing.
+   */
+  const off = opts.pressureStep <= 0
   label(
     ctx,
-    compact ? `wrench ${opts.pressureStep} of 10` : `tension wrench — pressure ${opts.pressureStep} of 10`,
+    off
+      ? compact
+        ? 'wrench off'
+        : 'tension wrench — off'
+      : compact
+        ? `wrench ${opts.pressureStep} of 10`
+        : `tension wrench — pressure ${opts.pressureStep} of 10`,
     leftX,
     footerY + FOOTER_PAD,
     {
-    font: font(ts(TYPE.dimension)),
-    size: ts(TYPE.dimension),
-    color: p.inkLight,
-  })
+      font: font(ts(TYPE.dimension)),
+      size: ts(TYPE.dimension),
+      color: p.inkLight,
+    },
+  )
   meter(
     vp,
     p,
@@ -621,10 +652,11 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
     state.tension >= T_MIN_HOLD ? p.amber : p.rule,
     { height: BAR_H },
   )
-  label(ctx, String(opts.pressureStep), leftX + meterW + 20, footerY + FOOTER_PAD + 38, {
+  // The same em dash the slider's own header uses for off, so the two readouts speak one language.
+  label(ctx, off ? '—' : String(opts.pressureStep), leftX + meterW + 20, footerY + FOOTER_PAD + 38, {
     font: font(ts(TYPE.heading), 'bold'),
     size: ts(TYPE.heading),
-    color: p.ink,
+    color: off ? p.inkLight : p.ink,
   })
   text(ctx, state.tension.toFixed(2), leftX + meterW + 58, footerY + FOOTER_PAD + 38, {
     font: font(TYPE.dimension),
@@ -666,20 +698,24 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
    * tension wrench"*. See DECISIONS D-107.
    */
   const wrenchOff = state.tension < T_MIN_HOLD
+  /**
+   * With the wrench held, the row teaches two-thumb play until it has happened once (D-131).
+   *
+   * `heldHint` rather than the fixed sentence because the thing worth saying at that moment is not
+   * fixed: on a phone, the player who has just got tension on is about to let go of it to reach a
+   * pin, and letting go is the one move that undoes what they have. On a desktop, and on a phone
+   * once they have done it, the notch explanation is the better use of the row.
+   */
+  const held = opts.heldHint ?? 'past the notch, set pins hold while you work'
   // On a phone the prompt survives and the explanation does not: 'hold the wrench' is the one
-  // sentence a stuck player needs, and the notch is visible on the meter itself (D-122).
-  if (!compact || wrenchOff)
-  label(
-    ctx,
-    wrenchOff ? opts.tensionHint : 'past the notch, set pins hold while you work',
-    leftX,
-    footerY + FOOTER_PAD + 70,
-    {
+  // sentence a stuck player needs, and the notch is visible on the meter itself (D-122). A hint
+  // the caller has gone out of its way to supply is a prompt, so it survives too.
+  if (!compact || wrenchOff || opts.heldHint !== undefined)
+    label(ctx, wrenchOff ? opts.tensionHint : held, leftX, footerY + FOOTER_PAD + 70, {
       font: font(TYPE.dimension),
       size: TYPE.dimension,
-      color: wrenchOff ? readableAccents(p).amber : p.inkLight,
-    },
-  )
+      color: wrenchOff || opts.heldHint !== undefined ? readableAccents(p).amber : p.inkLight,
+    })
 
   if (opts.showResistance) {
     /**
@@ -691,7 +727,10 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
      * (D-054, D-057).
      */
     const named = opts.showStateWord ?? true
-    const colX = LOGICAL_WIDTH - MARGIN - 110
+    const flip = opts.mirrored ?? false
+    /** Mirror an x-span about the stage centre — the same rule the touch controls use. */
+    const mx = (x: number, w = 0): number => (flip ? LOGICAL_WIDTH - x - w : x)
+    const colX = mx(LOGICAL_WIDTH - MARGIN - 110, 46)
     const colBottom = footerY - 56
     // 270 normally; 210 on a phone, where the readings above the bars are nearly twice the size
     // and need the room (D-129).
@@ -716,7 +755,7 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
      * is the reading, and a reading needs both sides drawn as if they matter.
      */
     const colW = 46
-    const forceX = colX - colW - 62
+    const forceX = flip ? colX + colW + 62 : colX - colW - 62
     /**
      * One explicit vertical stack, top to bottom, with every row named.
      *
@@ -782,8 +821,12 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
      * and ran a hundred pixels off the side of the screen. Anchoring to the margin instead of to
      * the column is what keeps a reading that got bigger from also getting cut off (D-122).
      */
-    const readX = compact ? LOGICAL_WIDTH - MARGIN : colX + colW / 2
-    const readAlign = compact ? ('right' as const) : ('center' as const)
+    const readX = compact ? (flip ? MARGIN : LOGICAL_WIDTH - MARGIN) : colX + colW / 2
+    const readAlign = compact
+      ? flip
+        ? ('left' as const)
+        : ('right' as const)
+      : ('center' as const)
     column(vp, p, colX, colBottom, colH, state.resistance, named ? stateInk(state, p) : p.ink)
     text(ctx, state.resistance.toFixed(2), readX, NUM_Y, {
       font: font(numSize),
@@ -818,10 +861,11 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
      * at every chamber count. See DECISIONS D-106.
      */
     const captionW = LOGICAL_WIDTH - MARGIN - 8 - GUTTER_LEFT
+    const captionX = flip ? MARGIN + 8 : GUTTER_LEFT
     let cy = CAPTION_Y
     if (compact) cy = -1000 // drawn off-stage; the sentences explain a pair that is not there
     for (const line of ['force — how hard you push', 'resistance — how hard it pushes back']) {
-      cy += paragraph(ctx, line, GUTTER_LEFT, cy, {
+      cy += paragraph(ctx, line, captionX, cy, {
         font: font(TYPE.dimension),
         color: p.inkLight,
         maxWidth: captionW,

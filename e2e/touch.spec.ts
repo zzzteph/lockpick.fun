@@ -9,7 +9,8 @@
 
 import { expect, test, type Page } from '@playwright/test'
 import { advanceSeconds, bootGame, getState, loadLock, setManual } from './harness'
-import { WRENCH_SLIDER, yForStep } from '../src/ui/touch'
+import { WRENCH_DRAG_PX, WRENCH_SLIDER, yForStep } from '../src/ui/touch'
+import { TENSION_STEPS } from '../src/ui/input'
 
 /** The starter lock: few pins, forgiving, standard drivers. */
 const PRACTICE = 1
@@ -59,12 +60,30 @@ async function touch(page: Page, kind: TouchKind, x: number, y: number, id = 1):
   )
 }
 
-/** Put the wrench on a given pressure step and leave it there. */
+/**
+ * Put the wrench on a given pressure step and leave it there.
+ *
+ * **A drag, not a tap** — DECISIONS D-131. The slider used to be absolute, so touching a band set
+ * the tension to it; it is relative and geared now, because a jump on this control drops every pin
+ * already set, and eleven bands in 482px is eighteen CSS pixels a step against a fingertip four
+ * times that wide. So this does what a thumb does: grab, travel, release. Tension persists after
+ * the release — the slider *is* the wrench, and it stays where it was put.
+ */
 async function setWrench(page: Page, step: number): Promise<void> {
-  const y = (yForStep(step) + yForStep(step + 1)) / 2
   const x = WRENCH_SLIDER.x + WRENCH_SLIDER.w / 2
-  await touch(page, 'pointerdown', x, y, 2)
-  await touch(page, 'pointerup', x, y, 2)
+  if (step <= 0) {
+    // The fat bottom band means off however the drag arrived in it, so a tap there is enough.
+    const y = (yForStep(0) + yForStep(1)) / 2
+    await touch(page, 'pointerdown', x, y, 2)
+    await touch(page, 'pointerup', x, y, 2)
+    return
+  }
+  // Start just clear of the off zone, or the grab itself would read as a release.
+  const from = yForStep(1) - 10
+  const to = from - (step / TENSION_STEPS) * WRENCH_DRAG_PX
+  await touch(page, 'pointerdown', x, from, 2)
+  await touch(page, 'pointermove', x, to, 2)
+  await touch(page, 'pointerup', x, to, 2)
 }
 
 test('a finger on the wrench applies tension, and taking it off releases it', async ({ page }) => {

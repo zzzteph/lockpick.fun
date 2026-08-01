@@ -68,6 +68,63 @@ async function touchTap(page: Page, logicalX: number, logicalY: number): Promise
   await renderOnce(page)
 }
 
+/** Logical stage point -> client point, the same mapping `touchTap` does. */
+async function toClient(page: Page, x: number, y: number): Promise<{ x: number; y: number }> {
+  return page.evaluate(
+    (pt) => {
+      const c = document.querySelector('canvas') as HTMLCanvasElement
+      const r = c.getBoundingClientRect()
+      const scale = Math.min(r.width / 1920, r.height / 1080)
+      return {
+        x: r.left + (r.width - 1920 * scale) / 2 + pt.x * scale,
+        y: r.top + (r.height - 1080 * scale) / 2 + pt.y * scale,
+      }
+    },
+    { x, y },
+  )
+}
+
+/** A real touch drag: down at one logical point, moved to another, released. */
+async function touchDrag(
+  page: Page,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  opts: { release?: boolean } = {},
+): Promise<void> {
+  const a = await toClient(page, from.x, from.y)
+  const b = await toClient(page, to.x, to.y)
+  await page.evaluate(
+    ({ a, b, release }) => {
+      const canvas = document.querySelector('canvas')
+      if (!canvas) throw new Error('no canvas')
+      const at = (type: string, target: EventTarget, p: { x: number; y: number }): void => {
+        target.dispatchEvent(
+          new PointerEvent(type, {
+            pointerId: 7,
+            pointerType: 'touch',
+            clientX: p.x,
+            clientY: p.y,
+            bubbles: true,
+            cancelable: true,
+          }),
+        )
+      }
+      at('pointerdown', canvas, a)
+      // Several moves rather than one, because the wrench is relative: it integrates travel from
+      // where the finger went down, and a single jump is still a single delta (D-131).
+      for (let i = 1; i <= 8; i += 1) {
+        at('pointermove', window, {
+          x: a.x + ((b.x - a.x) * i) / 8,
+          y: a.y + ((b.y - a.y) * i) / 8,
+        })
+      }
+      if (release) at('pointerup', window, b)
+    },
+    { a, b, release: opts.release ?? true },
+  )
+  await renderOnce(page)
+}
+
 test.describe('phone, landscape', () => {
   test.use({ viewport: PHONE_LANDSCAPE, hasTouch: true, isMobile: true })
 
@@ -104,6 +161,42 @@ test.describe('phone, landscape', () => {
     const touching = await page.evaluate(() => globalThis.__shearline?.getTouch() ?? false)
     expect(touching, 'the shot has to be of the touch chrome, not the desktop chrome').toBe(true)
     await captureStage(page, 'mobile-pick')
+    watcher.assertClean()
+  })
+
+  /**
+   * The wrench the player drags, the tension the simulation gets, and the number the footer prints
+   * are the same wrench — DECISIONS D-131.
+   *
+   * The footer read `settings.tensionLevel`, which the touch slider never writes to, so it printed
+   * `wrench 5 of 10` on every phone for the whole of every attempt regardless of where the slider
+   * was. It took a real drag to see it: nothing in the suite had ever driven the touch wrench
+   * through the input layer, which is exactly why a fixed number survived on a live readout.
+   */
+  test('the footer prints the wrench the player is actually holding', async ({ page }) => {
+    const watcher = await bootGame(page, { frames: 3 })
+    await setManual(page, true)
+    await loadLock(page, 3, 5)
+    await touchTap(page, 900, 600)
+
+    const read = async (): Promise<{ step: number; tension: number; printedStep: number }> =>
+      page.evaluate(() => globalThis.__shearline!.getWrench())
+
+    // Off, and saying so — not the keyboard's default of step 5.
+    expect(await read()).toEqual({ step: 0, tension: 0, printedStep: 0 })
+
+    // Grab low on the slider and drag up. 620px of travel is the full ten steps (WRENCH_DRAG_PX).
+    await touchDrag(page, { x: 96, y: 760 }, { x: 96, y: 760 - 248 }, { release: false })
+    const mid = await read()
+    expect(mid.step, 'four steps of travel').toBe(4)
+    expect(mid.printedStep, 'the footer agrees with the slider').toBe(mid.step)
+    expect(mid.tension).toBeGreaterThan(0)
+
+    // And the fat off band at the bottom means off however far the drag came from.
+    await touchDrag(page, { x: 96, y: 400 }, { x: 96, y: 790 })
+    const off = await read()
+    expect(off.step).toBe(0)
+    expect(off.printedStep).toBe(0)
     watcher.assertClean()
   })
 

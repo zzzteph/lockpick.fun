@@ -293,6 +293,15 @@ export interface DevHook {
    * (D-082). Asking is how that test stops being a lie.
    */
   getTouch(): boolean
+  /**
+   * The wrench three ways: the touch slider's step, the tension the simulation is actually being
+   * given, and the step the footer meter prints.
+   *
+   * All three must agree. They did not on any touch device — the HUD read the keyboard's tension
+   * field, which the slider never writes, so the footer said `wrench 5 of 10` for the entire life
+   * of every attempt. Exposed so a test can hold them against each other. See DECISIONS D-131.
+   */
+  getWrench(): { step: number; tension: number; printedStep: number }
 }
 
 declare global {

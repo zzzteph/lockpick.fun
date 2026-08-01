@@ -16,10 +16,13 @@ import { clientToLogical, type Viewport } from '../render/viewport'
 import {
   PAUSE_PAD,
   WITHDRAW_PAD,
+  mirrorRect,
   createTouchState,
   inRect,
   liftForDrag,
-  stepAtY,
+  SWIPE_MIN_PX,
+  inOffZone,
+  stepForDrag,
   targetAt,
   tensionForTouchStep,
   type TouchState,
@@ -70,6 +73,8 @@ export interface InputSettings {
   tensionToggle: boolean
   /** Pressure step, as a tension value. */
   tensionLevel: number
+  /** True when the player holds the lock right-handed, which mirrors the whole screen (D-130). */
+  mirrored: boolean
   /**
    * Whether the up/down arrows trim the lift — **Training only** (D-111).
    *
@@ -91,6 +96,7 @@ export const DEFAULT_INPUT_SETTINGS: InputSettings = {
   sensitivity: 1,
   tensionToggle: false,
   tensionLevel: tensionForStep(5),
+  mirrored: false,
   fineLift: false,
 }
 
@@ -110,6 +116,14 @@ export interface InputHooks {
    * an orientation lock, both of which need a user gesture (D-129).
    */
   onFirstTouch?: () => void
+  /**
+   * The wrench has crossed into a new step (D-131).
+   *
+   * A detent is the one thing here the simulation cannot emit, because nothing about the wrench
+   * moving is a simulation event — tension is a continuous input, and the eleven steps are a *touch
+   * scheme* invention. It has to be reported from where the steps exist, which is here.
+   */
+  onWrenchStep?: (step: number) => void
 }
 
 /** mm of lift per second while Space is held — matched to the pick's own rate. */
@@ -152,6 +166,22 @@ export class InputController {
   private toggled = false
   private spaceDown = false
   private disposers: (() => void)[] = []
+  // ── Swipe (D-131) ──
+  /** Where the current touch went down, for telling a swipe from a tap. */
+  private swipeFromX = 0
+  private swipeFromY = 0
+  private swipeId: number | null = null
+  /** -1 for a swipe left, 1 for right, 0 for none. Consumed by `takeSwipe`. */
+  private pendingSwipe = 0
+  /**
+   * True once the player has held the wrench and lifted a pin at the same time — DECISIONS D-131.
+   *
+   * The scheme has supported it from the day it was written: `wrenchPointer` and `liftPointer` are
+   * separate slots, deliberately, so two thumbs can work at once. Nothing ever said so, and it is
+   * the difference between playing this game on a phone and fighting it — you cannot feather a
+   * wrench you have to let go of to touch a pin. So the HUD teaches it until it has happened once.
+   */
+  usedBothThumbs = false
   // ── Keyboard play state ──
   /**
    * Chamber the tip is at. Starts at the first one — the pick begins *in* the lock.
@@ -247,11 +277,25 @@ export class InputController {
       const p = clientToLogical(this.vp, e.clientX, e.clientY)
       this.pointerX = p.x
       this.pointerY = p.y
-      if (e.pointerType === 'touch') this.touchDown(e.pointerId, p.x, p.y)
+      if (e.pointerType === 'touch') {
+        this.swipeId = e.pointerId
+        this.swipeFromX = p.x
+        this.swipeFromY = p.y
+        this.touchDown(e.pointerId, p.x, p.y)
+      }
     })
     this.on(window, 'pointerup', (e) => {
+      /**
+       * A horizontal swipe pages the reference screens — DECISIONS D-131.
+       *
+       * Read *before* `touchUp`, which clears the two pointer slots this has to consult: a finger
+       * that was driving the wrench or lifting a pin was doing that, not swiping, and the drag it
+       * ends with must not also turn a page.
+       */
+      const swiped = e.pointerType === 'touch' ? this.readSwipe(e) : false
       if (e.pointerType === 'touch') this.touchUp(e.pointerId)
-      if (e.button === 0) {
+      // A swipe is not a click. Without this the gesture pages *and* presses whatever it ended on.
+      if (e.button === 0 && !swiped) {
         /**
          * Outward links are opened **here**, inside the real event, and nowhere else.
          *
@@ -365,26 +409,61 @@ export class InputController {
 
   private playing = false
 
+  /**
+   * Was this pointer-up the end of a horizontal swipe? Records it if so.
+   *
+   * `SWIPE_MIN_PX` of travel, and at least twice as far across as down: the paging screens sit
+   * under a finger that is also trying to read them, so a sloppy tap must never turn a page, and a
+   * lift drag that wanders sideways must never either. A pointer the touch scheme was already
+   * driving is excluded outright.
+   */
+  private readSwipe(e: PointerEvent): boolean {
+    const id = e.pointerId
+    const owned = this.touch.wrenchPointer === id || this.touch.liftPointer === id
+    const started = this.swipeId === id
+    this.swipeId = null
+    if (owned || !started) return false
+    const p = clientToLogical(this.vp, e.clientX, e.clientY)
+    const dx = p.x - this.swipeFromX
+    const dy = p.y - this.swipeFromY
+    if (Math.abs(dx) < SWIPE_MIN_PX || Math.abs(dx) < Math.abs(dy) * 2) return false
+    this.pendingSwipe = dx < 0 ? -1 : 1
+    return true
+  }
+
+  /** -1 for a swipe left, 1 for right, 0 for none. Clears on read, like `takeClick`. */
+  takeSwipe(): number {
+    const s = this.pendingSwipe
+    this.pendingSwipe = 0
+    return s
+  }
+
   private touchDown(id: number, x: number, y: number): void {
     if (!this.touch.active) this.hooks.onFirstTouch?.()
     this.touch.active = true
     // Menus are made of widgets and are driven by the ordinary pointer path; only the lock itself
     // has gestures.
     if (!this.playing) return
-    if (inRect(PAUSE_PAD, x, y)) {
+    const flip = this.settings.mirrored
+    if (inRect(mirrorRect(PAUSE_PAD, flip), x, y)) {
       this.hooks.onPause?.()
       return
     }
-    if (inRect(WITHDRAW_PAD, x, y)) {
+    if (inRect(mirrorRect(WITHDRAW_PAD, flip), x, y)) {
       this.withdraw()
       this.touchChamber = -1
       this.touchLift = 0
       return
     }
-    const target = targetAt(x, y)
+    const target = targetAt(x, y, flip)
     if (target === 'wrench') {
+      // A grab changes nothing — the drag does, from wherever the wrench already was (D-131).
+      // Except in the off zone, which means off however you arrived in it.
       this.touch.wrenchPointer = id
-      this.touch.step = stepAtY(y)
+      this.touch.wrenchOriginY = y
+      this.touch.wrenchOriginStep = this.touch.step
+      if (inOffZone(y)) this.touch.step = 0
+      if (this.touch.liftPointer !== null) this.usedBothThumbs = true
       return
     }
     // A pin. Selecting is *all* this does — the tip arrives at rest, exactly as an arrow press
@@ -392,17 +471,38 @@ export class InputController {
     const layout = this.layout
     if (!layout) return
     const chamber = chamberAtX(layout, x)
-    if (chamber < 0) return
+    /**
+     * Off the lock: lift whatever is already selected — DECISIONS D-130.
+     *
+     * This used to `return`, so a lift could only ever begin *on the pin*, which put a fingertip
+     * over the one thing the player needs to watch. The drag itself has always been vertical-only
+     * and x-agnostic, so nothing about the gesture required that — only where it was allowed to
+     * start did. Starting it anywhere off the lock keeps the hand clear of the drawing, and the
+     * `LIFT_PAD` strip is drawn to say so rather than leaving it to be discovered.
+     */
+    if (chamber < 0) {
+      if (this.touchChamber < 0) return
+      this.touch.liftPointer = id
+      this.touch.liftOriginY = y
+      this.touch.liftOriginMm = this.touchLift
+      // The likeliest way two-thumb play is ever discovered: `LIFT_PAD` is in the far gutter, so
+      // reaching it while the other thumb holds the wrench is the natural grip (D-131).
+      if (this.touch.wrenchPointer !== null) this.usedBothThumbs = true
+      return
+    }
     if (chamber !== this.touchChamber) this.touchLift = 0
     this.touchChamber = chamber
     this.touch.liftPointer = id
     this.touch.liftOriginY = y
     this.touch.liftOriginMm = this.touchLift
+    if (this.touch.wrenchPointer !== null) this.usedBothThumbs = true
   }
 
   private touchMove(id: number, _x: number, y: number): void {
     if (id === this.touch.wrenchPointer) {
-      this.touch.step = stepAtY(y)
+      const next = stepForDrag(this.touch, y)
+      if (next !== this.touch.step) this.hooks.onWrenchStep?.(next)
+      this.touch.step = next
       return
     }
     if (id !== this.touch.liftPointer) return
@@ -576,6 +676,38 @@ export class InputController {
       tensionHeld: this.settings.tensionToggle ? this.toggled : this.tensionKeyDown,
       tensionLevel: this.settings.tensionLevel,
     }
+  }
+
+  /**
+   * The tension the wrench is actually applying, whichever scheme is driving it.
+   *
+   * **The HUD read `settings.tensionLevel` directly, and the touch slider never writes to it** —
+   * `hands()` returns `tensionForTouchStep(touch.step)` straight out, leaving the keyboard's field
+   * at its default of `tensionForStep(5)` forever. So the footer meter on every phone has read
+   * `wrench 5 of 10` and `0.45` since the touch scheme was written: a fixed number, on the one
+   * readout whose entire job is to say how hard you are currently turning, contradicting the slider
+   * six inches above it. Nobody saw it because the number is *plausible* — it is a real step in the
+   * middle of the range, and it only looks wrong beside a wrench that says `—`.
+   *
+   * The same shape as D-112: a derived value copied by hand from the wrong source. See D-131.
+   */
+  get effectiveTension(): number {
+    return this.hands().tensionLevel
+  }
+
+  /**
+   * The pressure step the footer should print, 0..`TENSION_STEPS`, where 0 is the wrench off.
+   *
+   * Not `stepForTension(effectiveTension)`, because that function has no zero: it maps a tension to
+   * 1..10 by design, since on the keyboard the level is a *setting* you choose and `tensionHeld`
+   * decides whether it is applied. The touch slider folds both into one control, so its step is the
+   * answer directly — and step 0 is a real state that has to survive being printed.
+   *
+   * The keyboard path is unchanged, deliberately: with Q up, the level is still what you *would*
+   * get, and the meter has always said so.
+   */
+  get wrenchStep(): number {
+    return this.touch.active ? this.touch.step : stepForTension(this.settings.tensionLevel)
   }
 
   /** Logical pointer position, for drawing the pick where the hand actually is. */

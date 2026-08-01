@@ -110,6 +110,7 @@ import {
   clipToStage,
   createViewport,
   syncViewport,
+  touchFloorFor,
 } from './render/viewport'
 import {
   KEYWAY_FLOOR,
@@ -125,7 +126,8 @@ import {
   type SimState,
   type ToolStats,
 } from './sim'
-import { DEFAULT_INPUT_SETTINGS, InputController, LIFT_PX_PER_MM, stepForTension } from './ui/input'
+import { DEFAULT_INPUT_SETTINGS, InputController, LIFT_PX_PER_MM } from './ui/input'
+import { Haptics, detectVibrator } from './ui/haptics'
 import {
   EDITABLE_PINS,
   MAX_TOLERANCE,
@@ -154,12 +156,14 @@ import {
   drawResults,
   drawSettings,
   drawTrophies,
+  codesPageCount,
+  trophyPageCount,
   type ScreenName,
   type ShellActions,
   type ShellContext,
 } from './ui/shell'
-import { drawHelp } from './ui/help'
-import { Ui, type UiFrame } from './ui/widgets'
+import { HELP_PAGE_COUNT, drawHelp } from './ui/help'
+import { Ui, grown, pointInRect, type Rect, type UiFrame } from './ui/widgets'
 
 export interface App {
   readonly hook: DevHook
@@ -287,6 +291,14 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     ui: progress.data.settings.uiVolume,
     muted: progress.data.settings.muted,
   })
+  /**
+   * The phone's motor, driven by the same event stream as the sound (D-131).
+   *
+   * `performance.now` rather than the frame's own clock because the rate limit is about the motor
+   * spinning down, which is wall time — a paused or slowed frame loop must not let a burst through.
+   */
+  const haptics = new Haptics(detectVibrator(), () => performance.now())
+  haptics.enabled = progress.data.settings.haptics
   const unlockAudio = (): void => {
     void audio.unlock()
   }
@@ -581,12 +593,15 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       status = `${gone.name} deleted`
       audio.click()
     },
+    // Clamped at both ends, not just at zero — a swipe has no disabled state to stop it at the
+    // last page, so without an upper bound the stored page walks off the end (D-131).
     codesPageBy: (delta: number) => {
-      codesPage = Math.max(0, codesPage + delta)
+      const last = codesPageCount(vp, progress.data.customLocks.length) - 1
+      codesPage = Math.min(last, Math.max(0, codesPage + delta))
       armedDelete = null
     },
     trophyPageBy: (delta: number) => {
-      trophyPage = Math.max(0, trophyPage + delta)
+      trophyPage = Math.min(trophyPageCount(vp) - 1, Math.max(0, trophyPage + delta))
       audio.click()
     },
     benchTier: (tier: number) => {
@@ -594,7 +609,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       audio.click()
     },
     helpPage: (page: number) => {
-      helpPage = page
+      helpPage = Math.min(HELP_PAGE_COUNT - 1, Math.max(0, page))
       audio.click()
     },
     openRepo: () => {
@@ -688,6 +703,8 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     // than read at the key handler so a level change mid-attempt takes effect immediately, trim
     // and legend together.
     input.settings.fineLift = s.assist === 'training'
+    // Right-handed mirrors the controls as well as the cutaway (D-130).
+    input.settings.mirrored = s.handedness === 'right'
     audio.applySettings({
       master: s.masterVolume,
       mechanical: s.mechanicalVolume,
@@ -696,6 +713,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       muted: s.muted,
     })
     audio.setContinuousTones(s.continuousTones)
+    haptics.enabled = s.haptics
   }
 
   const input = new InputController(
@@ -705,6 +723,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       ...DEFAULT_INPUT_SETTINGS,
       sensitivity: progress.data.settings.sensitivity,
       tensionToggle: progress.data.settings.tensionToggle,
+      mirrored: progress.data.settings.handedness === 'right',
     },
     {
       // A phone that can turn itself landscape should, rather than asking (D-129).
@@ -727,8 +746,11 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
        * everywhere would swallow clicks on whatever else happens to be in that corner.
        */
       onLinkClick: (x: number, y: number): boolean => {
-        const inside = (r: { x: number; y: number; w: number; h: number }): boolean =>
-          x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h
+        // Both links are 40 logical px tall — fourteen CSS px on a phone. They get the finger
+        // floor like every other target (D-131); they are isolated in their corners, so growing
+        // them can steal nothing.
+        const floor = input.touch.active ? touchFloorFor(vp) : 0
+        const inside = (r: Rect): boolean => pointInRect(grown(r, floor), x, y)
         const framed = screen !== 'pick' && screen !== 'pause'
         if (framed && inside(REPORT_LINK)) {
           actions.reportIssue()
@@ -745,6 +767,9 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         // nothing else worth taking Tab away from the widgets for, so it now does nothing here and
         // stays the focus-advance key everywhere.
       },
+      // A tick per step of the wrench. This is the gearing's counterpart: the drag was made slower
+      // to buy precision, and the detent is what gives the hand something back for it (D-131).
+      onWrenchStep: () => haptics.detent(),
     },
   )
   applySettings()
@@ -784,6 +809,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   function absorb(events: readonly SimEvent[]): void {
     if (events.length === 0 || !session) return
     audio.handleEvents(events, session.state)
+    haptics.handleEvents(events)
     if (progress.data.settings.subtitles) pushSubtitleEvents(subtitles, events)
     eventLog.push(...events)
     if (eventLog.length > 512) eventLog.splice(0, eventLog.length - 512)
@@ -934,6 +960,25 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     if (screen === 'codes' && codeFocus) typeIntoCode(keys)
 
     /**
+     * Swipe across to turn a page — DECISIONS D-131.
+     *
+     * The `‹ ›` arrows are 40 logical px tall, which is fourteen real ones, and on the trophy case
+     * they are the *only* way to reach pages two through four. The floor in D-131 makes them
+     * hittable; this makes them unnecessary, because a swipe is what a player tries first on a
+     * paged screen and the arrows are then the discoverable fallback rather than the mechanism.
+     *
+     * Read once, here, and dispatched by screen: a swipe means nothing on the bench or the menu,
+     * and a gesture that silently did something on a screen with no pages would be worse than one
+     * that does nothing. Swiping left goes forward, as it does in every gallery.
+     */
+    const swipe = input.takeSwipe()
+    if (swipe !== 0) {
+      if (screen === 'trophies') actions.trophyPageBy(-swipe)
+      else if (screen === 'codes') actions.codesPageBy(-swipe)
+      else if (screen === 'help') actions.helpPage(helpPage - swipe)
+    }
+
+    /**
      * The "← bench" link in the pick HUD's header (D-096).
      *
      * Hit-tested here rather than in `hud.ts` because the HUD is a *drawing* — it has no `Ui` and
@@ -943,10 +988,11 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
      */
     overBenchLink =
       screen === 'pick' &&
-      pointer.x >= BENCH_LINK.x &&
-      pointer.x < BENCH_LINK.x + BENCH_LINK.w &&
-      pointer.y >= BENCH_LINK.y &&
-      pointer.y < BENCH_LINK.y + BENCH_LINK.h
+      pointInRect(
+        grown(BENCH_LINK, input.touch.active ? touchFloorFor(vp) : 0),
+        pointer.x,
+        pointer.y,
+      )
     if (overBenchLink && clicked) {
       lesson = null
       session = null
@@ -1008,7 +1054,8 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT)
     drawGrid(vp, 40, palette.rule, LOGICAL_WIDTH, LOGICAL_HEIGHT)
 
-    ui.begin(uiFrame)
+    // A fingertip gets the touch floor; a cursor gets exact hit-testing (D-131).
+    ui.begin(uiFrame, input.touch.active ? touchFloorFor(vp) : 0)
     const shell: ShellContext = {
       vp,
       p: palette,
@@ -1028,6 +1075,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       trophyPage,
       armedDelete,
       helpPage,
+      hapticsSupported: haptics.isSupported,
       ...(benchTier !== undefined ? { benchTier } : {}),
     }
 
@@ -1191,15 +1239,25 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
        * shows when the wrench is off" does not make the row any less crowded (D-101).
        */
       tensionHint: input.touch.active
-        ? 'slide the wrench up the left edge'
+        ? // Which edge depends on the hand the lock is held in (D-130), and "drag" rather than
+          // "slide to" because the wrench moves from where it is now, not to where you touched.
+          `drag the wrench up the ${mirrored() ? 'right' : 'left'} edge`
         : 'hold [Q] to turn the wrench',
+      // Teach the grip that makes this playable one-handed-per-control, until it has happened.
+      ...(input.touch.active && !input.usedBothThumbs
+        ? { heldHint: 'keep that thumb there — lift with the other' }
+        : {}),
       par: session.def.par,
-      pressureStep: stepForTension(input.settings.tensionLevel),
+      mirrored: mirrored(),
+      pressureStep: input.wrenchStep,
       // `STRAIN_BENT` is 1, so the raw figure is already the 0..1 the bar wants.
       strain: { amount: view.pickStrain, bent: view.pickBent, broken: view.pickBroken },
     })
 
-    drawTouchControls(vp, palette, input.touch, { tensionHeld: view.tension >= T_MIN_HOLD })
+    drawTouchControls(vp, palette, input.touch, {
+      tensionHeld: view.tension >= T_MIN_HOLD,
+      mirrored: mirrored(),
+    })
 
     if (progress.data.settings.subtitles) drawSubtitles(vp, palette, subtitles)
     if (lesson) {
@@ -1358,6 +1416,13 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     keyboardMode: ui.keyboardMode,
   })
   hook.getTouch = (): boolean => input.touch.active
+  // The wrench, as the game actually has it and as the footer prints it — the two disagreed on
+  // every phone until D-131, and nothing could see it because nothing exposed either one.
+  hook.getWrench = (): { step: number; tension: number; printedStep: number } => ({
+    step: input.touch.step,
+    tension: input.effectiveTension,
+    printedStep: input.wrenchStep,
+  })
   hook.events = (): SimEvent[] => eventLog.slice()
   hook.waitForEvent = async (type: string, timeoutMs = 15_000): Promise<void> => {
     if (eventLog.some((e) => e.type === type)) return

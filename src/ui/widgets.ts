@@ -22,6 +22,19 @@ export function pointInRect(r: Rect, x: number, y: number): boolean {
   return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h
 }
 
+/**
+ * A rect grown about its own centre to at least `floor` in each axis.
+ *
+ * The **hit** rect, never the drawn one — Material's own guidance is that a touch target may extend
+ * beyond the visual bounds, and it is the only fix that costs nothing visually. A 96x40 tier button
+ * stays a 96x40 tier button and answers to a thumb.
+ */
+export function grown(r: Rect, floor: number): Rect {
+  const w = Math.max(r.w, floor)
+  const h = Math.max(r.h, floor)
+  return { x: r.x + (r.w - w) / 2, y: r.y + (r.h - h) / 2, w, h }
+}
+
 export interface UiFrame {
   pointerX: number
   pointerY: number
@@ -63,9 +76,27 @@ export class Ui {
   /** True when the last focus change came from the keyboard — hides the ring for mouse users. */
   keyboardMode = false
 
-  begin(frame: UiFrame): void {
+  /**
+   * Logical px every target must span for a fingertip, or 0 to hit-test exactly (D-131).
+   *
+   * Zero on a mouse, deliberately. A cursor has one-pixel precision, and a pointer that activates
+   * the button it is merely *near* feels haunted. This is a concession to the finger, so it is
+   * switched on by the finger.
+   */
+  private floor = 0
+  /** This frame's rects in call order, kept so the next frame can resolve a near miss. */
+  private rects: Rect[] = []
+  private lastRects: Rect[] = []
+  /** The widget a touch landing in no widget at all resolves to, or -1. */
+  private nearMiss = -1
+
+  begin(frame: UiFrame, floor = 0): void {
     this.frame = frame
     this.index = 0
+    this.floor = floor
+    this.lastRects = this.rects
+    this.rects = []
+    this.nearMiss = this.resolveNearMiss()
     if (this.count > 0) {
       let moved = 0
       for (const k of NEXT_KEYS) if (frame.keys.has(k)) moved += 1
@@ -99,6 +130,43 @@ export class Ui {
     return false
   }
 
+  /**
+   * Which widget a touch that landed in no widget at all was aiming for — DECISIONS D-131.
+   *
+   * Inflating each rect where it is drawn is the obvious version and it is wrong, because this is an
+   * immediate-mode layer with no z-order: two inflated rects that overlap would both report hovered
+   * and both fire on the same tap. At the floor a phone needs — 122 logical px on an iPhone 13 —
+   * neighbours *always* overlap, so resolving to a single winner is not a refinement, it is the
+   * whole problem.
+   *
+   * So the near miss is resolved once, before any widget draws, against the rects the previous frame
+   * registered — nearest centre wins, and an exact hit anywhere cancels the whole mechanism. Reusing
+   * last frame's table is what makes it a *pre*-pass rather than a frame of lag: the shell redraws
+   * the same widgets in the same order every frame, so for any screen that is not mid-transition the
+   * table is already the right one.
+   */
+  private resolveNearMiss(): number {
+    if (this.floor <= 0) return -1
+    const px = this.frame.pointerX
+    const py = this.frame.pointerY
+    let best = -1
+    let bestDist = Infinity
+    for (let i = 0; i < this.lastRects.length; i += 1) {
+      const r = this.lastRects[i]
+      if (!r) continue
+      if (pointInRect(r, px, py)) return -1
+      if (!pointInRect(grown(r, this.floor), px, py)) continue
+      const dx = px - (r.x + r.w / 2)
+      const dy = py - (r.y + r.h / 2)
+      const d = dx * dx + dy * dy
+      if (d < bestDist) {
+        bestDist = d
+        best = i
+      }
+    }
+    return best
+  }
+
   /** The frame currently being processed — widgets that need the raw pointer read it here. */
   get input(): UiFrame {
     return this.frame
@@ -111,7 +179,9 @@ export class Ui {
     if (!enabled) {
       return { focused: false, hovered: false, activated: false, index, keyboardMode: false }
     }
-    const hovered = pointInRect(rect, this.frame.pointerX, this.frame.pointerY)
+    this.rects[index] = rect
+    const hovered =
+      pointInRect(rect, this.frame.pointerX, this.frame.pointerY) || this.nearMiss === index
     if (hovered && this.frame.clicked) {
       this.focus = index
       this.keyboardMode = false
@@ -273,14 +343,22 @@ export function slider(
   const step = opts.step ?? 0.05
   const st = ui.widget(rect)
 
-  label(ctx, caption, rect.x, rect.y + 14, {
-    font: font(TYPE.dimension),
-    size: TYPE.dimension,
+  /**
+   * Caption, value and track all follow the viewport — DECISIONS D-131.
+   *
+   * `button` got this in D-122 and these three did not, so the settings screen was drawing its
+   * captions at seven CSS px and its track at four. The track is the part that matters: it is the
+   * thing a finger aims at, and ten logical px of it is not a control, it is a hairline.
+   */
+  const capSize = typeFor(vp, TYPE.dimension)
+  label(ctx, caption, rect.x, rect.y + capSize - 3, {
+    font: font(capSize),
+    size: capSize,
     color: p.inkLight,
   })
 
-  const trackY = rect.y + rect.h - 12
-  const trackH = 10
+  const trackH = Math.max(10, Math.round(rect.h * 0.34))
+  const trackY = rect.y + rect.h - trackH - 2
   ctx.save()
   ctx.fillStyle = alpha(p.rule, 0.6)
   ctx.fillRect(rect.x, trackY, rect.w, trackH)
@@ -297,8 +375,10 @@ export function slider(
   )
   ctx.restore()
 
+  // Beside the track, not on it — a thumb setting a slider covers the middle of its own control,
+  // so the one number that says what you just chose has to live outside the sweep (D-131).
   text(ctx, value.toFixed(2), rect.x + rect.w + 16, trackY + trackH, {
-    font: font(TYPE.body),
+    font: font(typeFor(vp, TYPE.body)),
     color: p.ink,
   })
   if (st.focused && ui.keyboardMode) drawFocusRing(vp, p, rect)
@@ -325,7 +405,10 @@ export function toggle(
 ): boolean {
   const { ctx } = vp
   const st = ui.widget(rect)
-  const box = 20
+  // The box scales with the type, and never exceeds the row it sits in (D-131). A 20px checkbox is
+  // seven CSS px on a phone — findable only because the caption beside it says where to aim.
+  const capSize = typeFor(vp, TYPE.body)
+  const box = Math.min(Math.round(capSize * 1.2), Math.max(16, rect.h - 8))
   const boxY = rect.y + (rect.h - box) / 2
   ctx.save()
   ctx.fillStyle = value ? p.teal : p.paper
@@ -334,9 +417,9 @@ export function toggle(
   ctx.strokeStyle = p.ink
   ctx.strokeRect(snapX(vp, rect.x, STROKE.standard), snapY(vp, boxY, STROKE.standard), box, box)
   ctx.restore()
-  label(ctx, caption, rect.x + box + 14, rect.y + rect.h / 2 + 5, {
-    font: font(TYPE.body),
-    size: TYPE.body,
+  label(ctx, caption, rect.x + box + 14, rect.y + rect.h / 2 + capSize * 0.36, {
+    font: font(capSize),
+    size: capSize,
     color: p.ink,
   })
   if (st.focused && ui.keyboardMode) drawFocusRing(vp, p, rect)
@@ -370,9 +453,20 @@ export function segmented(
       cell.h,
     )
     ctx.restore()
-    label(ctx, caption, cell.x + cell.w / 2, cell.y + cell.h / 2 + 5, {
-      font: font(TYPE.body),
-      size: TYPE.body,
+    // Fitted to its own cell, height and width, exactly as `button` is (D-123, D-128, D-131).
+    // Four assist modes in one strip is the narrowest cell in the game.
+    let size = Math.min(typeFor(vp, TYPE.body), Math.floor(cell.h * 0.5))
+    ctx.save()
+    const room = cell.w - 12
+    const drawn = (s: number): number => {
+      ctx.font = font(s)
+      return ctx.measureText(caption.toUpperCase()).width + s * 0.08 * Math.max(0, caption.length - 1)
+    }
+    while (size > 9 && drawn(size) > room) size -= 1
+    ctx.restore()
+    label(ctx, caption, cell.x + cell.w / 2, cell.y + cell.h / 2 + size * 0.36, {
+      font: font(size),
+      size,
       color: i === selected ? p.paper : p.ink,
       align: 'center',
     })

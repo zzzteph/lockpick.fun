@@ -186,6 +186,9 @@ function footnote(c: ShellContext, line: string): void {
 
 const PAGES = ['the pins', 'the readouts', 'what a pin is doing'] as const
 
+/** Exported so a swipe can be clamped to the real range, not just the tab row's (D-131). */
+export const HELP_PAGE_COUNT = PAGES.length
+
 /**
  * Term, blurb, and an optional drawing, on a wide two-column grid.
  *
@@ -270,13 +273,28 @@ export function drawHelp(c: ShellContext): void {
     actions.goto('menu')
   }
 
+  /**
+   * The page's own opening line — scaled like everything else on it (D-130).
+   *
+   * D-129 scaled the grid and missed this, so the first sentence a player reads on the reference
+   * screen was still drawing at 21 logical px: about seven actual pixels on a phone. Reported as
+   * *"in mobile, help section, the text 'the plug cannot turn until…' is extra small and not
+   * readable"*. It is the sentence the rest of the page is a footnote to.
+   */
+  const introSize = typeFor(vp, TYPE.body)
   paragraph(
     ctx,
     'A plug cannot turn until every pin is caught on the shear line. Under torque it pinches one ' +
       'pin at a time: find that one by feel, and lift it until it catches.',
     LEFT,
     106,
-    { font: font(TYPE.body), color: p.ink, maxWidth: 1300, lineHeight: 28, maxLines: 2 },
+    {
+      font: font(introSize),
+      color: p.ink,
+      maxWidth: LOGICAL_WIDTH - LEFT * 2 - 180,
+      lineHeight: introSize + 7,
+      maxLines: 2,
+    },
   )
 
   PAGES.forEach((name, i) => {

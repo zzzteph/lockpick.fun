@@ -15,33 +15,63 @@ import {
   createTouchState,
   inRect,
   liftForDrag,
-  stepAtY,
+  OFF_BAND_SHARE,
+  WRENCH_DRAG_PX,
+  inOffZone,
+  stepForDrag,
   targetAt,
   tensionForTouchStep,
+  LIFT_PAD,
+  mirrorRect,
   yForStep,
 } from '../../src/ui/touch'
 import { TENSION_STEPS, tensionForStep } from '../../src/ui/input'
 import { T_MIN_HOLD } from '../../src/sim'
 
+/** A wrench drag that began at `step`, with the finger at the middle of the slider. */
+function grabbedAt(step: number) {
+  const state = createTouchState()
+  state.step = step
+  state.wrenchOriginStep = step
+  state.wrenchOriginY = WRENCH_SLIDER.y + WRENCH_SLIDER.h / 2
+  return state
+}
+
 describe('the wrench slider', () => {
-  it('is off at the bottom and full at the top', () => {
-    expect(stepAtY(WRENCH_SLIDER.y + WRENCH_SLIDER.h - 1)).toBe(0)
-    expect(stepAtY(WRENCH_SLIDER.y)).toBe(TENSION_STEPS)
+  it('does not move when the finger merely lands on it', () => {
+    // The whole point of going relative (D-131): a jump here drops every pin already set.
+    for (const step of [0, 3, TENSION_STEPS]) {
+      const state = grabbedAt(step)
+      expect(stepForDrag(state, state.wrenchOriginY)).toBe(step)
+    }
+  })
+
+  it('is geared, one step per WRENCH_DRAG_PX/TENSION_STEPS of travel', () => {
+    const state = grabbedAt(4)
+    const perStep = WRENCH_DRAG_PX / TENSION_STEPS
+    expect(stepForDrag(state, state.wrenchOriginY - perStep)).toBe(5)
+    expect(stepForDrag(state, state.wrenchOriginY - perStep * 3)).toBe(7)
+    expect(stepForDrag(state, state.wrenchOriginY + perStep * 2)).toBe(2)
+    // Geared *down* relative to the control's own height — that is the point.
+    expect(perStep).toBeGreaterThan(WRENCH_SLIDER.h / (TENSION_STEPS + OFF_BAND_SHARE))
   })
 
   it('never reports a step outside the range, however far the finger goes', () => {
-    for (const y of [-5000, -1, WRENCH_SLIDER.y - 200, WRENCH_SLIDER.y + WRENCH_SLIDER.h + 900, 5e4]) {
-      const step = stepAtY(y)
+    const state = grabbedAt(5)
+    for (const y of [-5e4, -1, WRENCH_SLIDER.y - 900, WRENCH_SLIDER.y + WRENCH_SLIDER.h + 900, 5e4]) {
+      const step = stepForDrag(state, y)
       expect(step).toBeGreaterThanOrEqual(0)
       expect(step).toBeLessThanOrEqual(TENSION_STEPS)
     }
   })
 
-  it('rises monotonically up the slider, and reaches every step', () => {
+  it('reaches every step on one continuous drag, monotonically', () => {
+    const state = grabbedAt(0)
     const seen = new Set<number>()
     let previous = -1
-    for (let y = WRENCH_SLIDER.y + WRENCH_SLIDER.h - 1; y >= WRENCH_SLIDER.y; y -= 1) {
-      const step = stepAtY(y)
+    for (let dy = 0; dy <= WRENCH_DRAG_PX; dy += 1) {
+      // Dragged up from the bottom of the slider, so the off zone is left behind immediately.
+      const step = stepForDrag(state, state.wrenchOriginY - dy)
       expect(step).toBeGreaterThanOrEqual(previous)
       previous = step
       seen.add(step)
@@ -49,18 +79,39 @@ describe('the wrench slider', () => {
     expect(seen.size).toBe(TENSION_STEPS + 1)
   })
 
-  it('gives the off band the same size as every other, so releasing needs no aim', () => {
-    const offBand = yForStep(0) - yForStep(1)
-    const topBand = yForStep(TENSION_STEPS) - yForStep(TENSION_STEPS + 1)
-    expect(offBand).toBeCloseTo(topBand, 9)
-    // And it is a proper finger target rather than a sliver.
-    expect(offBand).toBeGreaterThan(40)
+  it('resumes from where the wrench is, so two strokes reach what one would', () => {
+    const perStep = WRENCH_DRAG_PX / TENSION_STEPS
+    const first = grabbedAt(0)
+    const afterOne = stepForDrag(first, first.wrenchOriginY - perStep * 3)
+    const second = grabbedAt(afterOne)
+    expect(stepForDrag(second, second.wrenchOriginY - perStep * 3)).toBe(6)
   })
 
-  it('every band drawn matches the band the finger is read against', () => {
+  it('reads as off anywhere in the bottom band, wherever the drag came from', () => {
+    const state = grabbedAt(TENSION_STEPS)
+    const offTop = yForStep(1)
+    expect(inOffZone(offTop)).toBe(true)
+    expect(inOffZone(offTop - 1)).toBe(false)
+    for (const y of [offTop, offTop + 10, WRENCH_SLIDER.y + WRENCH_SLIDER.h - 1]) {
+      expect(stepForDrag(state, y)).toBe(0)
+    }
+  })
+
+  it('draws the off band fatter than the rest, so releasing needs no aim', () => {
+    const offBand = yForStep(0) - yForStep(1)
+    const topBand = yForStep(TENSION_STEPS) - yForStep(TENSION_STEPS + 1)
+    expect(offBand).toBeCloseTo(topBand * OFF_BAND_SHARE, 6)
+    // A genuine finger target: 80 logical px is about 29 real ones on a mid-sized phone.
+    expect(offBand).toBeGreaterThan(80)
+  })
+
+  it('tiles the slider exactly, top to bottom', () => {
+    expect(yForStep(0)).toBeCloseTo(WRENCH_SLIDER.y + WRENCH_SLIDER.h, 6)
+    expect(yForStep(TENSION_STEPS + 1)).toBeCloseTo(WRENCH_SLIDER.y, 6)
     for (let step = 0; step <= TENSION_STEPS; step += 1) {
-      const middle = (yForStep(step) + yForStep(step + 1)) / 2
-      expect(stepAtY(middle), `step ${step}`).toBe(step)
+      expect(yForStep(step + 1), `band ${step} is above band ${step - 1}`).toBeLessThan(
+        yForStep(step),
+      )
     }
   })
 
@@ -173,5 +224,66 @@ describe('where a touch lands', () => {
     expect(inRect(r, 110, 10)).toBe(false)
     expect(inRect(r, 10, 110)).toBe(false)
     expect(inRect(r, 9, 50)).toBe(false)
+  })
+})
+
+/**
+ * Handedness mirrors the controls, and the lift strip sits opposite the wrench — D-130.
+ *
+ * `mirrorRect` is pure geometry, so which side every control lands on is checkable here rather
+ * than by photographing a phone.
+ */
+describe('the two hands', () => {
+  const STAGE_W = 1920
+
+  it('puts the wrench on the left for a left-handed player and the right for a right-handed one', () => {
+    expect(mirrorRect(WRENCH_SLIDER, false).x).toBe(WRENCH_SLIDER.x)
+    const right = mirrorRect(WRENCH_SLIDER, true)
+    expect(right.x).toBe(STAGE_W - WRENCH_SLIDER.x - WRENCH_SLIDER.w)
+    expect(right.x + right.w, 'and stays inside the stage').toBeLessThanOrEqual(STAGE_W)
+  })
+
+  it('mirrors every control together, so the hands never end up split', () => {
+    for (const r of [WRENCH_SLIDER, WITHDRAW_PAD, PAUSE_PAD, LIFT_PAD]) {
+      const m = mirrorRect(r, true)
+      // Same distance from its own edge as the original was from the other edge.
+      expect(STAGE_W - m.x - m.w, r === LIFT_PAD ? 'lift' : 'control').toBe(r.x)
+      expect(m.y).toBe(r.y)
+      expect(m.h).toBe(r.h)
+    }
+  })
+
+  it('keeps the lift strip opposite the wrench in both hands', () => {
+    for (const flip of [false, true]) {
+      const w = mirrorRect(WRENCH_SLIDER, flip)
+      const l = mirrorRect(LIFT_PAD, flip)
+      const apart = Math.abs(w.x - l.x)
+      expect(apart, `flip=${flip}: the two controls must be on opposite sides`).toBeGreaterThan(
+        STAGE_W / 2,
+      )
+    }
+  })
+
+  it('gives every control a target an adult finger can hit', () => {
+    // A finger pad is about 9mm. At the scale a phone renders this stage — roughly 0.35 — 132
+    // logical px is about 46 CSS px, which is above both Apple's 44pt and Material's 48dp floors.
+    for (const r of [WRENCH_SLIDER, WITHDRAW_PAD, PAUSE_PAD, LIFT_PAD]) {
+      expect(r.w).toBeGreaterThanOrEqual(132)
+      expect(r.h).toBeGreaterThanOrEqual(74)
+    }
+  })
+
+  it('never lets a control overlap another', () => {
+    const rects = [WRENCH_SLIDER, WITHDRAW_PAD, PAUSE_PAD, LIFT_PAD]
+    for (let i = 0; i < rects.length; i += 1) {
+      for (let j = i + 1; j < rects.length; j += 1) {
+        const a = rects[i]
+        const b = rects[j]
+        if (!a || !b) continue
+        const overlaps =
+          a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+        expect(overlaps, `control ${i} overlaps control ${j}`).toBe(false)
+      }
+    }
   })
 })
