@@ -125,7 +125,24 @@ export function typeScaleFor(vp: Viewport): number {
   return Math.min(2.4, Math.max(1, needed))
 }
 
+/**
+ * Faces at or above this multiple of the readability floor are already large enough, and are left
+ * exactly as they are.
+ *
+ * The compact scale exists to lift type *off* the floor (D-122). Applied uniformly it also inflates
+ * the type that was never near it: the rank letter is 104 logical px, which is 38 CSS px on a
+ * phone — the largest thing on the screen by a factor of three — and multiplying it by 1.79 gave a
+ * 186px glyph, 17% of the stage's height, whose ink ran up through the header and printed across
+ * the lock's own name.
+ *
+ * Two floors is the line. Below it a face is small enough that the reason it exists is legibility;
+ * above it, it is large because somebody wanted it large, and the phone does not change that.
+ * See DECISIONS D-132.
+ */
+export const NO_SCALE_FLOORS = 2
+
 export function typeFor(vp: Viewport, size: number): number {
+  if (size * vp.scale >= MIN_TYPE_CSS * NO_SCALE_FLOORS) return size
   return Math.round(size * typeScaleFor(vp))
 }
 

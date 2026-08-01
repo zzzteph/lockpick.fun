@@ -27,7 +27,7 @@ import { driverFill } from './cutaway'
 import { hatchPath, text } from './draw'
 import type { Fx } from './fx'
 import { chamberOffsetY } from './fx'
-import { LOGICAL_HEIGHT, LOGICAL_WIDTH, type Viewport } from './viewport'
+import { LOGICAL_HEIGHT, LOGICAL_WIDTH, typeFor, type Viewport } from './viewport'
 import { STROKE, TYPE, font, type Palette } from './palette'
 
 export type FaceKind = 'disc-detainer' | 'tubular'
@@ -274,7 +274,7 @@ function drawSidebar(vp: Viewport, p: Palette, layout: FaceLayout, state: SimSta
   ctx.restore()
 
   text(ctx, 'sidebar', x + 11, top - 14, {
-    font: font(TYPE.dimension),
+    font: font(typeFor(vp, TYPE.dimension)),
     color: p.inkLight,
     align: 'center',
   })
@@ -362,14 +362,14 @@ function drawDiscFace(
     const labelR = (inner + outer) / 2
     const la = Math.PI * 0.78
     text(ctx, String(c.index + 1), layout.cx + Math.cos(la) * labelR, layout.cy + Math.sin(la) * labelR + 4, {
-      font: font(TYPE.dimension),
+      font: font(typeFor(vp, TYPE.dimension)),
       color: active ? p.ink : p.inkLight,
       align: 'center',
     })
 
     if (active) {
       text(ctx, `disc ${c.index + 1}`, layout.cx, layout.cy + 5, {
-        font: font(TYPE.body),
+        font: font(typeFor(vp, TYPE.body)),
         color: p.ink,
         align: 'center',
       })
@@ -476,7 +476,7 @@ function drawTubularFace(
 
     const labelR = layout.rOuter + 26
     text(ctx, String(c.index + 1), layout.cx + Math.cos(a) * labelR, layout.cy + Math.sin(a) * labelR + 5, {
-      font: font(TYPE.dimension),
+      font: font(typeFor(vp, TYPE.dimension)),
       color: active ? p.ink : p.inkLight,
       align: 'center',
     })
@@ -522,7 +522,7 @@ export function drawFaceOn(
       : `looking down the keyway — move around to choose a ${noun}, inward to push it`,
     LOGICAL_WIDTH / 2,
     LOGICAL_HEIGHT - 176,
-    { font: font(TYPE.dimension), color: p.inkLight, align: 'center' },
+    { font: font(typeFor(vp, TYPE.dimension)), color: p.inkLight, align: 'center' },
   )
 }
 

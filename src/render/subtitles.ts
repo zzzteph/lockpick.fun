@@ -14,7 +14,7 @@
 import type { SimEvent, SimEventType } from '../sim'
 import { text } from './draw'
 import { STROKE, TYPE, alpha, font, readableAccents, type Palette } from './palette'
-import { LOGICAL_HEIGHT, LOGICAL_WIDTH, type Viewport } from './viewport'
+import { LOGICAL_HEIGHT, LOGICAL_WIDTH, typeFor, type Viewport } from './viewport'
 
 /** How long a caption stays up. Long enough to read, short enough not to stack up. */
 export const CAPTION_SECONDS = 2.2
@@ -173,7 +173,7 @@ export function drawLessonLine(
   ctx.restore()
 
   text(ctx, lesson.line, LOGICAL_WIDTH / 2, y + 29, {
-    font: font(TYPE.body),
+    font: font(typeFor(vp, TYPE.body)),
     color: p.ink,
     align: 'center',
   })
@@ -219,7 +219,7 @@ export function drawSubtitles(vp: Viewport, p: Palette, s: Subtitles): void {
     ctx.strokeRect(x + 0.5, y + 0.5, width - 1, lineH - 5)
     ctx.restore()
     text(ctx, c.text, LOGICAL_WIDTH / 2, y + 20, {
-      font: font(TYPE.body),
+      font: font(typeFor(vp, TYPE.body)),
       color: alpha(c.kind === 'state' ? readable.violet : p.ink, fade),
       align: 'center',
     })

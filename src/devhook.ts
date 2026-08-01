@@ -302,6 +302,18 @@ export interface DevHook {
    * of every attempt. Exposed so a test can hold them against each other. See DECISIONS D-131.
    */
   getWrench(): { step: number; tension: number; printedStep: number }
+  /**
+   * Draw one frame with the layout probe on, and return what the rules make of it.
+   *
+   * Every mobile layout bug so far has been found by a person studying a screenshot, which does not
+   * cover ten screens across twelve phones and never catches what nobody thought to look at. This
+   * makes the drawing report itself. See DECISIONS D-132.
+   */
+  auditScreen(): {
+    findings: { kind: string; detail: string; value: number }[]
+    drawn: number
+    scale: number
+  }
 }
 
 declare global {

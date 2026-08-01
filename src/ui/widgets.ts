@@ -9,7 +9,7 @@
 
 import { label, roundRectPath, text } from '../render/draw'
 import { STROKE, TYPE, alpha, font, type Palette } from '../render/palette'
-import { snapX, snapY, type Viewport, typeFor } from '../render/viewport'
+import { MIN_TYPE_CSS, snapX, snapY, type Viewport, typeFor } from '../render/viewport'
 
 export interface Rect {
   x: number
@@ -118,6 +118,16 @@ export class Ui {
     return this.count
   }
 
+  /**
+   * Every rect registered this frame — the layout audit's source of truth for touch targets.
+   *
+   * Read off the same table the hit-testing uses, so an audit cannot disagree with what the game
+   * will actually respond to. Holes (disabled widgets) are dropped. See DECISIONS D-132.
+   */
+  registeredRects(): Rect[] {
+    return this.rects.filter((r): r is Rect => r !== undefined)
+  }
+
   /** Reset focus — call when the screen changes. */
   reset(): void {
     this.focus = 0
@@ -199,18 +209,83 @@ export interface ButtonOptions {
   size?: number
 }
 
+/**
+ * How wide a caption is at `size`, tracking and all — DECISIONS D-132.
+ *
+ * The counterpart to `typeFor`, and the reason the chrome kept failing: scaling a caption inside a
+ * box that stays 150x40 does not make it legible, it makes `button` shrink the caption back down to
+ * fit. A nav button's label was landing at seven CSS px on every screen in the game for exactly
+ * that reason. A box that has to hold text has to be measured from the text.
+ *
+ * Measured against the real face rather than estimated from the character count — the same rule
+ * D-102 set, and this is the sixth place in this codebase to need it.
+ */
+export function captionWidth(vp: Viewport, caption: string, size: number): number {
+  const { ctx } = vp
+  ctx.save()
+  ctx.font = font(size)
+  const w =
+    ctx.measureText(caption.toUpperCase()).width + size * 0.08 * Math.max(0, caption.length - 1)
+  ctx.restore()
+  return w
+}
+
+/**
+ * A box that will hold `caption` at the current scale without shrinking it.
+ *
+ * `button` caps its caption at half the box height (D-128), so a box that wants a face of `size`
+ * has to be at least twice that tall — the height is not padding, it is the constraint.
+ */
+export function boxForCaption(
+  vp: Viewport,
+  caption: string,
+  size: number,
+  min: { w: number; h: number } = { w: 0, h: 0 },
+): { w: number; h: number } {
+  return {
+    w: Math.max(min.w, Math.ceil(captionWidth(vp, caption, size)) + 28),
+    h: Math.max(min.h, size * 2 + 14),
+  }
+}
+
+/**
+ * A box grown, about its own centre, until a caption of `wanted` px clears the readability floor.
+ *
+ * `button` caps its caption at half the box height so the glyphs have air (D-128), which means a
+ * short box does not produce a cramped caption — it produces an *unreadable* one. The layout sweep
+ * found ninety-seven of them: `+` and `-` at ten CSS px, the help tabs, `TEST PICK`, the trophy
+ * pagination, every segmented control.
+ *
+ * Twenty-five call sites each with their own hand-tuned height is twenty-five chances to get it
+ * wrong again, so the rule lives with the widget that enforces it. Growing rather than cramping,
+ * because a control the player cannot read is not a control — and growing is also what the touch
+ * floor wants. See DECISIONS D-132.
+ */
+export function minControlH(vp: Viewport, wanted: number): number {
+  const floor = MIN_TYPE_CSS / Math.max(vp.scale, 0.01)
+  // `min`, not `max`: a control only has to be tall enough for the *floor*, not for whatever face
+  // the caller asked for. On a full page that is 30px, not 44 — which is why this cannot simply be
+  // `wanted * 2` without inflating every button on the desktop for no reason.
+  return Math.ceil(Math.min(wanted, floor)) * 2 + 8
+}
+
+export function fitBox(vp: Viewport, rect: Rect, wanted: number): Rect {
+  const need = minControlH(vp, wanted)
+  if (rect.h >= need) return rect
+  return { ...rect, y: rect.y - (need - rect.h) / 2, h: need }
+}
+
 /** Draw a button and return true when it has been pressed this frame. */
 export function button(
   vp: Viewport,
   p: Palette,
   ui: Ui,
-  rect: Rect,
+  box: Rect,
   caption: string,
   opts: ButtonOptions = {},
 ): boolean {
   const { ctx } = vp
   const enabled = opts.enabled ?? true
-  const st = ui.widget(rect, enabled)
   /**
    * A button's caption follows the viewport (D-122).
    *
@@ -220,6 +295,9 @@ export function button(
    * not seventeen literal pixels on a 390px-tall display.
    */
   const size = typeFor(vp, opts.size ?? TYPE.body)
+  // Grown before it is registered, so the hit target, the focus ring and the frame all agree.
+  const rect = fitBox(vp, box, size)
+  const st = ui.widget(rect, enabled)
 
   ctx.save()
   const x = snapX(vp, rect.x, STROKE.standard)
@@ -320,8 +398,8 @@ export function panel(
   ctx.restore()
   if (title) {
     label(ctx, title, rect.x + 16, rect.y + 26, {
-      font: font(TYPE.dimension),
-      size: TYPE.dimension,
+      font: font(typeFor(vp, TYPE.dimension)),
+      size: typeFor(vp, TYPE.dimension),
       color: p.inkLight,
     })
   }
@@ -436,9 +514,11 @@ export function segmented(
   selected: number,
 ): number {
   const w = rect.w / captions.length
+  // Same floor as  — a segmented cell shrinks its caption the same way (D-132).
+  const grownRow = fitBox(vp, rect, typeFor(vp, TYPE.body))
   let next = selected
   captions.forEach((caption, i) => {
-    const cell: Rect = { x: rect.x + w * i, y: rect.y, w, h: rect.h }
+    const cell: Rect = { x: grownRow.x + w * i, y: grownRow.y, w, h: grownRow.h }
     const st = ui.widget(cell)
     const { ctx } = vp
     ctx.save()

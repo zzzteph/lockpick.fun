@@ -62,13 +62,13 @@ export function inRect(r: TouchRect, x: number, y: number): boolean {
  * landed and every screenshot in the suite was taken with a mouse. The compact type scale finally
  * made it big enough to report as *"pause and wrench overlap"* (D-129).
  *
- * **318 and 482, once the pads became square (D-131).** The gutter now tiles cleanly: header ends
- * at 88, pause 96..228, a 90px band for this header, slider 318..800, withdraw 806..938, footer
- * panel at 940. Every boundary is a real constraint and nothing overlaps anything. The slider gives
- * up 96px of length for it, which costs nothing it needs — the drag is relative and geared (D-131),
- * so the runway is a comfort, not a resolution limit, and 482 logical px is 174 real ones.
+ * **318 and 614, once pause left this gutter (D-133).** The column tiles: header ends at 88,
+ * withdraw 96..228, a 90px band for this header, and the slider 318..932 — down to the footer panel
+ * at 940. It is the whole of the hand's reach rather than the middle of it, and the bottom of the
+ * track, which is where the thumb rests and where `off` lives, is now at the bottom of the screen
+ * instead of a hundred pixels above it.
  */
-export const WRENCH_SLIDER: TouchRect = { x: 30, y: 318, w: 132, h: 482 }
+export const WRENCH_SLIDER: TouchRect = { x: 30, y: 318, w: 132, h: 614 }
 
 /**
  * Every touch control mirrors with the handedness setting — DECISIONS D-130.
@@ -103,24 +103,37 @@ export function mirrorRect(r: TouchRect, mirrored: boolean): TouchRect {
  * resistance columns, so a strip at the margin lands on top of them. 1548 is `GUTTER_LEFT` — the
  * first column of page the lock can never reach — which puts the strip between the drawing and the
  * readings, touching neither. Mirrored it lands at 240, between the free gutter and the lock.
+ *
+ * It starts at 260 rather than 220 because pause now sits at the top of this gutter (D-133), and it
+ * still ends at 532 — clear of the state word at 552.
  */
-export const LIFT_PAD: TouchRect = { x: 1548, y: 220, w: 132, h: 272 }
+export const LIFT_PAD: TouchRect = { x: 1548, y: 260, w: 132, h: 272 }
 
 /**
- * The pads at each end of the gutter: pause, and withdraw the pick.
+ * Pause is in the **pick** hand's gutter, not the wrench hand's — DECISIONS D-133.
  *
- * **Both are 132 wide and were 74 tall** — forty-eight CSS px across and twenty-seven down on a
- * mid-sized phone. Wide enough for a thumb and a third of the height one needs, which is the shape
- * of the whole mobile audit in D-131: the widths were designed for fingers and the heights were
- * inherited from a desktop row.
+ * Both pads used to sit in the left column, stacked either side of the wrench slider, which put the
+ * two controls that *end a run* — pause, and the bench link above it — directly in the path the
+ * tension thumb travels. A UX review measured it: the whole column is a 50px band, and a thumb that
+ * has dragged the wrench up sits about 32px below the pause box and under the bench link, holding
+ * that position for the entire attempt because the game explicitly coaches it to.
  *
- * They are square now, at 132. The room was already there and unused — the wrench slider runs
- * 260 to 838, the header ends at 88 and the footer panel starts at 940, which leaves 172px of
- * empty gutter above the slider and 102 below it. Pause takes 96..228 and withdraw 806..938,
- * both still clear of the bars they must not overlap, and the slider is untouched between them.
+ * A control you press by accident while doing something else is a bad control wherever it is drawn.
+ * Pause moves to the top of the opposite gutter, above the lift strip, where the other hand already
+ * is and where nothing is being dragged. Both are placed through `mirrorRect`, so the pairing holds
+ * whichever way round the lock is held.
  */
-export const WITHDRAW_PAD: TouchRect = { x: 30, y: 806, w: 132, h: 132 }
-export const PAUSE_PAD: TouchRect = { x: 30, y: 96, w: 132, h: 132 }
+export const PAUSE_PAD: TouchRect = { x: STAGE_W - 162, y: 96, w: 132, h: 132 }
+
+/**
+ * Withdrawing the pick takes the top of the wrench's gutter, where pause used to be.
+ *
+ * It is a deliberate, occasional action — you press it to start a chamber again — so the top of the
+ * column suits it, and moving it out of the bottom is what lets the slider reach the bottom of the
+ * stage. It also ends a collision nobody had traced: the plug dial's readouts live in that
+ * lower-left corner, and this pad's caption was printed across them.
+ */
+export const WITHDRAW_PAD: TouchRect = { x: 30, y: 96, w: 132, h: 132 }
 
 /**
  * How far up the finger must drag to ask for full lift, in logical px.
@@ -209,6 +222,33 @@ export function yForStep(step: number): number {
   const t = sharesBelow(step) / (TENSION_STEPS + OFF_BAND_SHARE)
   return WRENCH_SLIDER.y + WRENCH_SLIDER.h * (1 - t)
 }
+
+/**
+ * The step whose drawn band contains `y` — the inverse of `yForStep`.
+ *
+ * **For taps, not for drags** — DECISIONS D-134. D-131 made the wrench relative because a drag that
+ * jumps the tension drops every pin already set, and that reasoning is about the *drag*: your thumb
+ * is already on the control, so where it landed says nothing about what you want. A **tap** is the
+ * opposite — you looked at the slider, you chose a band, you put your finger on it. Reported as
+ * *"I cannot freely click on the tension measure, I need to click and drag"*, which is fair: the
+ * bands are drawn and numbered, and a control that shows you ten choices should let you pick one.
+ *
+ * Honours the fat off band, so the bottom `OFF_BAND_SHARE` of the track reads as zero.
+ */
+export function stepAtY(y: number): number {
+  const t = 1 - (y - WRENCH_SLIDER.y) / WRENCH_SLIDER.h
+  const shares = t * (TENSION_STEPS + OFF_BAND_SHARE)
+  if (shares <= OFF_BAND_SHARE) return 0
+  return Math.max(0, Math.min(TENSION_STEPS, Math.floor(shares - OFF_BAND_SHARE) + 1))
+}
+
+/**
+ * How far a finger may travel and still count as a tap rather than a drag, in logical px.
+ *
+ * About four CSS px on a phone. Below the wobble in a deliberate press, and far below the 62px a
+ * single geared step of drag costs, so the two gestures cannot be confused for one another.
+ */
+export const TAP_SLOP = 12
 
 /**
  * Inside the fat band at the bottom, which means *off* wherever the drag came from.

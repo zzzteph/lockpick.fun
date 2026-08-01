@@ -34,7 +34,7 @@ import {
   type CutawayLayout,
 } from './layout'
 import { STATE_PATTERN, STROKE, TYPE, alpha, font, mix, stateColor, type Palette } from './palette'
-import { LOGICAL_WIDTH, isCompact, snapX, snapY, type Viewport } from './viewport'
+import { LOGICAL_WIDTH, isCompact, snapX, snapY, typeFor, type Viewport } from './viewport'
 
 const HATCH_SPACING = 6
 
@@ -614,35 +614,65 @@ function drawRotationGauge(
   arc(r + 20, demand, alpha(p.ink, 0.35), STROKE.hairline)
   arc(r + 13, theta, p.amber, STROKE.heavy)
 
-  text(ctx, 'PLUG θ', cx, cy + r + 40, {
-    font: font(TYPE.dimension),
-    color: p.inkLight,
-    align: 'center',
-  })
+  /**
+   * The dial's caption stack, spaced by its own type — DECISIONS D-132.
+   *
+   * Five lines at +40, +62, +82, +104 and +122: an 18px pitch for a 17px face, which works exactly
+   * until the face is 30px and every line is printed through the one below it. Reported as *"plug
+   * (circle one) with the text are also very small"* — and once the type was scaled to fix the
+   * "very small", the offsets turned it into a smear. Measured, so the two cannot disagree again.
+   */
+  /**
+   * The caption stack is **left-aligned off the gutter**, not centred on the dial — D-133.
+   *
+   * Centred on `cx`, the widest line (`29.8° / 0.1°`) reaches back past x=162, which is the right
+   * edge of the wrench slider's panel — so the leading digit was drawn underneath it and the reading
+   * looked sliced. A UX review measured three different left edges in a 35px-tall cluster, with two
+   * different label/value arrangements between them.
+   *
+   * One edge and one arrangement: every line starts at `readX`, which is the first column clear of
+   * the gutter, and every line is label-over-value rather than some stacked and some inline.
+   */
+  /**
+   * The caption block is clamped **between both gutters** — DECISIONS D-134.
+   *
+   * The dial sits at the tail of the lock, so it mirrors with `handedness`; the wrench slider
+   * mirrors too. They therefore land on the *same* side of the screen whichever hand is chosen, and
+   * this block is always the thing that has to give. D-133 clamped it off the left gutter only, so
+   * right-handed put the whole readout under the wrench panel and sliced the plug angle in half.
+   *
+   * Measured first, placed second: the widest line decides where the block can start, and it is
+   * pushed inside whichever gutter it would otherwise run into.
+   */
+  const dimSize = typeFor(vp, TYPE.dimension)
+  const bodySize = typeFor(vp, TYPE.body)
   const deg = (a: number): string => `${((a * 180) / Math.PI).toFixed(1)}°`
-  text(ctx, deg(theta), cx, cy + r + 62, {
-    font: font(TYPE.body),
-    color: p.ink,
-    align: 'center',
-  })
-  // "asking / allowed" — the pair that tells you whose fault the stall is.
-  text(ctx, `${deg(demand)} / ${deg(max)}`, cx, cy + r + 82, {
-    font: font(TYPE.dimension),
-    color: p.inkLight,
-    align: 'center',
-  })
+  const rows: [string, number, string][] = [
+    ['PLUG θ', dimSize, p.inkLight],
+    [deg(theta), bodySize, p.ink],
+    // "asking / allowed" — the pair that tells you whose fault the stall is.
+    [`${deg(demand)} / ${deg(max)}`, dimSize, p.inkLight],
+  ]
   if (free) {
     // The plug is slack and turning against nothing. The only thing left is your wrench.
-    text(ctx, 'PLUG FREE', cx, cy + r + 104, {
-      font: font(TYPE.dimension),
-      color: p.teal,
-      align: 'center',
-    })
-    text(ctx, 'TURN HARDER', cx, cy + r + 122, {
-      font: font(TYPE.dimension),
-      color: p.teal,
-      align: 'center',
-    })
+    rows.push(['PLUG FREE', dimSize, p.teal], ['TURN HARDER', dimSize, p.teal])
+  }
+  ctx.save()
+  let widest = 0
+  for (const [str, size] of rows) {
+    ctx.font = font(size)
+    widest = Math.max(widest, ctx.measureText(str).width)
+  }
+  ctx.restore()
+  const GUTTER_CLEAR = 176
+  const readX = Math.min(
+    Math.max(GUTTER_CLEAR, cx - r),
+    LOGICAL_WIDTH - GUTTER_CLEAR - widest,
+  )
+  let dy = cy + r + 12
+  for (const [str, size, color] of rows) {
+    dy += size + 6
+    text(ctx, str, readX, dy, { font: font(size), color })
   }
 }
 
@@ -712,15 +742,30 @@ export function drawCutaway(
   ctx.stroke()
   ctx.restore()
 
-  drawRotationGauge(
-    vp,
-    p,
-    layout,
-    state.theta,
-    state.thetaDemand,
-    state.thetaMax,
-    pickedButUnturned(state),
-  )
+  /**
+   * The rotation gauge is a desktop reading — DECISIONS D-135.
+   *
+   * It is a dial plus three lines of type in the lower-left corner, and the **plug's angle is
+   * already a meter in the footer**. What the dial adds over that meter is `asking / allowed` —
+   * whose fault the stall is — which is a genuinely good reading and a study one: you look at it
+   * when you are working out *why*, not while you are picking. On a phone it is one of the largest
+   * blocks on the screen, and the screen it is on is the one the whole game happens on.
+   *
+   * The one thing in it that is not a reading but an **instruction** survives the cut: `plug free,
+   * turn harder` means every driver is above the line and only your wrench is short, which is a
+   * state a player can sit in indefinitely without knowing why. It moves to the caption row where
+   * the other prompts live.
+   */
+  if (!isCompact(vp))
+    drawRotationGauge(
+      vp,
+      p,
+      layout,
+      state.theta,
+      state.thetaDemand,
+      state.thetaMax,
+      pickedButUnturned(state),
+    )
   drawChamberLabels(vp, p, layout, state, opts.activeChamber)
   /**
    * The anatomy key — SHELL, PLUG, KEYWAY, the shear line and the pin-stack legend — is a
@@ -747,7 +792,7 @@ function drawChamberLabels(
     const cx = shellChamberX(layout, c.index)
     const isActive = c.index === active
     text(ctx, String(c.index + 1), cx, labelY, {
-      font: font(TYPE.dimension),
+      font: font(typeFor(vp, TYPE.dimension)),
       color: isActive ? p.ink : p.inkLight,
       align: 'center',
     })

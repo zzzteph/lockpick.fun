@@ -65,6 +65,23 @@ const FOOTER_PAD = 38
 const RANK_BAND_Y = MARGIN + HEADER_H
 
 /**
+ * The bottom of that band — the top of the assembly, measured rather than assumed.
+ *
+ * The band is 130px of clear page between the header and the lock, and everything in it was placed
+ * with literals against a 21px face: the rank letter at +84 and the countdown under it at
+ * `+84 + body + 10`. Scaled, `body` is 46 on the smallest phone, which puts the countdown's
+ * baseline at 228 — **ten pixels inside the lock**, where it was drawn across the shell. Reported
+ * as *"the timer overlaps with the lock"*, and it is the timer: the countdown to the next rank.
+ *
+ * Measured from `computeLayout` for the same reason `GUTTER_LEFT` is (D-106): every hardcoded
+ * guess about where the assembly starts has eventually been wrong. See DECISIONS D-137.
+ */
+const RANK_BAND_BOTTOM = (() => {
+  const widest = assemblyBounds(computeLayout(MAX_CHAMBERS, 0))
+  return widest.y
+})()
+
+/**
  * Left edge of the right-hand gutter: the strip of page the lock can never reach into.
  *
  * `computeLayout` widens the assembly with the chamber count until it saturates, so the widest it
@@ -353,6 +370,7 @@ function stateInk(state: SimState, p: Palette): string {
  * misaligned is *the* thing they need to know, it counts them.
  */
 function drawSidebarLamp(vp: Viewport, p: Palette, state: SimState, footerY: number): void {
+  const ts = (size: number): number => typeFor(vp, size)
   const gated = state.chambers.filter((c) => c.sidebarGate !== null)
   if (gated.length === 0) return
   const { ctx } = vp
@@ -378,8 +396,8 @@ function drawSidebarLamp(vp: Viewport, p: Palette, state: SimState, footerY: num
   ctx.stroke()
   ctx.restore()
   label(ctx, word, x - 24, y + 12, {
-    font: font(TYPE.dimension),
-    size: TYPE.dimension,
+    font: font(ts(TYPE.dimension)),
+    size: ts(TYPE.dimension),
     color: ink,
     align: 'right',
   })
@@ -423,8 +441,8 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
    * one to serve a single link would put widget state in the drawing layer. See DECISIONS D-096.
    */
   label(ctx, '← bench', MARGIN + 24, headerMid, {
-    font: font(TYPE.body),
-    size: TYPE.body,
+    font: font(ts(TYPE.body)),
+    size: ts(TYPE.body),
     color: opts.benchHot ? p.ink : p.inkLight,
   })
   if (opts.benchHot) {
@@ -438,8 +456,8 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
     ctx.restore()
   }
   label(ctx, opts.lockName, LOGICAL_WIDTH / 2, headerMid, {
-    font: font(TYPE.heading),
-    size: TYPE.heading,
+    font: font(ts(TYPE.heading)),
+    size: ts(TYPE.heading),
     color: p.ink,
     align: 'center',
   })
@@ -485,7 +503,7 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
   const rank = rankIndexFor(opts.elapsed, opts.par)
   const readable = readableAccents(p)
   text(ctx, formatClock(opts.elapsed), clockX, MARGIN + HEADER_H / 2 + 12, {
-    font: font(TYPE.clock),
+    font: font(ts(TYPE.clock)),
     color: p.ink,
     align: 'right',
   })
@@ -527,14 +545,14 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
      * Once you have used it once, the amber footer caption is enough. See DECISIONS D-112.
      */
     label(ctx, opts.tensionHint, LOGICAL_WIDTH / 2, RANK_BAND_Y + 66, {
-      font: font(TYPE.title, 'bold'),
-      size: TYPE.title,
+      font: font(ts(TYPE.title), 'bold'),
+      size: ts(TYPE.title),
       color: readable.amber,
       align: 'center',
     })
     label(ctx, 'nothing in the lock moves until it is under tension', LOGICAL_WIDTH / 2, RANK_BAND_Y + 100, {
-      font: font(TYPE.body),
-      size: TYPE.body,
+      font: font(ts(TYPE.body)),
+      size: ts(TYPE.body),
       color: p.inkLight,
       align: 'center',
     })
@@ -542,14 +560,14 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
     // No letter, because there is no rank to earn — and the word has to be unmissable, or a player
     // will spend ten good minutes on a run that was never going to count (D-092).
     label(ctx, 'INSPECTION', LOGICAL_WIDTH / 2, RANK_BAND_Y + 66, {
-      font: font(TYPE.title, 'bold'),
-      size: TYPE.title,
+      font: font(ts(TYPE.title), 'bold'),
+      size: ts(TYPE.title),
       color: readable.violet,
       align: 'center',
     })
     label(ctx, 'nothing is recorded', LOGICAL_WIDTH / 2, RANK_BAND_Y + 94, {
-      font: font(TYPE.body),
-      size: TYPE.body,
+      font: font(ts(TYPE.body)),
+      size: ts(TYPE.body),
       color: p.inkLight,
       align: 'center',
     })
@@ -559,8 +577,8 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
     ctx.save()
     ctx.globalAlpha = 0.9
     label(ctx, RANKS[rank]?.letter ?? 'F', LOGICAL_WIDTH / 2, RANK_BAND_Y + 84, {
-      font: font(TYPE.rank, 'bold'),
-      size: TYPE.rank,
+      font: font(ts(TYPE.rank), 'bold'),
+      size: ts(TYPE.rank),
       color: rankInk,
       align: 'center',
     })
@@ -574,12 +592,21 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
      * should be below the rank"*, which is where it should always have been.
      */
     if (left !== null) {
+      /*
+       * The countdown takes the dimension face on a phone, and sits on the band's floor.
+       *
+       * The band is 130px between the header and the lock. The rank letter is 104 of them and is
+       * deliberately not scaled (D-135), so at the compact body face there is simply no room for a
+       * second line under it — clamping the body-sized line up to clear the lock pushed it into the
+       * letter instead. One step down fits: the letter's ink ends at 177 and this sits at 183.
+       */
+      const countSize = compact ? ts(TYPE.dimension) : ts(TYPE.body)
       label(
         ctx,
         `${left.toFixed(1)}s to ${RANKS[rank + 1]?.letter ?? 'F'}`,
         LOGICAL_WIDTH / 2,
-        RANK_BAND_Y + 110,
-        { font: font(TYPE.body), size: TYPE.body, color: p.inkLight, align: 'center' },
+        Math.min(RANK_BAND_Y + 84 + countSize + 10, RANK_BAND_BOTTOM - countSize * 0.28 - 8),
+        { font: font(countSize), size: countSize, color: p.inkLight, align: 'center' },
       )
     }
   }
@@ -659,7 +686,7 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
     color: off ? p.inkLight : p.ink,
   })
   text(ctx, state.tension.toFixed(2), leftX + meterW + 58, footerY + FOOTER_PAD + 38, {
-    font: font(TYPE.dimension),
+    font: font(ts(TYPE.dimension)),
     color: p.inkLight,
   })
   /**
@@ -712,8 +739,8 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
   // the caller has gone out of its way to supply is a prompt, so it survives too.
   if (!compact || wrenchOff || opts.heldHint !== undefined)
     label(ctx, wrenchOff ? opts.tensionHint : held, leftX, footerY + FOOTER_PAD + 70, {
-      font: font(TYPE.dimension),
-      size: TYPE.dimension,
+      font: font(ts(TYPE.dimension)),
+      size: ts(TYPE.dimension),
       color: wrenchOff || opts.heldHint !== undefined ? readableAccents(p).amber : p.inkLight,
     })
 
@@ -801,13 +828,13 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
     if (!compact) {
       column(vp, p, forceX, colBottom, colH, state.pickForce, alpha(p.inkLight, 0.7), 10, colW)
     text(ctx, state.pickForce.toFixed(2), forceX + colW / 2, NUM_Y, {
-      font: font(TYPE.heading),
+      font: font(ts(TYPE.heading)),
       color: p.ink,
       align: 'center',
     })
       label(ctx, 'force', forceX + colW / 2, LABEL_Y, {
-        font: font(TYPE.dimension),
-        size: TYPE.dimension,
+        font: font(ts(TYPE.dimension)),
+        size: ts(TYPE.dimension),
         color: p.inkLight,
         align: 'center',
       })
@@ -862,15 +889,24 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
      */
     const captionW = LOGICAL_WIDTH - MARGIN - 8 - GUTTER_LEFT
     const captionX = flip ? MARGIN + 8 : GUTTER_LEFT
+    /*
+     * Not drawn at all on a phone, rather than drawn at y = -1000 (D-132).
+     *
+     * Hiding a thing by putting it a thousand pixels above the stage works, in the sense that
+     * nobody sees it — but it is still measured, still costs a `measureText`, and it is invisible
+     * to any check that asks what is on the screen. The layout audit reported it as text running
+     * off the top edge, which is exactly what it was.
+     */
     let cy = CAPTION_Y
-    if (compact) cy = -1000 // drawn off-stage; the sentences explain a pair that is not there
-    for (const line of ['force — how hard you push', 'resistance — how hard it pushes back']) {
-      cy += paragraph(ctx, line, captionX, cy, {
-        font: font(TYPE.dimension),
-        color: p.inkLight,
-        maxWidth: captionW,
-        lineHeight: 22,
-      }) * 22
+    if (!compact) {
+      for (const line of ['force — how hard you push', 'resistance — how hard it pushes back']) {
+        cy += paragraph(ctx, line, captionX, cy, {
+          font: font(ts(TYPE.dimension)),
+          color: p.inkLight,
+          maxWidth: captionW,
+          lineHeight: 22,
+        })
+      }
     }
     if (named) {
       label(ctx, stateWord(state), readX, WORD_Y, {
@@ -921,20 +957,20 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
   // finish line: fill past it and the lock is open (D-100).
   if (!compact)
   label(ctx, 'how far it has turned — past the notch it opens', plugX, footerY + FOOTER_PAD + 70, {
-    font: font(TYPE.dimension),
-    size: TYPE.dimension,
+    font: font(ts(TYPE.dimension)),
+    size: ts(TYPE.dimension),
     color: p.inkLight,
   })
 
   if (!compact && opts.depthMm !== null && opts.depthMm !== undefined) {
     const dx = LOGICAL_WIDTH / 2 - 150
     label(ctx, 'pick depth', dx, footerY + FOOTER_PAD, {
-      font: font(TYPE.dimension),
-      size: TYPE.dimension,
+      font: font(ts(TYPE.dimension)),
+      size: ts(TYPE.dimension),
       color: p.inkLight,
     })
     text(ctx, `${opts.depthMm.toFixed(2)} mm`, dx, footerY + FOOTER_PAD + 38, {
-      font: font(TYPE.heading),
+      font: font(ts(TYPE.heading)),
       color: p.ink,
     })
   }
@@ -954,8 +990,8 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
     const word = strain.broken ? 'pick broken' : strain.bent ? 'pick bent' : 'pick strain'
     const ink = strain.broken ? p.crimson : strain.bent ? p.crimson : p.amber
     label(ctx, word, sx, footerY + FOOTER_PAD, {
-      font: font(TYPE.dimension),
-      size: TYPE.dimension,
+      font: font(ts(TYPE.dimension)),
+      size: ts(TYPE.dimension),
       color: p.inkLight,
     })
     meter(vp, p, sx, footerY + FOOTER_PAD + 14, 180, strain.broken ? 1 : strain.amount, ink, {
@@ -974,7 +1010,7 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
      */
     if (strain.broken) {
       text(ctx, opts.restartHint, sx, footerY + FOOTER_PAD + 70, {
-        font: font(TYPE.body),
+        font: font(ts(TYPE.body)),
         color: readableAccents(p).crimson,
       })
     }
@@ -1012,8 +1048,11 @@ function drawKeyLegend(
   keys: readonly (readonly [string, string])[],
 ): void {
   const { ctx } = vp
+  const ts = (size: number): number => typeFor(vp, size)
   const x = MARGIN + 16
-  const ROW = 34
+  // The row pitch follows the type, or a scaled legend stacks its own lines on top of each other —
+  // the entries are drawn at `ROW` apart and the glyphs got 1.8x taller (D-132).
+  const ROW = Math.max(34, ts(TYPE.body) + 14)
   // Below the header, and stopping well short of the rotation gauge in the lower gutter.
   let ky = MARGIN + HEADER_H + 52
   /**
@@ -1025,7 +1064,7 @@ function drawKeyLegend(
    * rule this row has now broken twice (D-102, D-109).
    */
   ctx.save()
-  ctx.font = font(TYPE.body, 'bold')
+  ctx.font = font(ts(TYPE.body), 'bold')
   const capW = keys.reduce((w, [key]) => Math.max(w, ctx.measureText(key).width + 20), 30)
   ctx.restore()
 
@@ -1038,14 +1077,14 @@ function drawKeyLegend(
     ctx.strokeRect(snapX(vp, x, STROKE.standard), snapY(vp, ky, STROKE.standard), capW, 26)
     ctx.restore()
     label(ctx, key, x + capW / 2, ky + 18, {
-      font: font(TYPE.body, 'bold'),
-      size: TYPE.body,
+      font: font(ts(TYPE.body), 'bold'),
+      size: ts(TYPE.body),
       color: p.ink,
       align: 'center',
     })
     label(ctx, what, x + capW + 14, ky + 18, {
-      font: font(TYPE.body),
-      size: TYPE.body,
+      font: font(ts(TYPE.body)),
+      size: ts(TYPE.body),
       color: p.ink,
     })
     ky += ROW
@@ -1057,6 +1096,7 @@ function drawKeyLegend(
 
 /** The banner shown once the lock is open. The full sequence arrives in Phase 11. */
 export function drawOpenBanner(vp: Viewport, p: Palette, elapsed: number): void {
+  const ts = (size: number): number => typeFor(vp, size)
   const { ctx } = vp
   const w = 520
   const h = 108
@@ -1070,13 +1110,13 @@ export function drawOpenBanner(vp: Viewport, p: Palette, elapsed: number): void 
   ctx.strokeRect(x, y, w, h)
   ctx.restore()
   label(ctx, 'open', LOGICAL_WIDTH / 2, y + 52, {
-    font: font(TYPE.title),
-    size: TYPE.title,
+    font: font(ts(TYPE.title)),
+    size: ts(TYPE.title),
     color: p.ink,
     align: 'center',
   })
   text(ctx, `${elapsed.toFixed(2)}s · press R for a fresh seed`, LOGICAL_WIDTH / 2, y + 84, {
-    font: font(TYPE.body),
+    font: font(ts(TYPE.body)),
     color: p.inkLight,
     align: 'center',
   })

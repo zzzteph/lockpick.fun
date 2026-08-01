@@ -21,7 +21,7 @@ import {
   type OpenSequence,
 } from './opensequence'
 import { STROKE, TYPE, alpha, font, readableAccents, type Palette } from './palette'
-import { LOGICAL_HEIGHT, LOGICAL_WIDTH, type Viewport } from './viewport'
+import { LOGICAL_HEIGHT, LOGICAL_WIDTH, typeFor, type Viewport } from './viewport'
 
 /** Beat 2: every line on screen flashes to Highlight for two frames. */
 export function drawImpactFlash(vp: Viewport, p: Palette, seq: OpenSequence): void {
@@ -111,12 +111,12 @@ export function drawCreditCount(vp: Viewport, p: Palette, seq: OpenSequence): vo
   ctx.globalAlpha = t
   ctx.translate(LOGICAL_WIDTH / 2, COUNT_BASELINE)
   ctx.scale(scale, scale)
-  ctx.font = font(TYPE.payout, 'bold')
+  ctx.font = font(typeFor(vp, TYPE.payout), 'bold')
   ctx.fillStyle = ink
   ctx.fillText(letter, -ctx.measureText(letter).width / 2, 0)
   ctx.restore()
   text(ctx, 'rank', LOGICAL_WIDTH / 2, COUNT_BASELINE + 30, {
-    font: font(TYPE.body),
+    font: font(typeFor(vp, TYPE.body)),
     color: p.inkLight,
     align: 'center',
   })
@@ -165,10 +165,10 @@ export function drawAchievementCards(
     ctx.restore()
 
     text(ctx, 'ACHIEVEMENT', x + 22, y + 26, {
-      font: font(TYPE.dimension),
+      font: font(typeFor(vp, TYPE.dimension)),
       color: p.inkLight,
     })
-    text(ctx, a.name, x + 22, y + 54, { font: font(TYPE.heading), color: p.ink })
+    text(ctx, a.name, x + 22, y + 54, { font: font(typeFor(vp, TYPE.heading)), color: p.ink })
   }
 }
 

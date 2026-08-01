@@ -6,12 +6,8 @@
  * bottom. Every screen looks like a page from the same manual.
  */
 
-import { ACHIEVEMENTS } from "../game/achievements";
-import {
-  ASSIST_BLURB,
-  ASSIST_MODES,
-  ASSIST_MULTIPLIER,
-} from "../game/challenges";
+import { ACHIEVEMENTS } from '../game/achievements'
+import { ASSIST_BLURB, ASSIST_MODES, ASSIST_MULTIPLIER } from '../game/challenges'
 import {
   MAX_TOLERANCE,
   MIN_TOLERANCE,
@@ -20,27 +16,14 @@ import {
   draftToLockDef,
   windowWidth,
   type Draft,
-} from "../game/editor";
-import { ALL_LOCKS, chambersOf } from "../game/locks";
-import {
-  decodeLock,
-  encodeLock,
-  formatCode,
-  shareProblem,
-  shareableCode,
-} from "../game/sharecode";
-import { countsForTier, effectivePar, letterFor } from "../game/ranks";
-import type { AttemptOutcome, AttemptResult, Progress } from "../game/progress";
-import { LESSONS } from "../game/tutorial";
-import { hatchRect, label, paragraph, text } from "../render/draw";
-import {
-  STROKE,
-  TYPE,
-  alpha,
-  font,
-  readableAccents,
-  type Palette,
-} from "../render/palette";
+} from '../game/editor'
+import { ALL_LOCKS, chambersOf } from '../game/locks'
+import { decodeLock, encodeLock, formatCode, shareProblem, shareableCode } from '../game/sharecode'
+import { countsForTier, effectivePar, letterFor } from '../game/ranks'
+import type { AttemptOutcome, AttemptResult, Progress } from '../game/progress'
+import { LESSONS } from '../game/tutorial'
+import { hatchRect, label, paragraph, text } from '../render/draw'
+import { STROKE, TYPE, alpha, font, readableAccents, type Palette } from '../render/palette'
 import {
   LOGICAL_HEIGHT,
   LOGICAL_WIDTH,
@@ -50,63 +33,60 @@ import {
   isCompact,
   touchFloorFor,
   typeFor,
-} from "../render/viewport";
-import {
-  MAX_CHAMBERS,
-  MAX_KEY_PIN,
-  MIN_CHAMBERS,
-  PROFILES,
-  type KeywayGrade,
-} from "../sim";
-import type { LockDef, SettingsData } from "./shellTypes";
+} from '../render/viewport'
+import { MAX_CHAMBERS, MAX_KEY_PIN, MIN_CHAMBERS, PROFILES, type KeywayGrade } from '../sim'
+import type { LockDef, SettingsData } from './shellTypes'
 import {
   type Ui,
+  boxForCaption,
   button,
+  captionWidth,
+  minControlH,
   cardFrame,
   panel,
   segmented,
   slider,
   toggle,
   type Rect,
-} from "./widgets";
+} from './widgets'
 
 export type ScreenName =
-  | "menu"
-  | "bench"
-  | "pick"
-  | "results"
-  | "settings"
-  | "pause"
-  | "trophies"
-  | "editor"
-  | "codes"
-  | "help";
+  | 'menu'
+  | 'bench'
+  | 'pick'
+  | 'results'
+  | 'settings'
+  | 'pause'
+  | 'trophies'
+  | 'editor'
+  | 'codes'
+  | 'help'
 
-const MARGIN = 24;
+const MARGIN = 24
 
 export interface ShellActions {
-  goto(screen: ScreenName): void;
-  startLock(def: LockDef): void;
-  resume(): void;
-  restart(): void;
-  abandon(): void;
+  goto(screen: ScreenName): void
+  startLock(def: LockDef): void
+  resume(): void
+  restart(): void
+  abandon(): void
   /** Begin one of the three lessons from `GAME_DESIGN.md §10`. */
-  startLesson(id: string): void;
-  updateSettings(patch: Partial<SettingsData>): void;
-  exportSave(): void;
-  importSave(): void;
-  toggleChallenge(id: string): void;
+  startLesson(id: string): void
+  updateSettings(patch: Partial<SettingsData>): void
+  exportSave(): void
+  importSave(): void
+  toggleChallenge(id: string): void
   /** Flip whether the next lock started from the bench is a study run (D-092). */
-  toggleInspect(): void;
+  toggleInspect(): void
   // ── The lock editor (D-080) ──
-  editorChamberCount(n: number): void;
-  editorDepth(index: number, depth: number): void;
-  editorCyclePin(index: number): void;
-  editorCycleSpring(index: number): void;
-  editorTolerance(q: number): void;
-  editorKeyway(k: KeywayGrade): void;
-  editorFocusName(on: boolean): void;
-  editorLoad(index: number): void;
+  editorChamberCount(n: number): void
+  editorDepth(index: number, depth: number): void
+  editorCyclePin(index: number): void
+  editorCycleSpring(index: number): void
+  editorTolerance(q: number): void
+  editorKeyway(k: KeywayGrade): void
+  editorFocusName(on: boolean): void
+  editorLoad(index: number): void
   /**
    * Open any lock in the editor as a draft — the roster included (D-100).
    *
@@ -114,83 +94,83 @@ export interface ShellActions {
    * lists every lock in the game. Loading a *copy*, so opening a roster lock to see how it is built
    * cannot alter the roster lock.
    */
-  editDef(def: LockDef): void;
+  editDef(def: LockDef): void
   /** Copy the current draft's share code to the clipboard (D-093). */
-  editorCopyCode(): void;
+  editorCopyCode(): void
   /** Read a share code from the clipboard and load it into the draft. */
-  editorPasteCode(): void;
+  editorPasteCode(): void
   /**
    * Put a string on the clipboard and say so along the bottom of the screen.
    *
    * `what` is the human name of the thing — "the code for Halberd Deadbolt" — because a status line
    * reading only the sixteen characters back at you does not confirm anything (D-099).
    */
-  copyText(value: string, what: string): void;
+  copyText(value: string, what: string): void
   // ── The share-code box on the codes screen (D-101) ──
   /** Put keystrokes into the code box, or stop. */
-  codeFocus(on: boolean): void;
+  codeFocus(on: boolean): void
   /** Empty the box and keep typing. */
-  codeClear(): void;
+  codeClear(): void
   /** Fill the box from the clipboard — it does not commit anything on its own. */
-  codePaste(): void;
+  codePaste(): void
   /** Decode whatever is in the box and add that lock to the player's own. */
-  codeSubmit(): void;
+  codeSubmit(): void
   /** Prime a lock for deletion, or clear whatever was primed. One at a time. */
-  armDelete(slug: string | null): void;
-  deleteCustomLock(index: number): void;
+  armDelete(slug: string | null): void
+  deleteCustomLock(index: number): void
   /** Step the codes screen through the player's own locks, six at a time. */
-  codesPageBy(delta: number): void;
+  codesPageBy(delta: number): void
   /** Step the trophy case a page at a time — compact only, where it pages (D-129). */
-  trophyPageBy(delta: number): void;
+  trophyPageBy(delta: number): void
   /** Show a tier on the bench. The bench draws one at a time (D-102). */
-  benchTier(tier: number): void;
+  benchTier(tier: number): void
   /** Show one of the help screen's three pages (D-103). */
-  helpPage(page: number): void;
+  helpPage(page: number): void
   /** Open the repository in a new tab. */
-  openRepo(): void;
+  openRepo(): void
   /** Open a pre-filled GitHub issue for whatever is on screen (D-102). */
-  reportIssue(): void;
-  editorTest(): void;
-  editorSave(): void;
-  editorReset(): void;
+  reportIssue(): void
+  editorTest(): void
+  editorSave(): void
+  editorReset(): void
 }
 
 export interface ShellContext {
-  vp: Viewport;
-  p: Palette;
-  ui: Ui;
-  progress: Progress;
-  actions: ShellActions;
+  vp: Viewport
+  p: Palette
+  ui: Ui
+  progress: Progress
+  actions: ShellActions
   /** Filled in on the results screen. */
-  outcome?: AttemptOutcome;
-  result?: AttemptResult | null;
+  outcome?: AttemptOutcome
+  result?: AttemptResult | null
   /** Message shown along the bottom of whichever screen is up. */
-  status?: string;
+  status?: string
   /** Challenge modifiers the player has opted into for the next attempt. */
-  challenges?: readonly string[];
+  challenges?: readonly string[]
   /** True when the next lock picked from the bench will be an inspection (D-092). */
-  inspectNext?: boolean;
+  inspectNext?: boolean
   /** The lock being built, on the editor screen (D-080). */
-  draft?: Draft;
+  draft?: Draft
   /** True while keystrokes are going into the draft's name instead of anywhere else. */
-  editingName?: boolean;
+  editingName?: boolean
   // ── The codes screen (D-101) ──
   /** What is typed into the share-code box. */
-  codeEntry?: string;
+  codeEntry?: string
   /** True while keystrokes are going into that box. */
-  codeFocus?: boolean;
+  codeFocus?: boolean
   /** Whether this device can vibrate — the settings screen says so when it cannot (D-131). */
-  hapticsSupported?: boolean;
+  hapticsSupported?: boolean
   /** Which page of the player's own locks is showing. */
-  codesPage?: number;
+  codesPage?: number
   /** Which page of the trophy case is showing on a phone. */
-  trophyPage?: number;
+  trophyPage?: number
   /** Which tier the bench is showing. Undefined means "the deepest one they have reached". */
-  benchTier?: number;
+  benchTier?: number
   /** Which of the help screen's three pages is showing (D-103). */
-  helpPage?: number;
+  helpPage?: number
   /** Slug of the lock whose delete is primed, if any. */
-  armedDelete?: string | null;
+  armedDelete?: string | null
 }
 
 // ── Shared chrome ───────────────────────────────────────────────────────────────────────
@@ -203,32 +183,44 @@ export interface ShellContext {
  * actions to open a tab. One frame, one place, so the link is on every page the player can be on
  * when they notice something wrong. See DECISIONS D-102.
  */
-export function screenFrame(
-  c: ShellContext,
-  title: string,
-  status: string,
-): void {
-  const { vp, p, ui, actions } = c;
-  const { ctx } = vp;
-  ctx.save();
-  ctx.lineWidth = STROKE.hairline;
-  ctx.strokeStyle = p.rule;
+export function screenFrame(c: ShellContext, title: string, status: string): void {
+  const { vp, p, ui, actions } = c
+  const { ctx } = vp
+  ctx.save()
+  ctx.lineWidth = STROKE.hairline
+  ctx.strokeStyle = p.rule
   ctx.strokeRect(
     snapX(vp, MARGIN, STROKE.hairline),
     snapY(vp, MARGIN, STROKE.hairline),
     LOGICAL_WIDTH - MARGIN * 2,
     LOGICAL_HEIGHT - MARGIN * 2,
-  );
-  ctx.restore();
+  )
+  ctx.restore()
   label(ctx, title, MARGIN + 28, MARGIN + 52, {
-    font: font(TYPE.title),
-    size: TYPE.title,
+    font: font(typeFor(vp, TYPE.title)),
+    size: typeFor(vp, TYPE.title),
     color: p.ink,
-  });
-  text(ctx, status, MARGIN + 28, LOGICAL_HEIGHT - MARGIN - 24, {
-    font: font(TYPE.dimension),
-    color: p.inkLight,
-  });
+  })
+  /*
+   * The status line and the report link swap corners on a phone — DECISIONS D-132.
+   *
+   * The link moved to the bottom-left to get an outward link out of the right thumb's rest, and
+   * that is where this caption has always sat. One of them has to move, and the caption is the one
+   * that can: it is read, not pressed, so it does not care which corner it is in, while the link
+   * being under a thumb was the entire point of moving it.
+   */
+  const statusRight = isCompact(vp)
+  text(
+    ctx,
+    status,
+    statusRight ? LOGICAL_WIDTH - MARGIN - 28 : MARGIN + 28,
+    LOGICAL_HEIGHT - MARGIN - 24,
+    {
+      font: font(typeFor(vp, TYPE.dimension)),
+      color: p.inkLight,
+      ...(statusRight ? { align: 'right' as const } : {}),
+    },
+  )
 
   /**
    * Report an issue, in the corner of every page — as a **button**, not a caption.
@@ -241,23 +233,26 @@ export function screenFrame(
    * the body — the context a reporter cannot be expected to think of and the game already has. The
    * player supplies the only part that is actually theirs, which is what went wrong.
    */
-  const linkState = ui.widget(REPORT_LINK);
-  cardFrame(vp, p, REPORT_LINK, linkState, false);
+  const report = reportLink(vp)
+  const reportSize = typeFor(vp, TYPE.body)
+  if (!outwardLinksOn(vp, title)) return
+  const linkState = ui.widget(report)
+  cardFrame(vp, p, report, linkState, false)
   label(
     ctx,
-    "report an issue ↗",
-    REPORT_LINK.x + REPORT_LINK.w / 2,
-    REPORT_LINK.y + 27,
+    'report an issue ↗',
+    report.x + report.w / 2,
+    report.y + report.h / 2 + reportSize * 0.36,
     {
-      font: font(TYPE.body),
-      size: TYPE.body,
+      font: font(reportSize),
+      size: reportSize,
       color: linkState.hovered ? readableAccents(p).teal : p.ink,
-      align: "center",
+      align: 'center',
     },
-  );
+  )
   // Keyboard only: a mouse click is handled synchronously in the pointer event so the browser
   // treats the tab as user-opened (D-103), and never reaches the widget layer.
-  if (linkState.activated) actions.reportIssue();
+  if (linkState.activated) actions.reportIssue()
 }
 
 /**
@@ -266,18 +261,56 @@ export function screenFrame(
  * Exported because they are hit-tested twice: here, for drawing and for keyboard focus, and again
  * in the pointer event itself, which is the only place a browser will let a tab be opened (D-103).
  */
-export const REPORT_LINK: Rect = {
-  x: LOGICAL_WIDTH - MARGIN - 290,
-  y: LOGICAL_HEIGHT - MARGIN - 54,
-  w: 262,
-  h: 40,
-};
-export const FORK_LINK: Rect = {
-  x: LOGICAL_WIDTH - MARGIN - 330,
-  y: MARGIN + 34,
-  w: 302,
-  h: 40,
-};
+/**
+ * Both grow with the type they carry — DECISIONS D-132.
+ *
+ * They were fixed 262x40 and 302x40 boxes holding a caption that scales, so on a phone `button`'s
+ * shrink-to-fit ground both labels down to about seven CSS px. Functions rather than constants
+ * because the size depends on the viewport, and both are hit-tested in two places — here for
+ * drawing and focus, and again inside the pointer event, which is the only place a browser will
+ * open a tab (D-103). One definition each, taking the viewport, keeps those two in step.
+ */
+/**
+ * Bottom-**left** on a phone, not bottom-right — DECISIONS D-132.
+ *
+ * Held in landscape, a phone puts the right thumb in the bottom-right corner: it is the most
+ * reachable spot on the screen, and it was occupied by an **outward link** that leaves the game and
+ * opens a browser tab. Every screen's real content is also laid out from the left, so on a phone
+ * the grid grows toward that corner and finishes flush against it — on the codes page the roster's
+ * COPY buttons and this link shared a hit band, and the widget layer has no z-order, so one tap
+ * would copy a code and open GitHub at the same time.
+ *
+ * The bottom-left is the one corner nothing else wants: the status line is there, and it is a
+ * caption rather than a control. On a full page it stays where it has always been.
+ */
+/**
+ * Whether the outward links are drawn at all on this screen — DECISIONS D-135.
+ *
+ * `report an issue` was on every framed screen and `fork me on GitHub` on the menu, both as
+ * full-size buttons, because on a full page a link in a corner costs nothing. On a phone a corner
+ * *is* the page: the report button is the largest control on Trophies, and the fork button is the
+ * largest thing on the menu after the destinations — and both of them **leave the game**.
+ *
+ * On a phone the report link keeps the two screens somebody is on when they want it — the title
+ * screen and Settings — and the fork link, which is for developers, goes entirely. Exported so the
+ * pointer-event path that actually opens the tab (D-103) cannot disagree with what is drawn.
+ */
+export function outwardLinksOn(vp: Viewport, title: string): boolean {
+  if (!isCompact(vp)) return true
+  return title === 'Shear line' || title === 'Settings'
+}
+
+export function reportLink(vp: Viewport): Rect {
+  const box = boxForCaption(vp, 'report an issue ↗', typeFor(vp, TYPE.body), { w: 262, h: 40 })
+  const y = LOGICAL_HEIGHT - MARGIN - 14 - box.h
+  if (!isCompact(vp)) return { x: LOGICAL_WIDTH - MARGIN - 28 - box.w, y, ...box }
+  return { x: MARGIN + 28, y, ...box }
+}
+
+export function forkLink(vp: Viewport): Rect {
+  const box = boxForCaption(vp, 'fork me on GitHub ↗', typeFor(vp, TYPE.body), { w: 302, h: 40 })
+  return { x: LOGICAL_WIDTH - MARGIN - 28 - box.w, y: MARGIN + 34, ...box }
+}
 
 /**
  * Navigation, in the same corner on every screen.
@@ -291,41 +324,52 @@ export const FORK_LINK: Rect = {
  * Laid out **right to left**, so the way out is always the rightmost button and always in the same
  * place, whatever else a screen puts beside it. See DECISIONS D-103.
  */
-function navBar(
-  c: ShellContext,
-  items: readonly (readonly [string, () => void])[],
-): void {
-  const { vp, p, ui } = c;
-  const w = 150;
-  const gap = 20;
+/**
+ * The nav row, sized from its own captions — DECISIONS D-132.
+ *
+ * It was a fixed 150x40 on every screen in the game, which is 54x14 CSS px on a phone: `button`
+ * shrank each caption to half the box height and drew `MENU` at seven pixels. Reported as *"the
+ * buttons appeared on right top corner are extra small"*, and it was the single most repeated
+ * finding in the layout sweep because this row is on eight screens.
+ *
+ * Each button now takes the width its own word needs, so `SHARE CODES` and `MENU` are no longer
+ * the same size — which is also the honest look for a row of links.
+ */
+function navBar(c: ShellContext, items: readonly (readonly [string, () => void])[]): void {
+  const { vp, p, ui } = c
+  const size = typeFor(vp, TYPE.body)
+  const gap = isCompact(vp) ? 14 : 20
+  const boxes = items.map(([caption]) => boxForCaption(vp, caption, size, { w: 150, h: 40 }))
+  const h = boxes.reduce((m, b) => Math.max(m, b.h), 0)
+  const total = boxes.reduce((sum, b) => sum + b.w, 0) + gap * Math.max(0, items.length - 1)
+  // Laid out left to right from a right-aligned block, so tab order still matches reading order.
+  let x = LOGICAL_WIDTH - MARGIN - 28 - total
   items.forEach(([caption, go], i) => {
-    const x =
-      LOGICAL_WIDTH - MARGIN - 28 - w - (items.length - 1 - i) * (w + gap);
-    if (button(vp, p, ui, { x, y: MARGIN + 24, w, h: 40 }, caption)) go();
-  });
+    const box = boxes[i] ?? { w: 150, h }
+    if (button(vp, p, ui, { x, y: MARGIN + 24, w: box.w, h }, caption)) go()
+    x += box.w + gap
+  })
 }
 
 function creditLine(progress: Progress): string {
   // Was a credit balance. Ranks are the score now (D-091), so the line says how far along the
   // ladder the bench actually is rather than how much dead money is in it.
-  const counted = ALL_LOCKS.filter((d) =>
-    countsForTier(progress.record(d.slug).bestRank),
-  ).length;
-  return `${counted}/${ALL_LOCKS.length} locks ranked D or better`;
+  const counted = ALL_LOCKS.filter((d) => countsForTier(progress.record(d.slug).bestRank)).length
+  return `${counted}/${ALL_LOCKS.length} locks ranked D or better`
 }
 
 // ── Menu ────────────────────────────────────────────────────────────────────────────────
 
 export function drawMenu(c: ShellContext): void {
-  const { vp, p, ui, progress, actions } = c;
-  screenFrame(c, "Shear line", c.status ?? creditLine(progress));
-  const { ctx } = vp;
+  const { vp, p, ui, progress, actions } = c
+  screenFrame(c, 'Shear line', c.status ?? creditLine(progress))
+  const { ctx } = vp
 
-  label(ctx, "a lockpicking simulator", MARGIN + 28, MARGIN + 84, {
-    font: font(TYPE.body),
-    size: TYPE.body,
+  label(ctx, 'a lockpicking simulator', MARGIN + 28, MARGIN + 84, {
+    font: font(typeFor(vp, TYPE.body)),
+    size: typeFor(vp, TYPE.body),
     color: p.inkLight,
-  });
+  })
 
   /**
    * Fork me on GitHub — top right, where that has lived on every project page since 2008.
@@ -333,22 +377,20 @@ export function drawMenu(c: ShellContext): void {
    * Drawn rather than a ribbon graphic: the game has no images and this screen has a house style,
    * and a corner ribbon in someone else's palette would be the only bitmap in the build.
    */
-  const forkState = ui.widget(FORK_LINK);
-  cardFrame(vp, p, FORK_LINK, forkState, false);
-  label(
-    ctx,
-    "fork me on GitHub ↗",
-    FORK_LINK.x + FORK_LINK.w / 2,
-    FORK_LINK.y + 28,
-    {
-      font: font(TYPE.body),
-      size: TYPE.body,
-      color: forkState.hovered ? readableAccents(p).teal : p.ink,
-      align: "center",
-    },
-  );
-  // Keyboard only — see `REPORT_LINK` (D-103).
-  if (forkState.activated) actions.openRepo();
+  const fork = forkLink(vp)
+  const forkSize = typeFor(vp, TYPE.body)
+  if (!isCompact(vp)) {
+  const forkState = ui.widget(fork)
+  cardFrame(vp, p, fork, forkState, false)
+  label(ctx, 'fork me on GitHub ↗', fork.x + fork.w / 2, fork.y + fork.h / 2 + forkSize * 0.36, {
+    font: font(forkSize),
+    size: forkSize,
+    color: forkState.hovered ? readableAccents(p).teal : p.ink,
+    align: 'center',
+  })
+  // Keyboard only — see `reportLink` (D-103).
+  if (forkState.activated) actions.openRepo()
+  }
 
   /**
    * Taller, wider buttons on a phone, and the row of them centred in what is left.
@@ -361,7 +403,7 @@ export function drawMenu(c: ShellContext): void {
    * The button stack is the whole screen on a phone: the side columns go (see below), so the row
    * can take the width it needs and start higher up. See DECISIONS D-122.
    */
-  const compact = isCompact(vp);
+  const compact = isCompact(vp)
   /**
    * On a phone the stack becomes a grid, and the buttons are sized from the finger floor (D-131).
    *
@@ -374,16 +416,14 @@ export function drawMenu(c: ShellContext): void {
    * fixed number would be right on one phone by luck. Clamped so a very small viewport cannot eat
    * the title and a large one cannot produce a button the size of a door.
    */
-  const w = compact ? 760 : 380;
-  const h = compact
-    ? Math.round(Math.min(Math.max(touchFloorFor(vp), 96), 150))
-    : 56;
-  const x = (LOGICAL_WIDTH - w) / 2;
-  const y = compact ? 236 : 320;
+  const w = compact ? 760 : 380
+  const h = compact ? Math.round(Math.min(Math.max(touchFloorFor(vp), 96), 150)) : 56
+  const x = (LOGICAL_WIDTH - w) / 2
+  const y = compact ? 236 : 320
   // Compact `gap` is the air *between* buttons; the flat layout's is a pitch. Hence `pitch` below.
-  const gap = compact ? 24 : 74;
-  const pitch = compact ? h + gap : gap;
-  const colW = compact ? (w - gap) / 2 : w;
+  const gap = compact ? 24 : 74
+  const pitch = compact ? h + gap : gap
+  const colW = compact ? (w - gap) / 2 : w
   /** The i-th non-primary entry. Two across on a phone, one under the next everywhere else. */
   const entry = (i: number): Rect =>
     compact
@@ -393,21 +433,17 @@ export function drawMenu(c: ShellContext): void {
           w: colW,
           h,
         }
-      : { x, y: y + pitch * (1 + i), w, h };
+      : { x, y: y + pitch * (1 + i), w, h }
 
   // A brand-new player is sent to the first lesson, not to a wall of thirty-five locks. The
   // game is unusually unforgiving of not knowing what tension is for, and "Start picking"
   // dropping someone straight onto the bench was an invitation to bounce off it.
-  const taught = progress.data.tutorial.length > 0;
-  const hasProgress = progress.totalOpens > 0;
-  const primaryCaption = !taught
-    ? "Start the tutorial"
-    : hasProgress
-      ? "Continue"
-      : "Start picking";
+  const taught = progress.data.tutorial.length > 0
+  const hasProgress = progress.totalOpens > 0
+  const primaryCaption = !taught ? 'Start the tutorial' : hasProgress ? 'Continue' : 'Start picking'
   if (button(vp, p, ui, { x, y, w, h }, primaryCaption, { primary: true })) {
-    if (taught) actions.goto("bench");
-    else actions.startLesson(LESSONS[0]?.id ?? "lesson-1");
+    if (taught) actions.goto('bench')
+    else actions.startLesson(LESSONS[0]?.id ?? 'lesson-1')
   }
   /**
    * Beside the button it is about — on the **left**, which is the side with nothing on it.
@@ -418,23 +454,17 @@ export function drawMenu(c: ShellContext): void {
    * the button stack puts it beside its button with nothing to collide with.
    */
   if (!taught && !compact) {
-    label(
-      ctx,
-      "five minutes, and the rest of the game makes sense",
-      x - 24,
-      y + h / 2 + 6,
-      {
-        font: font(TYPE.dimension),
-        size: TYPE.dimension,
-        color: p.inkLight,
-        align: "right",
-      },
-    );
+    label(ctx, 'five minutes, and the rest of the game makes sense', x - 24, y + h / 2 + 6, {
+      font: font(typeFor(vp, TYPE.dimension)),
+      size: typeFor(vp, TYPE.dimension),
+      color: p.inkLight,
+      align: 'right',
+    })
   }
-  if (button(vp, p, ui, entry(0), "Bench")) actions.goto("bench");
-  if (button(vp, p, ui, entry(1), "Trophies")) actions.goto("trophies");
+  if (button(vp, p, ui, entry(0), 'Bench')) actions.goto('bench')
+  if (button(vp, p, ui, entry(1), 'Trophies')) actions.goto('trophies')
   // Between the trophies and the settings on purpose: it is a place to *go*, not a preference.
-  if (button(vp, p, ui, entry(2), "Share codes")) actions.goto("codes");
+  if (button(vp, p, ui, entry(2), 'Share codes')) actions.goto('codes')
   /**
    * The editor, which had no way in from here (D-128).
    *
@@ -443,9 +473,9 @@ export function drawMenu(c: ShellContext): void {
    * findable only by guessing which other screen linked to it. Reported as *"no editor at the
    * menu"*. It sits after Share codes because the two belong together: build one, then send it.
    */
-  if (button(vp, p, ui, entry(3), "Editor")) actions.goto("editor");
-  if (button(vp, p, ui, entry(4), "Help")) actions.goto("help");
-  if (button(vp, p, ui, entry(5), "Settings")) actions.goto("settings");
+  if (button(vp, p, ui, entry(3), 'Editor')) actions.goto('editor')
+  if (button(vp, p, ui, entry(4), 'Help')) actions.goto('help')
+  if (button(vp, p, ui, entry(5), 'Settings')) actions.goto('settings')
 
   /*
    * A domain used to be drawn here and on the codes screen. It named a host nobody had registered,
@@ -470,7 +500,7 @@ export function drawMenu(c: ShellContext): void {
    * buttons is the crowding the request was about. The blurb is on the page they came from and
    * the trophies have a screen of their own.
    */
-  const earned = progress.data.achievements;
+  const earned = progress.data.achievements
   if (compact) {
     // Nothing beside the buttons.
   } else if (earned.length === 0) {
@@ -481,39 +511,39 @@ export function drawMenu(c: ShellContext): void {
      * exactly backwards: the person who needs telling is the one who has never played. Three
      * sentences, replaced by their own trophies the moment there are any (D-099).
      */
-    const bx = LOGICAL_WIDTH - MARGIN - 520;
-    label(ctx, "what this is", bx, 320, {
-      font: font(TYPE.dimension),
-      size: TYPE.dimension,
+    const bx = LOGICAL_WIDTH - MARGIN - 520
+    label(ctx, 'what this is', bx, 320, {
+      font: font(typeFor(vp, TYPE.dimension)),
+      size: typeFor(vp, TYPE.dimension),
       color: p.inkLight,
-    });
+    })
     paragraph(
       ctx,
-      "A plug will not turn until every pin is caught on the shear line. Under torque it pinches " +
-        "one pin at a time: find that one by feel, and lift it until it catches.",
+      'A plug will not turn until every pin is caught on the shear line. Under torque it pinches ' +
+        'one pin at a time: find that one by feel, and lift it until it catches.',
       bx,
       356,
       {
-        font: font(TYPE.body),
+        font: font(typeFor(vp, TYPE.body)),
         color: p.ink,
         maxWidth: 480,
         lineHeight: 30,
         maxLines: 5,
       },
-    );
+    )
     paragraph(
       ctx,
-      "Nothing is random. Every lock is the same lock every time, so what improves is you.",
+      'Nothing is random. Every lock is the same lock every time, so what improves is you.',
       bx,
       516,
       {
-        font: font(TYPE.body),
+        font: font(typeFor(vp, TYPE.body)),
         color: p.inkLight,
         maxWidth: 480,
         lineHeight: 30,
         maxLines: 3,
       },
-    );
+    )
   }
   /**
    * The recent-trophy list is a side column too, and it was missed — DECISIONS D-128.
@@ -525,37 +555,37 @@ export function drawMenu(c: ShellContext): void {
    * — which is what an `else if` chain with an orphan `if` on the end does.
    */
   if (!compact && earned.length > 0) {
-    const tx = LOGICAL_WIDTH - MARGIN - 96;
-    label(ctx, "lately", tx, 320, {
-      font: font(TYPE.dimension),
-      size: TYPE.dimension,
+    const tx = LOGICAL_WIDTH - MARGIN - 96
+    label(ctx, 'lately', tx, 320, {
+      font: font(typeFor(vp, TYPE.dimension)),
+      size: typeFor(vp, TYPE.dimension),
       color: p.inkLight,
-      align: "right",
-    });
-    let ty = 350;
+      align: 'right',
+    })
+    let ty = 350
     for (const id of [...earned].reverse().slice(0, 5)) {
-      const a = ACHIEVEMENTS.find((x) => x.id === id);
-      if (!a) continue;
+      const a = ACHIEVEMENTS.find((x) => x.id === id)
+      if (!a) continue
       label(ctx, a.name, tx, ty, {
-        font: font(TYPE.body),
-        size: TYPE.body,
+        font: font(typeFor(vp, TYPE.body)),
+        size: typeFor(vp, TYPE.body),
         color: p.ink,
-        align: "right",
-      });
+        align: 'right',
+      })
       // 24 below the name, in a 58px row. At 17 and 46 — numbers set for a 13px body — the 21px
       // name's descenders sat inside the 17px condition underneath it (D-103).
       text(ctx, a.condition, tx, ty + 24, {
-        font: font(TYPE.dimension),
+        font: font(typeFor(vp, TYPE.dimension)),
         color: p.inkLight,
-        align: "right",
-      });
-      ty += 58;
+        align: 'right',
+      })
+      ty += 58
     }
     text(ctx, `${earned.length}/${ACHIEVEMENTS.length} earned`, tx, ty + 6, {
-      font: font(TYPE.dimension),
+      font: font(typeFor(vp, TYPE.dimension)),
       color: readableAccents(p).teal,
-      align: "right",
-    });
+      align: 'right',
+    })
   }
 
   /**
@@ -567,21 +597,21 @@ export function drawMenu(c: ShellContext): void {
    * screen reads as a mistake rather than a flourish, and on a phone the stack *is* the screen, so
    * there is nowhere for it to go but above.
    */
-  const lineY = isCompact(vp) ? 196 : 250;
-  ctx.save();
-  ctx.lineWidth = STROKE.heavy;
-  ctx.strokeStyle = p.ink;
-  ctx.beginPath();
-  ctx.moveTo(MARGIN, snapY(vp, lineY, STROKE.heavy));
-  ctx.lineTo(LOGICAL_WIDTH - MARGIN, snapY(vp, lineY, STROKE.heavy));
-  ctx.stroke();
-  ctx.restore();
-  label(ctx, "shear line", LOGICAL_WIDTH - MARGIN - 28, lineY - 12, {
-    font: font(TYPE.dimension),
-    size: TYPE.dimension,
+  const lineY = isCompact(vp) ? 196 : 250
+  ctx.save()
+  ctx.lineWidth = STROKE.heavy
+  ctx.strokeStyle = p.ink
+  ctx.beginPath()
+  ctx.moveTo(MARGIN, snapY(vp, lineY, STROKE.heavy))
+  ctx.lineTo(LOGICAL_WIDTH - MARGIN, snapY(vp, lineY, STROKE.heavy))
+  ctx.stroke()
+  ctx.restore()
+  label(ctx, 'shear line', LOGICAL_WIDTH - MARGIN - 28, lineY - 12, {
+    font: font(typeFor(vp, TYPE.dimension)),
+    size: typeFor(vp, TYPE.dimension),
     color: p.inkLight,
-    align: "right",
-  });
+    align: 'right',
+  })
 }
 
 // ── Bench ───────────────────────────────────────────────────────────────────────────────
@@ -610,8 +640,8 @@ export function drawMenu(c: ShellContext): void {
 // `CARD_H` went with the last screen that used it: the bench draws its own geometry now (D-102)
 // and the codes page draws `CODE_CARD_*`. `CARD_W` survives only as the width `CARDS_PER_ROW` is
 // derived from, which `benchHeight` still uses to count lesson rows.
-const CARD_W = 288;
-const CARD_GAP = 12;
+const CARD_W = 288
+const CARD_GAP = 12
 
 /**
  * Bench card geometry, for one tier at a time (D-102).
@@ -621,11 +651,11 @@ const CARD_GAP = 12;
  * size, a lock drawing big enough to tell a spool from a serrated pin, and stats with air round
  * them instead of stacked at 22px intervals.
  */
-const BENCH_COLS = 3;
-const BENCH_GAP = 24;
-const BENCH_CARD_H = 250;
+const BENCH_COLS = 3
+const BENCH_GAP = 24
+const BENCH_CARD_H = 250
 /** Bench card height on a phone: two columns and three rows have to fit above the status line. */
-const COMPACT_CARD_H = 210;
+const COMPACT_CARD_H = 210
 
 /**
  * Two to a row on a phone, not three — DECISIONS D-123.
@@ -639,15 +669,13 @@ const COMPACT_CARD_H = 210;
  * strip, which compact drops once the lessons are done — see `drawBench`.
  */
 function benchGrid(vp: Viewport): {
-  cols: number;
-  cardW: number;
-  cardH: number;
+  cols: number
+  cardW: number
+  cardH: number
 } {
-  const cols = isCompact(vp) ? 2 : BENCH_COLS;
-  const cardW = Math.floor(
-    (LOGICAL_WIDTH - (MARGIN + 28) * 2 - BENCH_GAP * (cols - 1)) / cols,
-  );
-  return { cols, cardW, cardH: isCompact(vp) ? COMPACT_CARD_H : BENCH_CARD_H };
+  const cols = isCompact(vp) ? 2 : BENCH_COLS
+  const cardW = Math.floor((LOGICAL_WIDTH - (MARGIN + 28) * 2 - BENCH_GAP * (cols - 1)) / cols)
+  return { cols, cardW, cardH: isCompact(vp) ? COMPACT_CARD_H : BENCH_CARD_H }
 }
 
 /**
@@ -671,18 +699,17 @@ function benchGrid(vp: Viewport): {
  * comfortable one you cannot.
  */
 function codeGrid(_vp: Viewport): {
-  cols: number;
-  cardW: number;
-  cardH: number;
+  cols: number
+  cardW: number
+  cardH: number
 } {
   const cardW = Math.floor(
-    (LOGICAL_WIDTH - (MARGIN + 28) * 2 - CARD_GAP * (CODE_COLS - 1)) /
-      CODE_COLS,
-  );
-  return { cols: CODE_COLS, cardW, cardH: CODE_CARD_H };
+    (LOGICAL_WIDTH - (MARGIN + 28) * 2 - CARD_GAP * (CODE_COLS - 1)) / CODE_COLS,
+  )
+  return { cols: CODE_COLS, cardW, cardH: CODE_CARD_H }
 }
 /** Lesson card height — one line of title over two of blurb, at the larger face. */
-const LESSON_H = 104;
+const LESSON_H = 104
 
 /**
  * Codes-page card geometry: five to a row, not six (D-102).
@@ -691,15 +718,19 @@ const LESSON_H = 104;
  * fixed by giving the name the full card, arriving again from the other direction. Five columns is
  * 353 wide, which fits every name in the game, and twenty shareable locks still land in four rows.
  */
-const CODE_COLS = 5;
-const CODE_CARD_H = 136;
-const BENCH_LEFT = MARGIN + 28;
-const BENCH_WIDTH = LOGICAL_WIDTH - BENCH_LEFT * 2;
+const CODE_COLS = 5
+/**
+ * 150, not 136 — DECISIONS D-132.
+ *
+ * The card carries a name, a drawing, its stats, its code and a row of three or four buttons, and
+ * 136 was measured against a stack that had no button row in it. Fourteen more pixels is what the
+ * roster can spare: four rows of them still land above the status line.
+ */
+const CODE_CARD_H = 150
+const BENCH_LEFT = MARGIN + 28
+const BENCH_WIDTH = LOGICAL_WIDTH - BENCH_LEFT * 2
 /** Cards per row, so a six-lock tier wraps instead of running off the page. */
-const CARDS_PER_ROW = Math.max(
-  1,
-  Math.floor((BENCH_WIDTH + CARD_GAP) / (CARD_W + CARD_GAP)),
-);
+const CARDS_PER_ROW = Math.max(1, Math.floor((BENCH_WIDTH + CARD_GAP) / (CARD_W + CARD_GAP)))
 
 /**
  * A small side-elevation line drawing of a lock, sized to the card.
@@ -726,104 +757,99 @@ function drawLockGlyph(
    */
   maxPinWidth = 4,
 ): void {
-  const { ctx } = vp;
-  const n = chambersOf(def);
-  const ink = locked ? p.rule : p.inkLight;
-  ctx.save();
-  ctx.lineWidth = STROKE.hairline;
-  ctx.strokeStyle = ink;
+  const { ctx } = vp
+  const n = chambersOf(def)
+  const ink = locked ? p.rule : p.inkLight
+  ctx.save()
+  ctx.lineWidth = STROKE.hairline
+  ctx.strokeStyle = ink
 
   // The two round families get a face, not a section: it is what they look like.
   if (
-    def.family === "disc-detainer" ||
-    def.family === "tubular" ||
-    def.family === "radial-slider"
+    def.family === 'disc-detainer' ||
+    def.family === 'tubular' ||
+    def.family === 'radial-slider'
   ) {
-    const cx = rect.x + rect.w / 2;
-    const cy = rect.y + rect.h / 2;
-    const r = Math.min(rect.w, rect.h) / 2 - 2;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.stroke();
-    if (def.family === "disc-detainer") {
+    const cx = rect.x + rect.w / 2
+    const cy = rect.y + rect.h / 2
+    const r = Math.min(rect.w, rect.h) / 2 - 2
+    ctx.beginPath()
+    ctx.arc(cx, cy, r, 0, Math.PI * 2)
+    ctx.stroke()
+    if (def.family === 'disc-detainer') {
       // Concentric discs, each with its gate notch at a different angle.
       for (let i = 0; i < Math.min(n, 5); i += 1) {
-        const rr = r * (1 - i / (Math.min(n, 5) + 1));
-        ctx.beginPath();
-        ctx.arc(cx, cy, rr, 0.5 + i * 1.1, 0.5 + i * 1.1 + Math.PI * 1.75);
-        ctx.stroke();
+        const rr = r * (1 - i / (Math.min(n, 5) + 1))
+        ctx.beginPath()
+        ctx.arc(cx, cy, rr, 0.5 + i * 1.1, 0.5 + i * 1.1 + Math.PI * 1.75)
+        ctx.stroke()
       }
     } else {
       // A fan of chambers around the core, and the shear circle through them.
-      ctx.beginPath();
-      ctx.arc(cx, cy, r * 0.36, 0, Math.PI * 2);
-      ctx.stroke();
+      ctx.beginPath()
+      ctx.arc(cx, cy, r * 0.36, 0, Math.PI * 2)
+      ctx.stroke()
       for (let i = 0; i < n; i += 1) {
-        const a = -Math.PI / 2 + (i / n) * Math.PI * 2;
-        ctx.beginPath();
-        ctx.moveTo(cx + Math.cos(a) * r * 0.36, cy + Math.sin(a) * r * 0.36);
-        ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
-        ctx.stroke();
+        const a = -Math.PI / 2 + (i / n) * Math.PI * 2
+        ctx.beginPath()
+        ctx.moveTo(cx + Math.cos(a) * r * 0.36, cy + Math.sin(a) * r * 0.36)
+        ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r)
+        ctx.stroke()
       }
     }
-    ctx.restore();
-    return;
+    ctx.restore()
+    return
   }
 
-  const bodyW = rect.w;
-  const bodyH = rect.h;
-  const x = rect.x;
-  const y = rect.y;
-  const shear = y + bodyH * 0.5;
+  const bodyW = rect.w
+  const bodyH = rect.h
+  const x = rect.x
+  const y = rect.y
+  const shear = y + bodyH * 0.5
   // Shell above, plug below, in the two brasses the cutaway uses — so a card reads as a small
   // picture of the thing you are about to open rather than as an abstract diagram (D-050). Muted
   // right down on a locked card, where the whole glyph is a ghost.
   if (!locked) {
-    ctx.save();
-    ctx.globalAlpha = 0.5;
-    ctx.fillStyle = p.shellBody;
-    ctx.fillRect(x, y, bodyW, shear - y);
-    ctx.fillStyle = p.plugBody;
-    ctx.fillRect(x, shear, bodyW, y + bodyH - shear);
-    ctx.restore();
+    ctx.save()
+    ctx.globalAlpha = 0.5
+    ctx.fillStyle = p.shellBody
+    ctx.fillRect(x, y, bodyW, shear - y)
+    ctx.fillStyle = p.plugBody
+    ctx.fillRect(x, shear, bodyW, y + bodyH - shear)
+    ctx.restore()
   }
-  ctx.strokeRect(snapX(vp, x, 1), snapY(vp, y, 1), bodyW, bodyH);
+  ctx.strokeRect(snapX(vp, x, 1), snapY(vp, y, 1), bodyW, bodyH)
 
-  ctx.beginPath();
-  ctx.moveTo(x, snapY(vp, shear, 1));
-  ctx.lineTo(x + bodyW, snapY(vp, shear, 1));
-  ctx.stroke();
+  ctx.beginPath()
+  ctx.moveTo(x, snapY(vp, shear, 1))
+  ctx.lineTo(x + bodyW, snapY(vp, shear, 1))
+  ctx.stroke()
 
   // The keyway, along the bottom of the plug.
-  const keyway = y + bodyH * 0.84;
-  ctx.beginPath();
-  ctx.moveTo(x + 2, snapY(vp, keyway, 1));
-  ctx.lineTo(x + bodyW - 2, snapY(vp, keyway, 1));
-  ctx.stroke();
+  const keyway = y + bodyH * 0.84
+  ctx.beginPath()
+  ctx.moveTo(x + 2, snapY(vp, keyway, 1))
+  ctx.lineTo(x + bodyW - 2, snapY(vp, keyway, 1))
+  ctx.stroke()
 
   // One stack per chamber, shaped by the pin it actually carries.
-  const pitch = bodyW / n;
-  const halfW = Math.max(1.5, Math.min(maxPinWidth, pitch * 0.26));
+  const pitch = bodyW / n
+  const halfW = Math.max(1.5, Math.min(maxPinWidth, pitch * 0.26))
   for (let i = 0; i < n; i += 1) {
-    const cx = snapX(vp, x + pitch * (i + 0.5), 1);
-    const profile = def.pins[i] ?? "standard";
-    const top = y + 3;
-    const bottom = keyway - 1;
-    if (profile === "wafer") {
+    const cx = snapX(vp, x + pitch * (i + 0.5), 1)
+    const profile = def.pins[i] ?? 'standard'
+    const top = y + 3
+    const bottom = keyway - 1
+    if (profile === 'wafer') {
       // One plate with a gate slot at the shear line.
-      ctx.strokeRect(
-        snapX(vp, cx - halfW, 1),
-        snapY(vp, top, 1),
-        halfW * 2,
-        bottom - top,
-      );
-      ctx.beginPath();
-      ctx.moveTo(cx - halfW, snapY(vp, shear - 1, 1));
-      ctx.lineTo(cx + halfW, snapY(vp, shear - 1, 1));
-      ctx.moveTo(cx - halfW, snapY(vp, shear + 1, 1));
-      ctx.lineTo(cx + halfW, snapY(vp, shear + 1, 1));
-      ctx.stroke();
-      continue;
+      ctx.strokeRect(snapX(vp, cx - halfW, 1), snapY(vp, top, 1), halfW * 2, bottom - top)
+      ctx.beginPath()
+      ctx.moveTo(cx - halfW, snapY(vp, shear - 1, 1))
+      ctx.lineTo(cx + halfW, snapY(vp, shear - 1, 1))
+      ctx.moveTo(cx - halfW, snapY(vp, shear + 1, 1))
+      ctx.lineTo(cx + halfW, snapY(vp, shear + 1, 1))
+      ctx.stroke()
+      continue
     }
     /**
      * Driver above the shear line, key pin below, and the silhouette narrowed wherever the profile
@@ -837,13 +863,13 @@ function drawLockGlyph(
      * Bands run bottom-up — index 0 sits against the key pin — and the glyph draws the driver top
      * down, hence `1 - mid / total`.
      */
-    const bands = PROFILES[profile].bands;
-    const total = bands.reduce((sum, b) => sum + b.length, 0) || 1;
-    const cuts: number[] = [];
-    let cursor = 0;
+    const bands = PROFILES[profile].bands
+    const total = bands.reduce((sum, b) => sum + b.length, 0) || 1
+    const cuts: number[] = []
+    let cursor = 0
     for (const band of bands) {
-      if (band.reduced) cuts.push(1 - (cursor + band.length / 2) / total);
-      cursor += band.length;
+      if (band.reduced) cuts.push(1 - (cursor + band.length / 2) / total)
+      cursor += band.length
     }
     /**
      * How far up and down the groove's shoulders run — scaled, not fixed at a pixel.
@@ -853,43 +879,43 @@ function drawLockGlyph(
      * as a plain rectangle — the one thing the preview exists to show. A quarter of the stack's
      * half-width is 1.0 at card size, so every card is unchanged (D-099).
      */
-    const nick = Math.max(1, halfW * 0.25);
-    ctx.beginPath();
-    ctx.moveTo(cx - halfW, snapY(vp, top, 1));
+    const nick = Math.max(1, halfW * 0.25)
+    ctx.beginPath()
+    ctx.moveTo(cx - halfW, snapY(vp, top, 1))
     for (const at of cuts) {
-      const yy = top + (shear - top) * at;
-      ctx.lineTo(cx - halfW, snapY(vp, yy - nick, 1));
-      ctx.lineTo(cx - halfW * 0.4, snapY(vp, yy, 1));
-      ctx.lineTo(cx - halfW, snapY(vp, yy + nick, 1));
+      const yy = top + (shear - top) * at
+      ctx.lineTo(cx - halfW, snapY(vp, yy - nick, 1))
+      ctx.lineTo(cx - halfW * 0.4, snapY(vp, yy, 1))
+      ctx.lineTo(cx - halfW, snapY(vp, yy + nick, 1))
     }
-    ctx.lineTo(cx - halfW, snapY(vp, shear, 1));
-    ctx.lineTo(cx + halfW, snapY(vp, shear, 1));
+    ctx.lineTo(cx - halfW, snapY(vp, shear, 1))
+    ctx.lineTo(cx + halfW, snapY(vp, shear, 1))
     for (const at of [...cuts].reverse()) {
-      const yy = top + (shear - top) * at;
-      ctx.lineTo(cx + halfW, snapY(vp, yy + nick, 1));
-      ctx.lineTo(cx + halfW * 0.4, snapY(vp, yy, 1));
-      ctx.lineTo(cx + halfW, snapY(vp, yy - nick, 1));
+      const yy = top + (shear - top) * at
+      ctx.lineTo(cx + halfW, snapY(vp, yy + nick, 1))
+      ctx.lineTo(cx + halfW * 0.4, snapY(vp, yy, 1))
+      ctx.lineTo(cx + halfW, snapY(vp, yy - nick, 1))
     }
-    ctx.lineTo(cx + halfW, snapY(vp, top, 1));
-    ctx.closePath();
-    ctx.stroke();
+    ctx.lineTo(cx + halfW, snapY(vp, top, 1))
+    ctx.closePath()
+    ctx.stroke()
     // The key pin, its height set by the bitting so a deep cut reads as a deep cut.
-    const cut = def.bitting[i] ?? 3;
-    const keyTop = shear + (bottom - shear) * (1 - Math.min(1, cut / 5));
+    const cut = def.bitting[i] ?? 3
+    const keyTop = shear + (bottom - shear) * (1 - Math.min(1, cut / 5))
     ctx.strokeRect(
       snapX(vp, cx - halfW * 0.8, 1),
       snapY(vp, keyTop, 1),
       halfW * 1.6,
       bottom - keyTop,
-    );
+    )
   }
-  ctx.restore();
+  ctx.restore()
 }
 
 export function drawBench(c: ShellContext): void {
-  const { vp, p, ui, progress, actions } = c;
-  const { ctx } = vp;
-  const inspecting = c.inspectNext ?? false;
+  const { vp, p, ui, progress, actions } = c
+  const { ctx } = vp
+  const inspecting = c.inspectNext ?? false
   /**
    * What study mode means goes in the **status line**, not floating under the button.
    *
@@ -903,47 +929,76 @@ export function drawBench(c: ShellContext): void {
    */
   screenFrame(
     c,
-    "Bench",
+    'Bench',
     c.status ??
       (inspecting
-        ? "study mode — pick any lock to feel it out. No clock, no rank, nothing recorded."
+        ? 'study mode — pick any lock to feel it out. No clock, no rank, nothing recorded.'
         : creditLine(progress)),
-  );
+  )
 
   navBar(c, [
-    ["Codes", () => actions.goto("codes")],
-    ["Editor", () => actions.goto("editor")],
-    ["Menu", () => actions.goto("menu")],
-  ]);
+    ['Codes', () => actions.goto('codes')],
+    ['Editor', () => actions.goto('editor')],
+    ['Menu', () => actions.goto('menu')],
+  ])
 
   // The lessons sit above Tier 1, always visible and always replayable — `GAME_DESIGN.md §10`
   // asks for both. Completed ones say so rather than disappearing: a player who wants to redo
   // the spool lesson three tiers later should not have to hunt for it.
-  let y = 120;
-  const taughtBasics = progress.data.tutorial.length > 0;
-  const grid = benchGrid(vp);
-  const compactBench = isCompact(vp);
-  // A heading with nothing under it is an orphan: it goes with the strip it heads (D-123).
-  const showLessons = !isCompact(vp) || !taughtBasics;
-  if (showLessons)
-    label(ctx, "lessons", BENCH_LEFT, y, {
+  let y = 120
+  const taughtBasics = progress.data.tutorial.length > 0
+  const grid = benchGrid(vp)
+  const compactBench = isCompact(vp)
+  /**
+   * A heading with nothing under it is an orphan: it goes with the strip it heads (D-123). And on a
+   * phone it goes anyway — DECISIONS D-134.
+   *
+   * It sits directly under the screen's own title, so the top of the bench read `BENCH` / `LESSONS`
+   * with nothing between them, and the line after it — *"start here, the locks unlock once you
+   * finish the first"* — already says both what the cards are and what to do with them. Three
+   * stacked lines of chrome before the first thing you can press.
+   */
+  /**
+   * Hidden when the lessons are **finished**, not when one of them is — DECISIONS D-136.
+   *
+   * D-123 dropped the strip on a phone because three cards permanently marked `done` are the least
+   * useful 104px on the page. That is true once they are all done, and it was gated on
+   * `taughtBasics`, which is `tutorial.length > 0` — *any* lesson. So finishing lesson one, which
+   * is the thing the bench spends its whole empty state telling you to do, deleted the only way to
+   * reach lessons two and three. They are unreachable from anywhere else: the menu's shortcut goes
+   * to `LESSONS[0]` and these cards are the only other `startLesson` call in the game.
+   */
+  const allLessonsDone = LESSONS.every((l) => progress.data.tutorial.includes(l.id))
+  const showLessons = !isCompact(vp) || !allLessonsDone
+  if (showLessons && !isCompact(vp))
+    label(ctx, 'lessons', BENCH_LEFT, y, {
       font: font(typeFor(vp, TYPE.heading)),
       size: typeFor(vp, TYPE.heading),
       color: p.ink,
-    });
+    })
   if (!taughtBasics) {
+    /*
+     * On its own line on a phone — DECISIONS D-132.
+     *
+     * It sat at `BENCH_LEFT + 160` on the heading's row, which put it under the nav bar. That was
+     * survivable while the nav buttons were 40px tall and unreadable; once they were sized to their
+     * own captions (D-132) the row grew and printed straight through this sentence. Beside a
+     * heading is a fine place for a remark on a 1920px page and never a fine place on a 660px one.
+     */
+    const hereSize = typeFor(vp, TYPE.body)
+    const stacked = isCompact(vp)
+    if (stacked) y += hereSize + 14
     text(
       ctx,
-      "start here — the locks below unlock once you finish the first one",
-      BENCH_LEFT + 160,
+      stacked
+        ? 'start here — the locks unlock once you finish the first'
+        : 'start here — the locks below unlock once you finish the first one',
+      stacked ? BENCH_LEFT : BENCH_LEFT + 160,
       y,
-      {
-        font: font(TYPE.body),
-        color: readableAccents(p).amber,
-      },
-    );
+      { font: font(hereSize), color: readableAccents(p).amber },
+    )
   }
-  y += 18;
+  y += 18
   /**
    * On a phone, the lesson strip goes once the lessons are done (D-123).
    *
@@ -956,36 +1011,52 @@ export function drawBench(c: ShellContext): void {
     LESSONS.forEach((lesson, i) => {
       // On the same three-column grid as the locks below, so the page has one rhythm rather than
       // two — and so a lesson's one-line summary is not cut to "…leaning" to fit a 288px card.
+      /**
+       * Wrapped into rows, and tall enough for its own type — DECISIONS D-132.
+       *
+       * The x was `BENCH_LEFT + (cardW + GAP) * i` with no row at all, which is fine at three
+       * columns and three lessons and wrong the moment the grid narrowed: D-122 took the compact
+       * bench to **two** columns, so the third lesson card has been drawn entirely off the right
+       * edge of the stage on every phone since. Nothing complained because nothing looks at what is
+       * outside the stage — the letterbox simply clips it.
+       *
+       * `LESSON_H` was 104 for a 21px title over two 17px lines. At the compact face that is a 38px
+       * title over two 35px lines, which is 108 before any padding, so the blurb printed out
+       * through the bottom border of its own card.
+       */
+      const lessonTitle = typeFor(vp, TYPE.body)
+      const lessonBlurb = typeFor(vp, TYPE.dimension)
+      const lessonH = Math.max(LESSON_H, lessonTitle + lessonBlurb * 2.3 + 46)
       const rect: Rect = {
-        x: BENCH_LEFT + (grid.cardW + BENCH_GAP) * i,
-        y,
+        x: BENCH_LEFT + (grid.cardW + BENCH_GAP) * (i % grid.cols),
+        y: y + Math.floor(i / grid.cols) * (lessonH + BENCH_GAP),
         w: grid.cardW,
-        h: LESSON_H,
-      };
-      const done = progress.data.tutorial.includes(lesson.id);
-      const st = ui.widget(rect);
-      cardFrame(vp, p, rect, st, false);
-      label(ctx, lesson.title, rect.x + 18, rect.y + 32, {
-        font: font(TYPE.body),
-        size: TYPE.body,
+        h: lessonH,
+      }
+      const done = progress.data.tutorial.includes(lesson.id)
+      const st = ui.widget(rect)
+      cardFrame(vp, p, rect, st, false)
+      label(ctx, lesson.title, rect.x + 18, rect.y + 18 + lessonTitle, {
+        font: font(lessonTitle),
+        size: lessonTitle,
         color: p.ink,
-      });
-      paragraph(ctx, lesson.teaches, rect.x + 18, rect.y + 60, {
-        font: font(TYPE.dimension),
+      })
+      paragraph(ctx, lesson.teaches, rect.x + 18, rect.y + 30 + lessonTitle + lessonBlurb, {
+        font: font(lessonBlurb),
         color: p.inkLight,
         maxWidth: rect.w - 36,
-        lineHeight: 22,
+        lineHeight: lessonBlurb + 5,
         maxLines: 2,
-      });
+      })
       if (done) {
-        text(ctx, "done", rect.x + rect.w - 18, rect.y + 32, {
-          font: font(TYPE.dimension),
+        text(ctx, 'done', rect.x + rect.w - 18, rect.y + 18 + lessonTitle, {
+          font: font(lessonBlurb),
           color: readableAccents(p).teal,
-          align: "right",
-        });
+          align: 'right',
+        })
       }
-      if (st.activated) actions.startLesson(lesson.id);
-    });
+      if (st.activated) actions.startLesson(lesson.id)
+    })
   /**
    * 46, not 18 — the tier strip was drawn 4px *inside* the lesson cards.
    *
@@ -994,7 +1065,15 @@ export function drawBench(c: ShellContext): void {
    * through the bottom border of the lesson card above them. Two bordered boxes sharing an edge
    * read as one broken box. 46 leaves a clean 24px. See DECISIONS D-109.
    */
-  y += (showLessons ? LESSON_H : 0) + 46;
+  // Counts the rows the lessons actually occupy — two columns means two rows for three lessons.
+  const lessonRowsDrawn = showLessons ? Math.ceil(LESSONS.length / grid.cols) : 0
+  const lessonBlockH = showLessons
+    ? lessonRowsDrawn *
+        (Math.max(LESSON_H, typeFor(vp, TYPE.body) + typeFor(vp, TYPE.dimension) * 2.3 + 46) +
+          BENCH_GAP) -
+      BENCH_GAP
+    : 0
+  y += lessonBlockH + 46
 
   /**
    * One tier at a time, chosen from a row of buttons — the bench used to be all twenty-five at once.
@@ -1012,19 +1091,12 @@ export function drawBench(c: ShellContext): void {
    * away — `ART_DIRECTION.md §7` wants aspiration visible, and a row of buttons showing three
    * locked tiers does that as honestly as three rows of hatched cards did. See DECISIONS D-102.
    */
-  const tiers = [...new Set(ALL_LOCKS.map((d) => d.tier))].sort(
-    (a, b) => a - b,
-  );
-  const openTiers = tiers.filter(
-    (t) => taughtBasics && progress.isTierUnlocked(t),
-  );
+  const tiers = [...new Set(ALL_LOCKS.map((d) => d.tier))].sort((a, b) => a - b)
+  const openTiers = tiers.filter((t) => taughtBasics && progress.isTierUnlocked(t))
   // Land on the deepest tier the player has actually reached rather than always on Tier 1: that is
   // where they left off, and it saves a click on every visit for everybody past the first hour.
-  const fallback = openTiers[openTiers.length - 1] ?? tiers[0] ?? 1;
-  const tier =
-    c.benchTier !== undefined && tiers.includes(c.benchTier)
-      ? c.benchTier
-      : fallback;
+  const fallback = openTiers[openTiers.length - 1] ?? tiers[0] ?? 1
+  const tier = c.benchTier !== undefined && tiers.includes(c.benchTier) ? c.benchTier : fallback
   /*
    * The word "tiers" beside four buttons that say TIER 1, TIER 2, TIER 3, TIER 4 (D-130).
    *
@@ -1035,30 +1107,54 @@ export function drawBench(c: ShellContext): void {
    * where there is no room.
    */
   if (!isCompact(vp))
-    label(ctx, "tiers", BENCH_LEFT, y + 4, {
-      font: font(TYPE.dimension),
-      size: TYPE.dimension,
+    label(ctx, 'tiers', BENCH_LEFT, y + 4, {
+      font: font(typeFor(vp, TYPE.dimension)),
+      size: typeFor(vp, TYPE.dimension),
       color: p.inkLight,
-    });
+    })
+  /**
+   * The tier strip: flush left, and sized from its own captions — DECISIONS D-132.
+   *
+   * The 90px indent was the gap the word `tiers` used to sit in. D-131 dropped that word on a phone
+   * and left the indent, so the row of buttons stood 90px to the right of the cards beneath it —
+   * reported as *"tiers are not aligned to the left"*. It is not a compact-only indent either: the
+   * label is 46px wide with 44 of air after it, so on a full page the row never lined up with the
+   * grid either, it just had something in the gap.
+   *
+   * Widths come from the captions, so `TIER 1` is a readable button rather than a 96px box holding
+   * seven-CSS-pixel type.
+   */
+  const tierSize = typeFor(vp, TYPE.body)
+  const tierBox = boxForCaption(vp, 'tier 4', tierSize, { w: 96, h: 40 })
+  const tierGap = isCompact(vp) ? 14 : 12
+  const tierLeft = isCompact(vp) ? BENCH_LEFT : BENCH_LEFT + 90
   tiers.forEach((t, i) => {
-    const open = taughtBasics && progress.isTierUnlocked(t);
+    const open = taughtBasics && progress.isTierUnlocked(t)
     const rect: Rect = {
-      x: BENCH_LEFT + 90 + i * 108,
+      x: tierLeft + i * (tierBox.w + tierGap),
       y: y - 22,
-      w: 96,
-      h: 40,
-    };
-    if (button(vp, p, ui, rect, `tier ${t}`, { primary: t === tier }))
-      actions.benchTier(t);
-    if (!open) {
-      // A padlock would be a second icon language on a screen that has none. The word is clearer.
-      text(ctx, "locked", rect.x + rect.w / 2, rect.y + rect.h + 18, {
-        font: font(TYPE.dimension),
-        color: p.inkLight,
-        align: "center",
-      });
+      w: tierBox.w,
+      h: tierBox.h,
     }
-  });
+    if (button(vp, p, ui, rect, `tier ${t}`, { primary: t === tier })) actions.benchTier(t)
+    /*
+     * The per-tier "locked" captions go on a phone — DECISIONS D-134.
+     *
+     * Four of them, under four buttons, on a screen that already says *"locked — finish the first
+     * lesson above"* and *"tier 1 — 5 locks, after the first lesson"*. Three ways of saying one
+     * thing, and the row of captions is the one that adds nothing: an unlocked tier button is drawn
+     * in ink and a locked one is not, so the state is already on the button.
+     */
+    if (!open && !isCompact(vp)) {
+      // A padlock would be a second icon language on a screen that has none. The word is clearer.
+      const lockSize = typeFor(vp, TYPE.dimension)
+      text(ctx, 'locked', rect.x + rect.w / 2, rect.y + rect.h + lockSize + 2, {
+        font: font(lockSize),
+        color: p.inkLight,
+        align: 'center',
+      })
+    }
+  })
   /**
    * Inspect mode, on the tier strip — the bench's own row of controls.
    *
@@ -1071,186 +1167,220 @@ export function drawBench(c: ShellContext): void {
    * put it straight through the third lesson card. Beside the tier buttons it sits with the other
    * control that changes what this screen is showing. See DECISIONS D-103.
    */
+  const inspectBox = boxForCaption(vp, 'Inspecting', tierSize, { w: 190, h: 40 })
   if (
     button(
       vp,
       p,
       ui,
-      { x: LOGICAL_WIDTH - MARGIN - 28 - 190, y: y - 22, w: 190, h: 40 },
-      inspecting ? "Inspecting" : "Inspect",
+      {
+        x: LOGICAL_WIDTH - MARGIN - 28 - inspectBox.w,
+        y: y - 22,
+        w: inspectBox.w,
+        h: Math.max(inspectBox.h, tierBox.h),
+      },
+      inspecting ? 'Inspecting' : 'Inspect',
       { primary: inspecting },
     )
   ) {
-    actions.toggleInspect();
+    actions.toggleInspect()
   }
 
-  // 66, not 58: the `locked` captions hang 36px below the button row and the tier's own line has to
-  // clear their descenders, not just their baselines.
-  y += 66;
+  // The row's own height plus the `locked` captions that hang under it — measured, because both
+  // grow with the type now and 66 was a literal tuned against a 40px button (D-132).
+  y += tierBox.h + typeFor(vp, TYPE.dimension) + 26
 
   {
     // The first lesson gates the whole bench. It is five minutes and it is the difference
     // between a game and a wall — but the lessons above are always live, so nobody is stuck.
-    const unlocked = taughtBasics && progress.isTierUnlocked(tier);
-    const locks = ALL_LOCKS.filter((d) => d.tier === tier);
+    const unlocked = taughtBasics && progress.isTierUnlocked(tier)
+    const locks = ALL_LOCKS.filter((d) => d.tier === tier)
     if (!unlocked) {
-      const need = progress.opensNeededFor(tier);
+      const need = progress.opensNeededFor(tier)
+      /*
+       * On a phone this line and the "tier N — M locks, after the first lesson" note under it were
+       * the same sentence twice. The note names the tier and the count, so this one only survives
+       * where it is *not* about the first lesson — the tier-progress case it alone can express.
+       */
       const why = !taughtBasics
-        ? "locked — finish the first lesson above"
-        : `locked — open ${need} more tier ${tier - 1} lock${need === 1 ? "" : "s"}`;
+        ? 'locked — finish the first lesson above'
+        : `locked — open ${need} more tier ${tier - 1} lock${need === 1 ? '' : 's'}`
+      if (!isCompact(vp) || taughtBasics)
       text(ctx, why, BENCH_LEFT, y, {
-        font: font(TYPE.body),
+        font: font(typeFor(vp, TYPE.body)),
         color: readableAccents(p).amber,
-      });
+      })
     }
-    y += 24;
+    y += 24
 
-    locks.forEach((def, i) => {
-      const col = i % grid.cols;
-      const row = Math.floor(i / grid.cols);
-      const rect: Rect = {
-        x: BENCH_LEFT + (grid.cardW + BENCH_GAP) * col,
-        y: y + row * (grid.cardH + BENCH_GAP),
-        w: grid.cardW,
-        h: grid.cardH,
-      };
-      const st = ui.widget(rect, unlocked);
-      cardFrame(vp, p, rect, st, !unlocked);
-      /**
-       * The hatch goes on **before** the writing, not after it.
-       *
-       * Drawn last, a 45-degree rule-grey hatch at 0.7 alpha lies across every glyph and every line
-       * of type on the card — which is why two thirds of the bench read as grey mush rather than as
-       * locked content. `ART_DIRECTION.md §7` wants locked tiers legible precisely so they can be
-       * aspired to; a card you cannot read is not aspiration, it is noise. Under the type, at half
-       * the weight and a wider pitch, it still says "not yet" without eating the words. See D-099.
-       */
-      if (!unlocked) {
-        hatchRect(ctx, rect.x, rect.y, rect.w, rect.h, {
-          spacing: 11,
-          angleDeg: 45,
-          color: alpha(p.rule, 0.35),
-          lineWidth: 1,
-        });
-      }
-      const record = progress.record(def.slug);
-      const readable = readableAccents(p);
-
-      /**
-       * The lock's name, **fitted to the card** — DECISIONS D-128.
-       *
-       * `paragraph` wraps on spaces and lets a single over-long *word* run past `maxWidth` rather
-       * than chopping it, which is right for prose and wrong here: at the compact type scale
-       * "Halberd Tight-Tolerance 5" put "Tight-Tolerance" straight out through the side of its
-       * own card. Reported as *"in the bench the names of the locks are too big and they exit the
-       * boxes of the locks"*.
-       *
-       * Measured and shrunk to fit, the same rule `button` and the touch pads use. A name is a
-       * label on a box, so the box wins — the alternative is truncating it, and half a lock name
-       * is worse than a slightly smaller whole one.
-       */
-      const nameRoom = rect.w - (record.opens > 0 ? 110 : 44);
-      // …and capped by the card's *height* too. At the compact scale a heading is 42px in a
-      // 210px card, which crowds the glyph and the record line into each other even when it fits
-      // across (D-128).
-      let nameSize = Math.min(
-        typeFor(vp, TYPE.heading),
-        Math.floor(rect.h * 0.15),
-      );
-      ctx.save();
-      while (nameSize > 12) {
-        ctx.font = font(nameSize);
-        if (ctx.measureText(def.name).width <= nameRoom) break;
-        nameSize -= 1;
-      }
-      ctx.restore();
-      text(ctx, def.name, rect.x + 22, rect.y + 38, {
-        font: font(nameSize),
-        color: unlocked ? p.ink : p.inkLight,
-      });
-      const glyphH = compactBench ? 84 : 118;
-      drawLockGlyph(
-        vp,
-        p,
-        def,
+    /**
+     * On a phone, before the first lesson, the lock grid does not draw at all — D-132.
+     *
+     * Every card in it is locked until `taughtBasics`, so it is a full screen of things you cannot
+     * press. On a full page that is fine and even useful — `ART_DIRECTION.md §7` wants locked tiers
+     * visible, because aspiration is motivating. On a phone it does not fit: three lesson cards in
+     * two columns plus a tier strip plus six 210px cards is 192px more than the stage has, and the
+     * bench's own overflow warning said so in red, off the bottom of the screen.
+     *
+     * The lessons are the screen at that moment. One line says what is behind them.
+     */
+    const gridSuppressed = isCompact(vp) && !taughtBasics
+    if (gridSuppressed) {
+      const noteSize = typeFor(vp, TYPE.dimension)
+      text(
+        ctx,
+        `tier ${tier} — ${locks.length} locks, after the first lesson`,
+        BENCH_LEFT,
+        y + noteSize,
         {
-          x: rect.x + 22,
-          y: rect.y + 58,
-          w: compactBench ? 200 : 220,
-          h: glyphH,
+          font: font(noteSize),
+          color: p.inkLight,
         },
-        !unlocked,
-        9,
-      );
+      )
+      y += noteSize + 10
+    }
+    if (!gridSuppressed)
+      locks.forEach((def, i) => {
+        const col = i % grid.cols
+        const row = Math.floor(i / grid.cols)
+        const rect: Rect = {
+          x: BENCH_LEFT + (grid.cardW + BENCH_GAP) * col,
+          y: y + row * (grid.cardH + BENCH_GAP),
+          w: grid.cardW,
+          h: grid.cardH,
+        }
+        const st = ui.widget(rect, unlocked)
+        cardFrame(vp, p, rect, st, !unlocked)
+        /**
+         * The hatch goes on **before** the writing, not after it.
+         *
+         * Drawn last, a 45-degree rule-grey hatch at 0.7 alpha lies across every glyph and every line
+         * of type on the card — which is why two thirds of the bench read as grey mush rather than as
+         * locked content. `ART_DIRECTION.md §7` wants locked tiers legible precisely so they can be
+         * aspired to; a card you cannot read is not aspiration, it is noise. Under the type, at half
+         * the weight and a wider pitch, it still says "not yet" without eating the words. See D-099.
+         */
+        if (!unlocked) {
+          hatchRect(ctx, rect.x, rect.y, rect.w, rect.h, {
+            spacing: 11,
+            angleDeg: 45,
+            color: alpha(p.rule, 0.35),
+            lineWidth: 1,
+          })
+        }
+        const record = progress.record(def.slug)
+        const readable = readableAccents(p)
 
-      const stats = [`${chambersOf(def)} chambers`, `par ${def.par}s`];
-      const statSize = typeFor(vp, TYPE.body);
-      stats.forEach((s, k) => {
-        text(
-          ctx,
-          s,
-          rect.x + (compactBench ? 250 : 266),
-          rect.y + 92 + k * (statSize + 12),
+        /**
+         * The lock's name, **fitted to the card** — DECISIONS D-128.
+         *
+         * `paragraph` wraps on spaces and lets a single over-long *word* run past `maxWidth` rather
+         * than chopping it, which is right for prose and wrong here: at the compact type scale
+         * "Halberd Tight-Tolerance 5" put "Tight-Tolerance" straight out through the side of its
+         * own card. Reported as *"in the bench the names of the locks are too big and they exit the
+         * boxes of the locks"*.
+         *
+         * Measured and shrunk to fit, the same rule `button` and the touch pads use. A name is a
+         * label on a box, so the box wins — the alternative is truncating it, and half a lock name
+         * is worse than a slightly smaller whole one.
+         */
+        const nameRoom = rect.w - (record.opens > 0 ? 110 : 44)
+        // …and capped by the card's *height* too. At the compact scale a heading is 42px in a
+        // 210px card, which crowds the glyph and the record line into each other even when it fits
+        // across (D-128).
+        let nameSize = Math.min(typeFor(vp, TYPE.heading), Math.floor(rect.h * 0.15))
+        ctx.save()
+        while (nameSize > 12) {
+          ctx.font = font(nameSize)
+          if (ctx.measureText(def.name).width <= nameRoom) break
+          nameSize -= 1
+        }
+        ctx.restore()
+        text(ctx, def.name, rect.x + 22, rect.y + 38, {
+          font: font(nameSize),
+          color: unlocked ? p.ink : p.inkLight,
+        })
+        const glyphH = compactBench ? 84 : 118
+        drawLockGlyph(
+          vp,
+          p,
+          def,
           {
+            x: rect.x + 22,
+            y: rect.y + 58,
+            w: compactBench ? 200 : 220,
+            h: glyphH,
+          },
+          !unlocked,
+          9,
+        )
+
+        const stats = [`${chambersOf(def)} chambers`, `par ${def.par}s`]
+        const statSize = typeFor(vp, TYPE.body)
+        stats.forEach((s, k) => {
+          text(ctx, s, rect.x + (compactBench ? 250 : 266), rect.y + 92 + k * (statSize + 12), {
             font: font(statSize),
             // `p.rule` is the hairline colour: as a *text* colour on a hatched card it was the same
             // grey as the hatch it sat on, which is no colour at all (D-099).
             color: p.inkLight,
-          },
-        );
-      });
+          })
+        })
 
-      if (record.opens > 0) {
-        text(
-          ctx,
-          `opened ${record.opens}x  ·  best ${record.bestTime?.toFixed(1) ?? "—"}s`,
-          rect.x + 22,
-          rect.y + rect.h - 20,
-          { font: font(typeFor(vp, TYPE.body)), color: readable.teal },
-        );
-        /**
-         * The best rank on this lock, in the card's corner, large.
-         *
-         * The single most useful thing a bench can tell you at a glance is *which locks you have
-         * not beaten yet*, and a list of best times cannot say that — 61 seconds is excellent on
-         * one lock and shameful on another. A letter is comparable across the whole page.
-         * Struck through in rule grey when it does not yet reach D, because that is the bar the
-         * next tier is waiting on (D-091).
-         */
-        const best = record.bestRank;
-        label(ctx, letterFor(best), rect.x + rect.w - 46, rect.y + 60, {
-          font: font(TYPE.payout, "bold"),
-          size: TYPE.payout,
-          color: countsForTier(best) ? readable.teal : p.rule,
-          align: "center",
-        });
-      } else if (unlocked) {
-        text(ctx, "not yet opened", rect.x + 22, rect.y + rect.h - 20, {
-          font: font(TYPE.body),
-          color: p.inkLight,
-        });
-      }
+        if (record.opens > 0) {
+          text(
+            ctx,
+            `opened ${record.opens}x  ·  best ${record.bestTime?.toFixed(1) ?? '—'}s`,
+            rect.x + 22,
+            rect.y + rect.h - 20,
+            { font: font(typeFor(vp, TYPE.body)), color: readable.teal },
+          )
+          /**
+           * The best rank on this lock, in the card's corner, large.
+           *
+           * The single most useful thing a bench can tell you at a glance is *which locks you have
+           * not beaten yet*, and a list of best times cannot say that — 61 seconds is excellent on
+           * one lock and shameful on another. A letter is comparable across the whole page.
+           * Struck through in rule grey when it does not yet reach D, because that is the bar the
+           * next tier is waiting on (D-091).
+           */
+          const best = record.bestRank
+          label(ctx, letterFor(best), rect.x + rect.w - 46, rect.y + 60, {
+            font: font(typeFor(vp, TYPE.payout), 'bold'),
+            size: typeFor(vp, TYPE.payout),
+            color: countsForTier(best) ? readable.teal : p.rule,
+            align: 'center',
+          })
+        } else if (unlocked) {
+          text(ctx, 'not yet opened', rect.x + 22, rect.y + rect.h - 20, {
+            font: font(typeFor(vp, TYPE.body)),
+            color: p.inkLight,
+          })
+        }
 
-      if (st.activated && unlocked) actions.startLock(def);
-    });
-    const rows = Math.ceil(locks.length / BENCH_COLS);
-    y += rows * (BENCH_CARD_H + BENCH_GAP);
+        if (st.activated && unlocked) actions.startLock(def)
+      })
+    /*
+     * Advanced by the grid that was actually drawn (D-132).
+     *
+     * It counted rows with `BENCH_COLS` and heights with `BENCH_CARD_H` — the *flat* constants —
+     * while the cards above are laid out from `grid`, which on a phone is two columns of 210px.
+     * So on every compact viewport `y` came out of this block wrong in both terms at once, which is
+     * why the overflow warning beneath it has never been able to give an honest number.
+     */
+    if (!gridSuppressed) {
+      const rows = Math.ceil(locks.length / grid.cols)
+      y += rows * (grid.cardH + BENCH_GAP)
+    }
   }
 
   // The bench does not scroll, so if it ever outgrows the stage the tiers at the bottom
   // become invisible *and* unclickable — which is precisely what happened the moment Phase 13
   // finished the roster. Saying so is better than silently losing Tier 6.
   if (y > LOGICAL_HEIGHT - MARGIN) {
-    text(
-      ctx,
-      `bench overflows by ${Math.ceil(y - (LOGICAL_HEIGHT - MARGIN))}px`,
-      BENCH_LEFT,
-      y,
-      {
-        font: font(TYPE.dimension),
-        color: readableAccents(p).crimson,
-      },
-    );
+    text(ctx, `bench overflows by ${Math.ceil(y - (LOGICAL_HEIGHT - MARGIN))}px`, BENCH_LEFT, y, {
+      font: font(typeFor(vp, TYPE.dimension)),
+      color: readableAccents(p).crimson,
+    })
   }
 }
 
@@ -1279,18 +1409,18 @@ export function benchHeight(
    */
   compact = false,
 ): number {
-  const showLessons = !compact || lessonCount === 0;
-  const lessonRows = showLessons ? Math.ceil(lessonCount / CARDS_PER_ROW) : 0;
+  const showLessons = !compact || lessonCount === 0
+  const lessonRows = showLessons ? Math.ceil(lessonCount / CARDS_PER_ROW) : 0
   // The `+ 46` mirrors the gap under the lesson cards, which had to grow from 18 because the tier
   // strip's buttons are drawn at `y - 22` and were landing inside the cards (D-109).
-  let y = 120 + 18 + lessonRows * (LESSON_H + 6) + 46;
+  let y = 120 + 18 + lessonRows * (LESSON_H + 6) + 46
   // Tier buttons, then the lock/locked line, then the biggest tier's rows.
-  y += 58 + 24;
-  const cols = compact ? 2 : BENCH_COLS;
-  const cardH = compact ? COMPACT_CARD_H : BENCH_CARD_H;
-  const biggest = Math.ceil(lockCount / Math.max(1, tierCount));
-  y += Math.ceil(biggest / cols) * (cardH + BENCH_GAP);
-  return y;
+  y += 58 + 24
+  const cols = compact ? 2 : BENCH_COLS
+  const cardH = compact ? COMPACT_CARD_H : BENCH_CARD_H
+  const biggest = Math.ceil(lockCount / Math.max(1, tierCount))
+  y += Math.ceil(biggest / cols) * (cardH + BENCH_GAP)
+  return y
 }
 
 // ── Results ─────────────────────────────────────────────────────────────────────────────
@@ -1306,136 +1436,128 @@ function drawBindingOrder(
   chamberCount: number,
   order: readonly number[],
 ): void {
-  const { ctx } = vp;
-  const pitch = rect.w / Math.max(1, chamberCount);
-  const boxW = Math.min(64, pitch * 0.7);
-  const readable = readableAccents(p);
+  const { ctx } = vp
+  const pitch = rect.w / Math.max(1, chamberCount)
+  const boxW = Math.min(64, pitch * 0.7)
+  const readable = readableAccents(p)
   for (let i = 0; i < chamberCount; i += 1) {
-    const cx = rect.x + pitch * (i + 0.5);
-    const bx = cx - boxW / 2;
-    ctx.save();
-    ctx.fillStyle = p.paper;
-    ctx.fillRect(bx, rect.y, boxW, 54);
-    ctx.lineWidth = STROKE.standard;
-    ctx.strokeStyle = p.ink;
-    ctx.strokeRect(
-      snapX(vp, bx, STROKE.standard),
-      snapY(vp, rect.y, STROKE.standard),
-      boxW,
-      54,
-    );
-    ctx.restore();
+    const cx = rect.x + pitch * (i + 0.5)
+    const bx = cx - boxW / 2
+    ctx.save()
+    ctx.fillStyle = p.paper
+    ctx.fillRect(bx, rect.y, boxW, 54)
+    ctx.lineWidth = STROKE.standard
+    ctx.strokeStyle = p.ink
+    ctx.strokeRect(snapX(vp, bx, STROKE.standard), snapY(vp, rect.y, STROKE.standard), boxW, 54)
+    ctx.restore()
     text(ctx, String(i + 1), cx, rect.y + 34, {
-      font: font(TYPE.heading),
+      font: font(typeFor(vp, TYPE.heading)),
       color: p.ink,
-      align: "center",
-    });
-    const position = order.indexOf(i);
-    text(
-      ctx,
-      position >= 0 ? `${position + 1}${ordinal(position + 1)}` : "—",
-      cx,
-      rect.y + 78,
-      {
-        font: font(TYPE.body),
-        color: position >= 0 ? readable.amber : p.inkLight,
-        align: "center",
-      },
-    );
+      align: 'center',
+    })
+    const position = order.indexOf(i)
+    text(ctx, position >= 0 ? `${position + 1}${ordinal(position + 1)}` : '—', cx, rect.y + 78, {
+      font: font(typeFor(vp, TYPE.body)),
+      color: position >= 0 ? readable.amber : p.inkLight,
+      align: 'center',
+    })
   }
   // The arrow chain, in the order they actually bound.
-  ctx.save();
-  ctx.lineWidth = STROKE.hairline;
-  ctx.strokeStyle = readable.amber;
-  ctx.beginPath();
+  ctx.save()
+  ctx.lineWidth = STROKE.hairline
+  ctx.strokeStyle = readable.amber
+  ctx.beginPath()
   for (let k = 0; k < order.length - 1; k += 1) {
-    const from = rect.x + pitch * ((order[k] as number) + 0.5);
-    const to = rect.x + pitch * ((order[k + 1] as number) + 0.5);
-    const y = rect.y + 96 + k * 12;
-    ctx.moveTo(from, y);
-    ctx.lineTo(to, y);
-    const dir = Math.sign(to - from) || 1;
-    ctx.moveTo(to - dir * 7, y - 4);
-    ctx.lineTo(to, y);
-    ctx.lineTo(to - dir * 7, y + 4);
+    const from = rect.x + pitch * ((order[k] as number) + 0.5)
+    const to = rect.x + pitch * ((order[k + 1] as number) + 0.5)
+    const y = rect.y + 96 + k * 12
+    ctx.moveTo(from, y)
+    ctx.lineTo(to, y)
+    const dir = Math.sign(to - from) || 1
+    ctx.moveTo(to - dir * 7, y - 4)
+    ctx.lineTo(to, y)
+    ctx.lineTo(to - dir * 7, y + 4)
   }
-  ctx.stroke();
-  ctx.restore();
-  label(ctx, "binding order", rect.x, rect.y - 12, {
-    font: font(TYPE.dimension),
-    size: TYPE.dimension,
+  ctx.stroke()
+  ctx.restore()
+  label(ctx, 'binding order', rect.x, rect.y - 12, {
+    font: font(typeFor(vp, TYPE.dimension)),
+    size: typeFor(vp, TYPE.dimension),
     color: p.inkLight,
-  });
+  })
 }
 
 function ordinal(n: number): string {
-  if (n % 100 >= 11 && n % 100 <= 13) return "th";
+  if (n % 100 >= 11 && n % 100 <= 13) return 'th'
   switch (n % 10) {
     case 1:
-      return "st";
+      return 'st'
     case 2:
-      return "nd";
+      return 'nd'
     case 3:
-      return "rd";
+      return 'rd'
     default:
-      return "th";
+      return 'th'
   }
 }
 
 export function drawResults(c: ShellContext): void {
-  const { vp, p, ui, progress, actions, outcome, result } = c;
-  const { ctx } = vp;
-  screenFrame(
-    c,
-    outcome?.opened ? "Open" : "Results",
-    c.status ?? creditLine(progress),
-  );
-  if (!outcome) return;
+  const { vp, p, ui, progress, actions, outcome, result } = c
+  const { ctx } = vp
+  screenFrame(c, outcome?.opened ? 'Open' : 'Results', c.status ?? creditLine(progress))
+  if (!outcome) return
 
-  const readable = readableAccents(p);
+  const readable = readableAccents(p)
   label(ctx, outcome.lock.name, MARGIN + 28, MARGIN + 92, {
-    font: font(TYPE.heading),
-    size: TYPE.heading,
+    font: font(typeFor(vp, TYPE.heading)),
+    size: typeFor(vp, TYPE.heading),
     color: p.inkLight,
-  });
+  })
 
-  const left = MARGIN + 60;
-  let y = 220;
+  const left = MARGIN + 60
+  let y = 220
   // The par this attempt was *judged* against, which on anything but Easy is not the lock's par.
-  const judgedPar = effectivePar(outcome.lock.par, outcome.assist);
+  const judgedPar = effectivePar(outcome.lock.par, outcome.assist)
   const rows: [string, string, string][] = [
     [
-      "time",
+      'time',
       `${outcome.seconds.toFixed(2)}s`,
       outcome.seconds <= judgedPar ? readable.teal : p.ink,
     ],
     [
-      "par",
+      'par',
       judgedPar === outcome.lock.par
         ? `${outcome.lock.par}s`
         : `${judgedPar.toFixed(0)}s  (${outcome.lock.par}s x ${outcome.assist})`,
       p.inkLight,
     ],
     [
-      "oversets",
+      'oversets',
       String(outcome.oversets),
       outcome.oversets === 0 ? readable.teal : readable.crimson,
     ],
-    [
-      "resets",
-      String(outcome.resets),
-      outcome.resets === 0 ? readable.teal : p.ink,
-    ],
-    ["false sets", String(outcome.falseSets), p.ink],
-  ];
+    ['resets', String(outcome.resets), outcome.resets === 0 ? readable.teal : p.ink],
+    ['false sets', String(outcome.falseSets), p.ink],
+  ]
+  /**
+   * The value column is measured from the widest label — DECISIONS D-135.
+   *
+   * It was `left + 260`, tuned against a 21px face. At the compact scale `FALSE SETS` is 286px of
+   * tracked capitals, so on the smallest phone the label ran 26px into its own value and `PAR`'s
+   * parenthetical ran into the row beneath it. The results screen had never been audited — the
+   * sweep reaches its screens with `goto` and this one needs a solved lock — so it was the only
+   * screen in the game still carrying a literal like this.
+   */
+  const statSize = typeFor(vp, TYPE.body)
+  const valueX =
+    left +
+    rows.reduce((w, [k]) => Math.max(w, Math.ceil(captionWidth(vp, k, statSize))), 0) +
+    28
+  const statPitch = Math.max(34, statSize + 12)
   for (const [k, v, color] of rows) {
-    label(ctx, k, left, y, {
-      font: font(TYPE.body),
-      size: TYPE.body,
-      color: p.inkLight,
-    });
-    text(ctx, v, left + 260, y, { font: font(TYPE.body), color });
-    y += 34;
+    label(ctx, k, left, y, { font: font(statSize), size: statSize, color: p.inkLight })
+    text(ctx, v, valueX, y, { font: font(statSize), color })
+    y += statPitch
   }
 
   /**
@@ -1456,68 +1578,83 @@ export function drawResults(c: ShellContext): void {
      * Widened, with the values right-aligned to the far side and the labels given the whole gap in
      * between, so nothing has to be short to fit. See DECISIONS D-099.
      */
-    y += 20;
-    const pw = 700;
-    panel(vp, p, { x: left - 20, y: y - 34, w: pw, h: 190 }, "rank");
+    /**
+     * The rank panel, measured — and shorter on a phone. DECISIONS D-134.
+     *
+     * Every number in it was a literal against a 21px face: a 190px panel, the letter at +96, three
+     * record lines from +16 at a 30px pitch. Scaled, the lines are 38px tall at a 30px pitch, so
+     * they printed through each other *and* across the letter they are about. Reported as
+     * *"the name of the lock may not fit in the rank box"* — it is the rank block, and what did not
+     * fit is everything.
+     *
+     * Two of the three lines also go on a phone. `previous best` and `counts toward the next tier`
+     * are bookkeeping you can read on the bench whenever you like; `best on this lock` is the one
+     * that says whether this run mattered, and it is the comparison the big letter is inviting.
+     */
+    y += 20
+    const rankBody = typeFor(vp, TYPE.body)
+    const compactResults = isCompact(vp)
+    const lines: [string, string][] = compactResults
+      ? [['best on this lock', letterFor(result.bestRank)]]
+      : [
+          ['best on this lock', letterFor(result.bestRank)],
+          ['previous best', result.firstOpen ? 'first open' : letterFor(result.previousBest)],
+          [
+            'counts toward the next tier',
+            countsForTier(result.bestRank) ? 'yes' : 'not yet — needs D',
+          ],
+        ]
+    const rankLetter = typeFor(vp, TYPE.payout)
+    const pw = compactResults ? 820 : 700
+    const linePitch = rankBody + 14
+    const panelH = Math.max(
+      rankLetter + 40,
+      lines.length * linePitch + (result.improved ? 60 : 20) + 40,
+    )
+    panel(vp, p, { x: left - 20, y: y - 34, w: pw, h: panelH }, 'rank')
     const rankInk =
-      result.rank <= 1
-        ? readable.teal
-        : result.rank <= 3
-          ? readable.amber
-          : readable.crimson;
-    label(ctx, letterFor(result.rank), left + 60, y + 96, {
-      font: font(TYPE.payout, "bold"),
-      size: TYPE.payout,
+      result.rank <= 1 ? readable.teal : result.rank <= 3 ? readable.amber : readable.crimson
+    // The letter is centred in the panel's own height rather than parked at a fixed +96.
+    const letterX = left + 60
+    label(ctx, letterFor(result.rank), letterX, y - 34 + panelH / 2 + rankLetter * 0.36, {
+      font: font(rankLetter, 'bold'),
+      size: rankLetter,
       color: rankInk,
-      align: "center",
-    });
-    const lines: [string, string][] = [
-      ["best on this lock", letterFor(result.bestRank)],
-      [
-        "previous best",
-        result.firstOpen ? "first open" : letterFor(result.previousBest),
-      ],
-      [
-        "counts toward the next tier",
-        countsForTier(result.bestRank) ? "yes" : "not yet — needs D",
-      ],
-    ];
-    let ly = y + 16;
+      align: 'center',
+    })
+    // Clear of the letter, which is as wide as it is tall.
+    const recordX = letterX + rankLetter * 0.7 + 24
+    let ly = y + 16
     for (const [k, v] of lines) {
-      label(ctx, k, left + 150, ly, {
-        font: font(TYPE.body),
-        size: TYPE.body,
-        color: p.inkLight,
-      });
-      text(ctx, v, left + pw - 40, ly, {
-        font: font(TYPE.body),
-        color: p.ink,
-        align: "right",
-      });
-      ly += 30;
+      label(ctx, k, recordX, ly, { font: font(rankBody), size: rankBody, color: p.inkLight })
+      text(ctx, v, left + pw - 40, ly, { font: font(rankBody), color: p.ink, align: 'right' })
+      ly += linePitch
     }
     if (result.improved) {
-      label(
-        ctx,
-        result.firstOpen ? "first open" : "new best",
-        left + 150,
-        ly + 8,
-        {
-          font: font(TYPE.heading),
-          size: TYPE.heading,
-          color: readable.teal,
-        },
-      );
+      label(ctx, result.firstOpen ? 'first open' : 'new best', recordX, ly + 12, {
+        font: font(typeFor(vp, TYPE.heading)),
+        size: typeFor(vp, TYPE.heading),
+        color: readable.teal,
+      })
     }
   }
 
-  drawBindingOrder(
-    vp,
-    p,
-    { x: LOGICAL_WIDTH / 2 + 40, y: 240, w: 620, h: 200 },
-    chambersOf(outcome.lock),
-    outcome.bindOrder,
-  );
+  /*
+   * The binding-order chart is a study aid, and a phone is not where you study — D-134.
+   *
+   * It threads a line from each chamber to the order it bound in, which is genuinely useful on a
+   * full page and is, at a phone's scale, a tangle of hairlines over the right-hand half of the
+   * screen. It is also the single largest block on the busiest screen in the game. The order is
+   * still recorded and still drawn on a desktop; what a phone gets instead is room.
+   */
+  if (!isCompact(vp))
+    drawBindingOrder(
+      vp,
+      p,
+      { x: LOGICAL_WIDTH / 2 + 40, y: 240, w: 620, h: 200 },
+      chambersOf(outcome.lock),
+      outcome.bindOrder,
+    )
 
   /**
    * The code for the lock you have just beaten, on the screen where you have just beaten it.
@@ -1526,14 +1663,21 @@ export function drawResults(c: ShellContext): void {
    * only ever obtainable by going to the editor and rebuilding the lock by hand. Drawn only when
    * the format can carry this lock honestly — `shareableCode` is the judge of that (D-099).
    */
-  const code = shareableCode(outcome.lock);
+  /*
+   * And the share code goes with it (D-134).
+   *
+   * A code, a COPY button and an ALL CODES button is three more controls on a screen whose job is
+   * to tell you how you did and send you to the next lock — and every one of them is a duplicate of
+   * the Share codes page, which is one tap from the menu and lists this lock among the others.
+   */
+  const code = isCompact(vp) ? null : shareableCode(outcome.lock)
   if (code !== null) {
-    const sy = 600;
-    label(ctx, "share this lock", left, sy, {
-      font: font(TYPE.dimension),
-      size: TYPE.dimension,
+    const sy = 600
+    label(ctx, 'share this lock', left, sy, {
+      font: font(typeFor(vp, TYPE.dimension)),
+      size: typeFor(vp, TYPE.dimension),
       color: p.inkLight,
-    });
+    })
     /**
      * **Measured, not counted** — the same lesson as D-102, in the one place that had not learnt
      * it yet.
@@ -1550,18 +1694,16 @@ export function drawResults(c: ShellContext): void {
      * stays only so the buttons do not jump left on a short code. See DECISIONS D-108.
      */
     const codeW = label(ctx, formatCode(code), left, sy + 40, {
-      font: font(TYPE.heading),
-      size: TYPE.heading,
+      font: font(typeFor(vp, TYPE.heading)),
+      size: typeFor(vp, TYPE.heading),
       color: p.ink,
-    });
-    const bx = left + Math.max(340, codeW + 28);
-    if (button(vp, p, ui, { x: bx, y: sy + 14, w: 160, h: 40 }, "Copy")) {
-      actions.copyText(formatCode(code), `the code for ${outcome.lock.name}`);
+    })
+    const bx = left + Math.max(340, codeW + 28)
+    if (button(vp, p, ui, { x: bx, y: sy + 14, w: 160, h: 40 }, 'Copy')) {
+      actions.copyText(formatCode(code), `the code for ${outcome.lock.name}`)
     }
-    if (
-      button(vp, p, ui, { x: bx + 176, y: sy + 14, w: 200, h: 40 }, "All codes")
-    ) {
-      actions.goto("codes");
+    if (button(vp, p, ui, { x: bx + 176, y: sy + 14, w: 200, h: 40 }, 'All codes')) {
+      actions.goto('codes')
     }
   }
 
@@ -1580,50 +1722,51 @@ export function drawResults(c: ShellContext): void {
    * hold "Kestrel Serrated Trainer", and pressing `Next lock` without knowing where it goes is the
    * kind of button people learn not to press.
    */
-  const next = progress.nextLockAfter(outcome.lock);
-  const bw = 240;
-  const gap = 24;
-  const count = next ? 3 : 2;
-  const rowW = bw * count + gap * (count - 1);
-  let bx2 = LOGICAL_WIDTH / 2 - rowW / 2;
-  const by = LOGICAL_HEIGHT - MARGIN - 130;
+  const next = progress.nextLockAfter(outcome.lock)
+  const bw = 240
+  const gap = 24
+  const count = next ? 3 : 2
+  const rowW = bw * count + gap * (count - 1)
+  let bx2 = LOGICAL_WIDTH / 2 - rowW / 2
+  const by = LOGICAL_HEIGHT - MARGIN - 130
 
-  if (button(vp, p, ui, { x: bx2, y: by, w: bw, h: 52 }, "Bench"))
-    actions.goto("bench");
-  bx2 += bw + gap;
+  if (button(vp, p, ui, { x: bx2, y: by, w: bw, h: 52 }, 'Bench')) actions.goto('bench')
+  bx2 += bw + gap
   if (
-    button(vp, p, ui, { x: bx2, y: by, w: bw, h: 52 }, "Again", {
+    button(vp, p, ui, { x: bx2, y: by, w: bw, h: 52 }, 'Again', {
       primary: !next,
     })
   ) {
-    actions.restart();
+    actions.restart()
   }
   if (next) {
-    bx2 += bw + gap;
+    bx2 += bw + gap
     if (
-      button(vp, p, ui, { x: bx2, y: by, w: bw, h: 52 }, "Next lock", {
+      button(vp, p, ui, { x: bx2, y: by, w: bw, h: 52 }, 'Next lock', {
         primary: true,
       })
     ) {
-      actions.startLock(next);
+      actions.startLock(next)
     }
-    label(ctx, next.name, LOGICAL_WIDTH / 2, by + 84, {
-      font: font(TYPE.body),
-      size: TYPE.body,
+    // Above the row, not below it: at the compact face this caption's ascenders reached into the
+    // button frames, so the lock you are about to pick read as part of the button (D-134).
+    label(ctx, next.name, LOGICAL_WIDTH / 2, by - 18, {
+      font: font(typeFor(vp, TYPE.body)),
+      size: typeFor(vp, TYPE.body),
       color: p.inkLight,
-      align: "center",
-    });
+      align: 'center',
+    })
   }
 }
 
 // ── Settings ────────────────────────────────────────────────────────────────────────────
 
 export function drawSettings(c: ShellContext): void {
-  const { vp, p, ui, progress, actions } = c;
-  const { ctx } = vp;
-  const s = progress.data.settings;
-  screenFrame(c, "Settings", c.status ?? "changes save immediately");
-  navBar(c, [["Menu", () => actions.goto("menu")]]);
+  const { vp, p, ui, progress, actions } = c
+  const { ctx } = vp
+  const s = progress.data.settings
+  screenFrame(c, 'Settings', c.status ?? 'changes save immediately')
+  navBar(c, [['Menu', () => actions.goto('menu')]])
 
   /**
    * Two columns on a phone, and every row given room for a thumb — DECISIONS D-131.
@@ -1637,31 +1780,48 @@ export function drawSettings(c: ShellContext): void {
    * So the space that was already there gets used. Controls left, switches right, and the pitch
    * roughly doubles. Nothing is dropped and nothing is paged.
    */
-  const compact = isCompact(vp);
-  const left = MARGIN + 60;
-  const w = 420;
-  const col2 = left + 880;
+  const compact = isCompact(vp)
+  const left = MARGIN + 60
+  const w = 420
+  const col2 = left + 880
   /** Row heights that a fingertip can land on, and the gap between one row and the next. */
-  const ctlH = compact ? 64 : 40;
-  const rowGap = compact ? 100 : 62;
-  let y = 150;
+  const ctlH = compact ? 64 : 40
+  const rowGap = compact ? 100 : 62
+  let y = 150
 
-  label(ctx, "level", left, y, {
+  label(ctx, 'level', left, y, {
     font: font(typeFor(vp, TYPE.dimension)),
     size: typeFor(vp, TYPE.dimension),
     color: p.inkLight,
-  });
+  })
   const assistIndex = segmented(
     vp,
     p,
     ui,
-    { x: left, y: y + 10, w: w + 160, h: ctlH },
+    // Four cells holding TRAINING/EASY/MEDIUM/HARD. 580 gives each 145, and TRAINING at the
+    // compact face is 208 — so `segmented` shrank it to seven CSS px. Sized from the longest
+    // word instead, and it still clears the switch column at left + 880 (D-132).
+    {
+      x: left,
+      y: y + 10,
+      w: compact
+        ? Math.min(
+            860,
+            ASSIST_MODES.reduce(
+              (m, mode) =>
+                Math.max(m, Math.ceil(captionWidth(vp, mode, typeFor(vp, TYPE.body))) + 24),
+              0,
+            ) * ASSIST_MODES.length,
+          )
+        : w + 160,
+      h: ctlH,
+    },
     ASSIST_MODES,
     ASSIST_MODES.indexOf(s.assist),
-  );
-  const nextAssist = ASSIST_MODES[assistIndex];
+  )
+  const nextAssist = ASSIST_MODES[assistIndex]
   if (nextAssist !== undefined && nextAssist !== s.assist) {
-    actions.updateSettings({ assist: nextAssist });
+    actions.updateSettings({ assist: nextAssist })
   }
   // Say what the level takes away and what it pays, so the choice is informed rather than a
   // guess at four adjectives.
@@ -1672,12 +1832,12 @@ export function drawSettings(c: ShellContext): void {
   // that is now the switch column. The four mode names are the choice; the prose explains it.
   if (!compact)
     paragraph(ctx, ASSIST_BLURB[s.assist], left, y + 70, {
-      font: font(TYPE.body),
+      font: font(typeFor(vp, TYPE.body)),
       color: p.ink,
       maxWidth: 1100,
       lineHeight: 26,
       maxLines: 2,
-    });
+    })
   // It used to say "pays x2.50", of credits that no longer exist. The ladder now buys **time**:
   // the harder the mode, the more of the clock a given rank is worth (D-091).
   // Beside the control, not on it: right-aligned to `left + w + 160` put this straight across the
@@ -1688,114 +1848,113 @@ export function drawSettings(c: ShellContext): void {
       `x${ASSIST_MULTIPLIER[s.assist].toFixed(2)} par for ranking`,
       left + w + 190,
       y + 36,
-      { font: font(TYPE.body), color: readableAccents(p).amber },
-    );
+      { font: font(typeFor(vp, TYPE.body)), color: readableAccents(p).amber },
+    )
   // 116, not 108: Training and Hard both run the blurb to two lines, which ended 12px above the
   // next label's baseline — not a gap at 15px, and one word away from touching (D-099).
-  y += compact ? ctlH + 60 : 116;
+  y += compact ? ctlH + 60 : 116
 
-  label(ctx, "which hand holds the pick", left, y, {
+  label(ctx, 'which hand holds the pick', left, y, {
     font: font(typeFor(vp, TYPE.dimension)),
     size: typeFor(vp, TYPE.dimension),
     color: p.inkLight,
-  });
+  })
   const handIndex = segmented(
     vp,
     p,
     ui,
     { x: left, y: y + 10, w: compact ? 460 : 320, h: ctlH },
-    ["left", "right"],
-    s.handedness === "right" ? 1 : 0,
-  );
-  const nextHand = handIndex === 1 ? "right" : "left";
-  if (nextHand !== s.handedness)
-    actions.updateSettings({ handedness: nextHand });
+    ['left', 'right'],
+    s.handedness === 'right' ? 1 : 0,
+  )
+  const nextHand = handIndex === 1 ? 'right' : 'left'
+  if (nextHand !== s.handedness) actions.updateSettings({ handedness: nextHand })
   // It mirrors the touch controls too now (D-130) — worth saying where there is room to say it.
   if (!compact)
-    text(
-      ctx,
-      "mirrors the lock, so the keyway opens on your side",
-      left + 344,
-      y + 34,
-      {
-        font: font(TYPE.dimension),
-        color: p.inkLight,
-      },
-    );
-  y += compact ? ctlH + 60 : 84;
+    text(ctx, 'mirrors the lock, so the keyway opens on your side', left + 344, y + 34, {
+      font: font(typeFor(vp, TYPE.dimension)),
+      color: p.inkLight,
+    })
+  y += compact ? ctlH + 60 : 84
 
-  const sliderH = compact ? 62 : 44;
-  const sensitivity = slider(
-    vp,
-    p,
-    ui,
-    { x: left, y, w, h: sliderH },
-    "sensitivity",
-    s.sensitivity,
-    { min: 0.4, max: 2, step: 0.05 },
-  );
-  if (sensitivity !== s.sensitivity) actions.updateSettings({ sensitivity });
-  y += rowGap;
-
-  const master = slider(
-    vp,
-    p,
-    ui,
-    { x: left, y, w, h: sliderH },
-    "master volume",
-    s.masterVolume,
-  );
-  if (master !== s.masterVolume)
-    actions.updateSettings({ masterVolume: master });
-  y += rowGap;
-  const mech = slider(
-    vp,
-    p,
-    ui,
-    { x: left, y, w, h: sliderH },
-    "mechanical",
-    s.mechanicalVolume,
-  );
-  if (mech !== s.mechanicalVolume)
-    actions.updateSettings({ mechanicalVolume: mech });
-  y += rowGap;
-  const amb = slider(
-    vp,
-    p,
-    ui,
-    { x: left, y, w, h: sliderH },
-    "ambient",
-    s.ambientVolume,
-  );
-  if (amb !== s.ambientVolume) actions.updateSettings({ ambientVolume: amb });
-  y += compact ? rowGap : 74;
-
-  const toggles: [string, keyof SettingsData][] = [
-    ["mute everything", "muted"],
-    ["hold tension (off = toggle)", "tensionToggle"],
-    ["reduce motion", "reducedMotion"],
-    // Off by default (D-085). The clicks always play; this is the drone layer underneath them.
-    ["continuous tones (hum, scrape, bed)", "continuousTones"],
-    ["audio subtitles", "subtitles"],
-    ["vibrate", "haptics"],
-  ];
-  // The switch column. On a full page it carries on down the left as it always has.
-  let ty = compact ? 150 : y;
-  const tx = compact ? col2 : left;
-  const toggleH = compact ? 64 : 34;
-  const togglePitch = compact ? 84 : 44;
-  for (const [caption, key] of toggles) {
-    const current = s[key] as boolean;
-    const next = toggle(
+  const sliderH = compact ? 62 : 44
+  /*
+   * The sensitivity slider is not drawn on a phone — DECISIONS D-134.
+   *
+   * It multiplies the **arrow-key** lift trim (D-111), and a phone has no arrow keys: the touch
+   * lift is geared by `LIFT_DRAG_PX` and never consults this. It was a control that could not
+   * change anything, taking a full row on the screen where the rows are most expensive.
+   */
+  if (!compact) {
+    const sensitivity = slider(
       vp,
       p,
       ui,
-      { x: tx, y: ty, w, h: toggleH },
-      caption,
-      current,
-    );
-    if (next !== current) actions.updateSettings({ [key]: next });
-    ty += togglePitch;
+      { x: left, y, w, h: sliderH },
+      'sensitivity',
+      s.sensitivity,
+      { min: 0.4, max: 2, step: 0.05 },
+    )
+    if (sensitivity !== s.sensitivity) actions.updateSettings({ sensitivity })
+    y += rowGap
+  }
+
+  /**
+   * One volume on a phone, three on a desktop — DECISIONS D-134.
+   *
+   * `master`, `mechanical` and `ambient` are a mixing desk, and a mixing desk is a thing you sit
+   * at. On a phone they are three of the six rows in the left column, and two of them are for
+   * balancing layers against each other — which is a judgement nobody makes on a bus, through a
+   * phone speaker, on a game whose continuous voices are off by default anyway (D-085).
+   *
+   * Master stays because "quieter" and "louder" are real wants. The other two keep whatever they
+   * were set to, so a save made at a desk still sounds the way it was mixed.
+   */
+  const master = slider(vp, p, ui, { x: left, y, w, h: sliderH }, 'master volume', s.masterVolume)
+  if (master !== s.masterVolume) actions.updateSettings({ masterVolume: master })
+  y += rowGap
+  if (!compact) {
+    const mech = slider(vp, p, ui, { x: left, y, w, h: sliderH }, 'mechanical', s.mechanicalVolume)
+    if (mech !== s.mechanicalVolume) actions.updateSettings({ mechanicalVolume: mech })
+    y += rowGap
+    const amb = slider(vp, p, ui, { x: left, y, w, h: sliderH }, 'ambient', s.ambientVolume)
+    if (amb !== s.ambientVolume) actions.updateSettings({ ambientVolume: amb })
+    y += 74
+  } else {
+    y += rowGap
+  }
+
+  const toggles: [string, keyof SettingsData][] = [
+    ['mute everything', 'muted'],
+    ['hold tension (off = toggle)', 'tensionToggle'],
+    ['reduce motion', 'reducedMotion'],
+    // Off by default (D-085). The clicks always play; this is the drone layer underneath them.
+    [compact ? 'continuous tones' : 'continuous tones (hum, scrape, bed)', 'continuousTones'],
+    ['audio subtitles', 'subtitles'],
+    ['vibrate', 'haptics'],
+  ]
+  // The switch column. On a full page it carries on down the left as it always has.
+  let ty = compact ? 150 : y
+  const tx = compact ? col2 : left
+  const toggleH = compact ? 64 : 34
+  const togglePitch = compact ? 84 : 44
+  /*
+   * The row is as wide as its own caption — DECISIONS D-132.
+   *
+   * `w` is 420, and `CONTINUOUS TONES (HUM, SCRAPE, BED)` at the compact face is over 700. The
+   * label was drawn to its full length while the *hit* row stopped at 420, so the back half of
+   * every long switch was text you could press with nothing underneath it.
+   */
+  const toggleSize = typeFor(vp, TYPE.body)
+  const toggleW = Math.max(
+    w,
+    ...toggles.map(([cap]) => Math.ceil(captionWidth(vp, cap, toggleSize)) + toggleSize * 1.2 + 40),
+  )
+  for (const [caption, key] of toggles) {
+    const current = s[key] as boolean
+    const next = toggle(vp, p, ui, { x: tx, y: ty, w: toggleW, h: toggleH }, caption, current)
+    if (next !== current) actions.updateSettings({ [key]: next })
+    ty += togglePitch
   }
   /*
    * Vibration is `navigator.vibrate`, which Safari on iOS does not implement — on any version. The
@@ -1804,78 +1963,65 @@ export function drawSettings(c: ShellContext): void {
    * See DECISIONS D-131 for why the iOS checkbox trick was not taken.
    */
   if (!c.hapticsSupported)
-    text(
-      ctx,
-      "this device has no vibration motor the browser can reach",
-      tx + 34,
-      ty + 6,
-      {
-        font: font(typeFor(vp, TYPE.dimension)),
-        color: p.inkLight,
-      },
-    );
+    text(ctx, 'this device has no vibration motor the browser can reach', tx + 34, ty + 6, {
+      font: font(typeFor(vp, TYPE.dimension)),
+      color: p.inkLight,
+    })
 
   // Save import/export sits below the nav bar rather than level with it: it is this screen's own
   // business, and the row along the top is now navigation and nothing else (D-103).
   // On a phone the top-right is the switch column, so they go under it.
-  const bx = compact ? col2 : LOGICAL_WIDTH - MARGIN - 308;
-  const by = compact ? ty + 54 : 200;
-  const bh = compact ? 72 : 46;
-  if (button(vp, p, ui, { x: bx, y: by, w: 280, h: bh }, "Export save"))
-    actions.exportSave();
-  if (
-    button(vp, p, ui, { x: bx, y: by + bh + 14, w: 280, h: bh }, "Import save")
-  )
-    actions.importSave();
+  const bx = compact ? col2 : LOGICAL_WIDTH - MARGIN - 308
+  const by = compact ? ty + 54 : 200
+  const bh = compact ? 72 : 46
+  if (button(vp, p, ui, { x: bx, y: by, w: 280, h: bh }, 'Export save')) actions.exportSave()
+  if (button(vp, p, ui, { x: bx, y: by + bh + 14, w: 280, h: bh }, 'Import save'))
+    actions.importSave()
 }
 
 // ── Pause ───────────────────────────────────────────────────────────────────────────────
 
 export function drawPause(c: ShellContext): void {
-  const { vp, p, ui, actions } = c;
-  const { ctx } = vp;
-  ctx.save();
-  ctx.fillStyle = alpha(p.paper, 0.86);
-  ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
-  ctx.restore();
+  const { vp, p, ui, actions } = c
+  const { ctx } = vp
+  ctx.save()
+  ctx.fillStyle = alpha(p.paper, 0.86)
+  ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT)
+  ctx.restore()
 
-  const w = 420;
+  const w = 420
   // 446, not 380: the panel gained a Help button and a panel sized for four buttons cannot hold
   // five — the last one drew through its own bottom edge.
-  const h = 446;
-  const x = (LOGICAL_WIDTH - w) / 2;
-  const y = (LOGICAL_HEIGHT - h) / 2;
-  panel(vp, p, { x, y, w, h }, undefined, p.paperShade);
-  label(ctx, "Paused", x + w / 2, y + 60, {
-    font: font(TYPE.title),
-    size: TYPE.title,
+  const h = 446
+  const x = (LOGICAL_WIDTH - w) / 2
+  const y = (LOGICAL_HEIGHT - h) / 2
+  panel(vp, p, { x, y, w, h }, undefined, p.paperShade)
+  label(ctx, 'Paused', x + w / 2, y + 60, {
+    font: font(typeFor(vp, TYPE.title)),
+    size: typeFor(vp, TYPE.title),
     color: p.ink,
-    align: "center",
-  });
+    align: 'center',
+  })
 
-  const bw = w - 80;
-  let by = y + 110;
+  const bw = w - 80
+  let by = y + 110
   if (
-    button(vp, p, ui, { x: x + 40, y: by, w: bw, h: 52 }, "Resume", {
+    button(vp, p, ui, { x: x + 40, y: by, w: bw, h: 52 }, 'Resume', {
       primary: true,
     })
   ) {
-    actions.resume();
+    actions.resume()
   }
-  by += 66;
-  if (button(vp, p, ui, { x: x + 40, y: by, w: bw, h: 52 }, "Restart lock"))
-    actions.restart();
-  by += 66;
+  by += 66
+  if (button(vp, p, ui, { x: x + 40, y: by, w: bw, h: 52 }, 'Restart lock')) actions.restart()
+  by += 66
   // Reachable mid-attempt, because "what is that bar for" is a question you have *while* picking,
   // not one you plan a trip to the menu for (D-101).
-  if (button(vp, p, ui, { x: x + 40, y: by, w: bw, h: 52 }, "Help"))
-    actions.goto("help");
-  by += 66;
-  if (button(vp, p, ui, { x: x + 40, y: by, w: bw, h: 52 }, "Settings"))
-    actions.goto("settings");
-  by += 66;
-  if (button(vp, p, ui, { x: x + 40, y: by, w: bw, h: 52 }, "Back to bench"))
-    actions.abandon();
+  if (button(vp, p, ui, { x: x + 40, y: by, w: bw, h: 52 }, 'Help')) actions.goto('help')
+  by += 66
+  if (button(vp, p, ui, { x: x + 40, y: by, w: bw, h: 52 }, 'Settings')) actions.goto('settings')
+  by += 66
+  if (button(vp, p, ui, { x: x + 40, y: by, w: bw, h: 52 }, 'Back to bench')) actions.abandon()
 }
 
 // ── Shop ────────────────────────────────────────────────────────────────────────────────
@@ -1883,10 +2029,10 @@ export function drawPause(c: ShellContext): void {
 // ── Trophies ────────────────────────────────────────────────────────────────────────────
 
 /** `ART_DIRECTION.md §7`: a 5x8 grid of plates. Forty achievements, forty plates. */
-const TROPHY_COLS = 5;
-const TROPHY_ROWS = 8;
-const TROPHY_COMPACT_COLS = 2;
-const TROPHY_COMPACT_ROWS = 5;
+const TROPHY_COLS = 5
+const TROPHY_ROWS = 8
+const TROPHY_COMPACT_COLS = 2
+const TROPHY_COMPACT_ROWS = 5
 
 /**
  * How many pages each paged screen has.
@@ -1896,19 +2042,72 @@ const TROPHY_COMPACT_ROWS = 5;
  * at the ends. A swipe has no such edge, so without this the stored page walks off past the last
  * one and the way back is as many swipes as you overshot.
  */
-export function trophyPageCount(vp: Viewport): number {
-  if (!isCompact(vp)) return 1;
-  return Math.max(
+/**
+ * The compact trophy grid, derived once — DECISIONS D-132.
+ *
+ * Both the drawing and the page count need it, and they have to agree: a plate now carries its
+ * unlock **condition** rather than the word "locked", which is up to two lines, so how many rows
+ * fit is a function of the type and the page rather than a constant. Five rows of a two-line plate
+ * is 825px on the smallest phone against the 596 the page has, and the overflow lands on the report
+ * link in the corner.
+ */
+export function trophyGrid(vp: Viewport): {
+  cols: number
+  rows: number
+  w: number
+  h: number
+  top: number
+  gapX: number
+  gapY: number
+} {
+  const cols = TROPHY_COMPACT_COLS
+  const gapX = 20
+  const gapY = 14
+  const size = typeFor(vp, TYPE.body)
+  const pagerH = Math.max(40, minControlH(vp, size))
+  const pagerY = MARGIN + 24 + boxForCaption(vp, 'Menu', size, { w: 150, h: 40 }).h + 16
+  const top = Math.max(152, pagerY + pagerH + 14)
+  const left = MARGIN + 56
+  const w = Math.floor((LOGICAL_WIDTH - MARGIN - 28 - left - gapX * (cols - 1)) / cols)
+  // What a plate needs: a name, then up to two lines of condition, then air.
+  const need = size + typeFor(vp, TYPE.dimension) * 2.4 + 30
+  const available = reportLink(vp).y - 16 - top
+  const rows = Math.max(
     1,
-    Math.ceil(
-      ACHIEVEMENTS.length / (TROPHY_COMPACT_COLS * TROPHY_COMPACT_ROWS),
-    ),
-  );
+    Math.min(TROPHY_COMPACT_ROWS, Math.floor((available + gapY) / (need + gapY))),
+  )
+  const h = Math.max(need, Math.floor((available - gapY * (rows - 1)) / rows))
+  return { cols, rows, w, h, top, gapX, gapY }
 }
 
-export function codesPageCount(vp: Viewport, saved: number): number {
-  return Math.max(1, Math.ceil(saved / codeGrid(vp).cols));
+export function trophyPageCount(vp: Viewport): number {
+  if (!isCompact(vp)) return 1
+  const g = trophyGrid(vp)
+  return Math.max(1, Math.ceil(ACHIEVEMENTS.length / (g.cols * g.rows)))
 }
+
+/**
+ * How many pages the codes screen has — counting **what it actually pages** (D-136).
+ *
+ * The flat layout pages the player's own designs, one row at a time. The compact layout (D-132)
+ * merged the two lists into one paged run of four — designs first, then the roster — and this was
+ * left counting the designs alone. With no designs that is one page, so `codesPageBy` clamped to
+ * page 0 and the `›` button, drawn live and enabled, could never advance: **sixteen of the twenty
+ * shareable locks were unreachable on a phone.**
+ *
+ * It went unseen because the button is *drawn* correctly — the drawing computes its own page count
+ * from the real list — and only the action disagreed. Two counts of one thing, which is the bug
+ * this signature now makes impossible: the compact branch derives from the same list the drawing
+ * builds.
+ */
+export function codesPageCount(vp: Viewport, saved: number): number {
+  if (!isCompact(vp)) return Math.max(1, Math.ceil(saved / codeGrid(vp).cols))
+  const shareable = ALL_LOCKS.filter((def) => shareableCode(def) !== null).length
+  return Math.max(1, Math.ceil((saved + shareable) / CODES_COMPACT_PER_PAGE))
+}
+
+/** Two columns of two, on a phone. Shared so the drawing and the page count cannot disagree. */
+export const CODES_COMPACT_PER_PAGE = 4
 
 /**
  * The trophy case.
@@ -1923,23 +2122,33 @@ export function codesPageCount(vp: Viewport, saved: number): number {
  * still dark, and "the lock it names has not been built yet" is the honest answer.
  */
 export function drawTrophies(c: ShellContext): void {
-  const { vp, p, ui, progress, actions } = c;
-  const { ctx } = vp;
-  const readable = readableAccents(p);
-  const earned = new Set(progress.data.achievements);
-  const reachable = ACHIEVEMENTS.filter((a) => a.reachable()).length;
+  const { vp, p, ui, progress, actions } = c
+  const { ctx } = vp
+  const readable = readableAccents(p)
+  const earned = new Set(progress.data.achievements)
+  const reachable = ACHIEVEMENTS.filter((a) => a.reachable()).length
 
   screenFrame(
     c,
-    "Trophies",
+    'Trophies',
     c.status ??
       `${earned.size} of ${ACHIEVEMENTS.length} earned  ·  ${reachable} currently earnable`,
-  );
-  navBar(c, [["Menu", () => actions.goto("menu")]]);
+  )
+  navBar(c, [['Menu', () => actions.goto('menu')]])
 
-  const left = MARGIN + 56;
-  // Below the nav bar, which the grid used to start level with (D-103).
-  const top = 152;
+  // The pager is placed before the grid because the grid starts below it (D-132).
+  const pagerSize = typeFor(vp, TYPE.body)
+  const pagerH = Math.max(40, minControlH(vp, pagerSize))
+  const pagerW = Math.max(44, Math.ceil(captionWidth(vp, '\u203a', pagerSize)) + 28)
+  const pagerY = MARGIN + 24 + boxForCaption(vp, 'Menu', pagerSize, { w: 150, h: 40 }).h + 16
+  const pagerRight = LOGICAL_WIDTH - MARGIN - 28
+
+  const left = MARGIN + 56
+  // Below the nav bar AND below the pager, which is drawn first and would otherwise be painted
+  // over by the first row of plates — invisible, and still stealing the taps meant for them (D-132).
+  // On a phone it comes from `trophyGrid`, so the page count cannot disagree with the drawing.
+  const compactTop = isCompact(vp) ? trophyGrid(vp).top : 152
+  const top = compactTop
   /**
    * Two columns and a page turner on a phone — DECISIONS D-129.
    *
@@ -1954,112 +2163,129 @@ export function drawTrophies(c: ShellContext): void {
    * uses. A reference screen you turn is better than one you squint at, and much better than one
    * whose bottom half is drawn past the edge of the phone.
    */
-  const compactCase = isCompact(vp);
-  const cols = compactCase ? TROPHY_COMPACT_COLS : TROPHY_COLS;
-  const rows = compactCase ? TROPHY_COMPACT_ROWS : TROPHY_ROWS;
-  const w = compactCase ? 908 : 356;
-  const h = compactCase ? 116 : 92;
-  const gapX = 12;
-  const gapY = 10;
-  const perPage = cols * rows;
-  const pages = compactCase ? trophyPageCount(vp) : 1;
-  const page = Math.min(Math.max(0, c.trophyPage ?? 0), pages - 1);
-  const from = compactCase ? page * perPage : 0;
-  const nameSize = typeFor(vp, TYPE.body);
-  const condSize = typeFor(vp, TYPE.dimension);
+  const compactCase = isCompact(vp)
+  const g = compactCase ? trophyGrid(vp) : null
+  const cols = g?.cols ?? TROPHY_COLS
+  const rows = g?.rows ?? TROPHY_ROWS
+  /**
+   * The grid is derived from the page's content box, not from a pair of literals — D-132.
+   *
+   * 908 x 2 plus a 12px gutter is 1828, against a content box of 1816 — so the right-hand column
+   * hung 12px past the margin every other screen on this page respects, and the gutter between the
+   * columns was the same 12px as the overshoot. The rows then finished 77px above the bottom of the
+   * page with that space left unused. Width from the box, and the leftover height spent on the rows
+   * that are actually drawn.
+   */
+  const gapX = g?.gapX ?? 12
+  const gapY = g?.gapY ?? 10
+  const w = g?.w ?? 356
+  const h = g?.h ?? 92
+  const perPage = cols * rows
+  const pages = compactCase ? trophyPageCount(vp) : 1
+  const page = Math.min(Math.max(0, c.trophyPage ?? 0), pages - 1)
+  const from = compactCase ? page * perPage : 0
+  const nameSize = typeFor(vp, TYPE.body)
+  const condSize = typeFor(vp, TYPE.dimension)
 
+  /**
+   * The pager, clear of the nav bar and sized up front \u2014 DECISIONS D-132.
+   *
+   * At y=96 it sat under a nav bar that used to be 40px tall and is now as tall as its own caption
+   * needs. Worse, a 44x40 box cannot hold a readable caption, so `button` grew it \u2014 and it grows
+   * about the *centre*, taking the extra height off the top and putting the arrows back inside the
+   * bar. A control placed below something else has to be given the size it will end up being,
+   * rather than discovering it during the draw.
+   */
   if (pages > 1) {
     if (
       button(
         vp,
         p,
         ui,
-        { x: LOGICAL_WIDTH - MARGIN - 232, y: 96, w: 44, h: 40 },
-        "\u2039",
-        {
-          enabled: page > 0,
-        },
+        { x: pagerRight - pagerW * 2 - 12, y: pagerY, w: pagerW, h: pagerH },
+        '\u2039',
+        { enabled: page > 0 },
       )
     ) {
-      actions.trophyPageBy(-1);
+      actions.trophyPageBy(-1)
     }
     if (
-      button(
-        vp,
-        p,
-        ui,
-        { x: LOGICAL_WIDTH - MARGIN - 180, y: 96, w: 44, h: 40 },
-        "\u203a",
-        {
-          enabled: page < pages - 1,
-        },
-      )
+      button(vp, p, ui, { x: pagerRight - pagerW, y: pagerY, w: pagerW, h: pagerH }, '\u203a', {
+        enabled: page < pages - 1,
+      })
     ) {
-      actions.trophyPageBy(1);
+      actions.trophyPageBy(1)
     }
   }
 
   for (let n = 0; n < perPage; n += 1) {
-    const i = from + n;
-    const a = ACHIEVEMENTS[i];
-    if (!a) continue;
-    const col = n % cols;
-    const row = Math.floor(n / cols);
-    if (row >= rows) break;
-    const x = left + col * (w + gapX);
-    const y = top + row * (h + gapY);
-    const got = earned.has(a.id);
-    const locked = !got && !a.reachable();
+    const i = from + n
+    const a = ACHIEVEMENTS[i]
+    if (!a) continue
+    const col = n % cols
+    const row = Math.floor(n / cols)
+    if (row >= rows) break
+    const x = left + col * (w + gapX)
+    const y = top + row * (h + gapY)
+    const got = earned.has(a.id)
+    const locked = !got && !a.reachable()
 
-    ctx.save();
-    ctx.fillStyle = got ? p.paperShade : p.paper;
-    ctx.fillRect(x, y, w, h);
-    ctx.lineWidth = got ? STROKE.standard : STROKE.hairline;
-    ctx.strokeStyle = got ? p.ink : p.rule;
-    ctx.strokeRect(
-      snapX(vp, x, STROKE.standard),
-      snapY(vp, y, STROKE.standard),
-      w,
-      h,
-    );
-    ctx.restore();
+    ctx.save()
+    ctx.fillStyle = got ? p.paperShade : p.paper
+    ctx.fillRect(x, y, w, h)
+    ctx.lineWidth = got ? STROKE.standard : STROKE.hairline
+    ctx.strokeStyle = got ? p.ink : p.rule
+    ctx.strokeRect(snapX(vp, x, STROKE.standard), snapY(vp, y, STROKE.standard), w, h)
+    ctx.restore()
 
     // A filled square for earned, a hollow one for not — the pattern channel, so the case
     // still reads in greyscale and to a colourblind player (ART_DIRECTION.md §1).
-    ctx.save();
-    ctx.lineWidth = STROKE.standard;
-    ctx.strokeStyle = got ? p.ink : p.rule;
-    ctx.fillStyle = got ? readable.teal : "transparent";
-    if (got) ctx.fillRect(x + 14, y + 16, 14, 14);
-    ctx.strokeRect(
-      snapX(vp, x + 14, STROKE.standard),
-      snapY(vp, y + 16, STROKE.standard),
-      14,
-      14,
-    );
-    ctx.restore();
+    ctx.save()
+    ctx.lineWidth = STROKE.standard
+    ctx.strokeStyle = got ? p.ink : p.rule
+    ctx.fillStyle = got ? readable.teal : 'transparent'
+    if (got) ctx.fillRect(x + 14, y + 16, 14, 14)
+    ctx.strokeRect(snapX(vp, x + 14, STROKE.standard), snapY(vp, y + 16, STROKE.standard), 14, 14)
+    ctx.restore()
 
     text(ctx, a.name, x + 40, y + nameSize + 10, {
       font: font(nameSize),
-      color: got ? p.ink : locked ? p.rule : p.inkLight,
-    });
+      // `rule` is the hairline tone — 1.56:1 on paper. A name nobody can read is not a name
+      // (D-135); unreachable trophies are already marked by their own explanatory line.
+      color: got ? p.ink : p.inkLight,
+    })
     paragraph(
       ctx,
-      got
-        ? a.condition
-        : locked
-          ? "Needs a lock that is not in the game yet"
-          : "\u2014 locked \u2014",
+      /*
+       * An unearned trophy says what to *do*, not that it is locked \u2014 DECISIONS D-132.
+       *
+       * The page drew ten identical rows of "\u2014 locked \u2014", which is a list of things you cannot have
+       * with no way to find out how to have them: a dead end on a screen whose whole job is to give
+       * you something to aim at. Every achievement already carries its own condition \u2014 the earned
+       * ones were showing it \u2014 so the text was there the entire time and only the earned half of
+       * the screen was allowed to use it.
+       */
+      locked ? 'Needs a lock that is not in the game yet' : a.condition,
       x + 40,
       y + nameSize + condSize + 20,
       {
         font: font(condSize),
-        color: got ? p.inkLight : p.rule,
+        /*
+         * An unearned condition is `inkLight`, not `rule` — DECISIONS D-135.
+         *
+         * `rule` is the hairline colour: 1.56:1 on paper, which is a tone for *lines*, not for
+         * words. It was the right choice while this line read "— locked —" and was deliberately
+         * a ghost. D-132 made it carry the actual unlock condition — the one thing on the screen
+         * telling you how to earn the trophy — and left it in the ghost colour, so the page's whole
+         * purpose was drawn in text nobody can read. Earned versus unearned is already carried by
+         * the filled square and the name's own colour.
+         */
+        color: p.inkLight,
         maxWidth: w - 54,
         lineHeight: condSize + 4,
         maxLines: 2,
       },
-    );
+    )
   }
 }
 
@@ -2092,10 +2318,10 @@ function codeCard(
   /** Index into the player's own locks, when this is one of theirs — the only deletable kind. */
   customIndex?: number,
 ): void {
-  const { vp, p, ui, actions } = c;
-  const { ctx } = vp;
-  const code = shareableCode(def);
-  const readable = readableAccents(p);
+  const { vp, p, ui, actions } = c
+  const { ctx } = vp
+  const code = shareableCode(def)
+  const readable = readableAccents(p)
   /**
    * Registered for the frame only — never read for `activated`.
    *
@@ -2103,67 +2329,95 @@ function codeCard(
    * its own action underneath whichever button was pressed. `cardFrame` wants a `WidgetState` for
    * the hover lightening, so it gets one; the clicks belong entirely to the buttons.
    */
-  const st = ui.widget(rect, false);
-  cardFrame(vp, p, rect, { ...st, hovered: false }, code === null);
+  const st = ui.widget(rect, false)
+  cardFrame(vp, p, rect, { ...st, hovered: false }, code === null)
 
-  paragraph(ctx, def.name, rect.x + 16, rect.y + 28, {
-    font: font(TYPE.body),
+  /*
+   * Laid out as a measured stack — DECISIONS D-132.
+   *
+   * Every offset in here used to be a literal tuned against a 21px face: the name at +28, the glyph
+   * at +36, two stat lines at +52 and +72, the code at +92 and a 28px button row at the bottom. The
+   * moment the type scaled (D-132) the name landed on the chamber count, the code landed on the
+   * buttons, and `button`'s shrink-to-fit ground PLAY/EDIT/COPY down to five CSS pixels. A stack
+   * spaced by its own measured type cannot come apart that way, which is the same lesson D-129 drew
+   * from the readout column.
+   */
+  const dim = typeFor(vp, TYPE.dimension)
+  const body = typeFor(vp, TYPE.body)
+  const pad = 14
+  let cy = rect.y + pad + body
+  paragraph(ctx, def.name, rect.x + pad, cy, {
+    font: font(body),
     color: p.ink,
-    maxWidth: rect.w - 32,
-    lineHeight: 24,
+    maxWidth: rect.w - pad * 2,
+    lineHeight: body + 4,
     maxLines: 1,
-  });
-  drawLockGlyph(
-    vp,
-    p,
-    def,
-    { x: rect.x + 16, y: rect.y + 36, w: 88, h: 34 },
-    code === null,
-  );
+  })
+  cy += 10
 
-  const security = def.pins.filter(
-    (pin) => PROFILES[pin].grooveCount > 0,
-  ).length;
-  text(ctx, `${chambersOf(def)} chambers`, rect.x + 116, rect.y + 52, {
-    font: font(TYPE.dimension),
-    color: p.inkLight,
-  });
+  /*
+   * One stat line, not two — DECISIONS D-132.
+   *
+   * The card is 136px and has five things to stack in it: name, drawing, stats, code, buttons. Two
+   * stat lines is one more than fits, and what it cost was the **code** — the one thing this page
+   * exists to show — printed through the row of buttons beneath it. Chambers and security count are
+   * one fact about the lock and read perfectly well on one line.
+   */
+  /**
+   * No lock drawing on the card at a phone's size — DECISIONS D-135.
+   *
+   * It is 88x55 logical, which is **26x16 CSS px** on the smallest phone, and inside it the groove
+   * that is the entire point of the drawing comes out 0.30 CSS px deep. Zoomed, it is a hatched
+   * box; at size it is a smudge.
+   *
+   * And it can never be anything else *here*, which is what settles it: every lock on this screen
+   * is a pin tumbler by construction — the roster is filtered by `shareableCode(def) !== null` and
+   * `shareProblem` rejects every other family — so the one distinction that would read at 26x16,
+   * the family silhouette, cannot occur. What is left is a thread count already printed in words
+   * beside it and a security-pin count already printed in violet.
+   *
+   * Cutting it also straightens the card: the stat line was the only row indented past the name
+   * above it and the code below, and on the smallest phone the stack it sat in overran its own box
+   * — the code line was being clamped against the button row. The drawing survives everywhere it
+   * can actually be read: the bench card, the editor preview, and the pick screen at full size.
+   */
+  const security = def.pins.filter((pin) => PROFILES[pin].grooveCount > 0).length
+  const tiny = isCompact(vp)
+  const glyphW = tiny ? 0 : Math.min(88, Math.floor(rect.w * 0.34))
+  const glyphH = Math.max(26, Math.floor(dim * 1.5))
+  if (!tiny) drawLockGlyph(vp, p, def, { x: rect.x + pad, y: cy, w: glyphW, h: glyphH }, code === null)
   text(
     ctx,
-    security === 0 ? "all standard" : `${security} security`,
-    rect.x + 116,
-    rect.y + 72,
-    {
-      font: font(TYPE.dimension),
-      color: security > 0 ? readable.violet : p.inkLight,
-    },
-  );
+    `${chambersOf(def)} chambers · ${security === 0 ? 'all standard' : `${security} security`}`,
+    rect.x + pad + (tiny ? 0 : glyphW + 12),
+    cy + (tiny ? dim : glyphH / 2 + dim * 0.36),
+    { font: font(dim), color: security > 0 ? readable.violet : p.inkLight },
+  )
+  cy += (tiny ? dim + 10 : glyphH) + 8
+
+  // The button row's geometry, needed before the code line that sits just above it.
+  const bh = Math.max(28, minControlH(vp, dim))
+  const by = rect.y + rect.h - pad - bh
 
   if (code === null) {
     // The actual reason, not a stand-in for it. "not a pin tumbler" was printed on every codeless
     // card and was true of three of them; the rest were rejected for cuts the format cannot reach,
     // and a wrong explanation is worse than none (D-099).
-    paragraph(
-      ctx,
-      `no code — ${shareProblem(def) ?? ""}`,
-      rect.x + 16,
-      rect.y + rect.h - 40,
-      {
-        font: font(TYPE.dimension),
-        color: p.inkLight,
-        maxWidth: rect.w - 32,
-        lineHeight: 21,
-        maxLines: 2,
-      },
-    );
-    return;
+    paragraph(ctx, `no code — ${shareProblem(def) ?? ''}`, rect.x + pad, cy + dim, {
+      font: font(dim),
+      color: p.inkLight,
+      maxWidth: rect.w - pad * 2,
+      lineHeight: dim + 4,
+      maxLines: 2,
+    })
+    return
   }
-  // 92, with the buttons at 104: at 100 against buttons at 102 the code's descenders sat inside
-  // the button frames below it (D-102).
-  text(ctx, formatCode(code), rect.x + 16, rect.y + 92, {
-    font: font(TYPE.dimension),
+  // Anchored to the button row rather than to the flow above it: the card has a fixed height on a
+  // full page, so the last thing before the buttons has to be placed from the bottom up.
+  text(ctx, formatCode(code), rect.x + pad, Math.min(cy + dim, by - 10), {
+    font: font(dim),
     color: p.inkLight,
-  });
+  })
 
   /**
    * Play it, edit it, copy it — three buttons, because a page of locks you can only *copy* is a
@@ -2178,40 +2432,45 @@ function codeCard(
    * codes screen a way around the progression rather than a way around the clipboard. Locks you
    * made yourself are always playable: they were never gated.
    */
-  const by = rect.y + rect.h - 32;
+  /*
+   * Tall enough that `button` will not shrink its caption below the readability floor — and no
+   * taller. `dim * 2` would be 44 on a full page, where 30 is enough, and 136px of card cannot
+   * spare the difference: it was the code line that ended up printed across the button row.
+   * Declared above, beside the code line that is placed relative to it.
+   */
   // Four buttons on a lock of your own, three on one of the game's — sized to the card's inner
   // width so the row is even either way.
-  const deletable = customIndex !== undefined;
-  const inner = rect.w - 32;
-  const count = deletable ? 4 : 3;
-  const bw = Math.floor((inner - 8 * (count - 1)) / count);
-  const step = bw + 8;
-  let bx = rect.x + 16;
+  const deletable = customIndex !== undefined
+  const inner = rect.w - 32
+  const count = deletable ? 4 : 3
+  const bw = Math.floor((inner - 8 * (count - 1)) / count)
+  const step = bw + 8
+  let bx = rect.x + 16
   if (
-    button(vp, p, ui, { x: bx, y: by, w: bw, h: 28 }, "play", {
+    button(vp, p, ui, { x: bx, y: by, w: bw, h: bh }, 'play', {
       size: TYPE.dimension,
       enabled: playable,
     })
   ) {
-    actions.startLock(def);
+    actions.startLock(def)
   }
-  bx += step;
+  bx += step
   if (
-    button(vp, p, ui, { x: bx, y: by, w: bw, h: 28 }, "edit", {
+    button(vp, p, ui, { x: bx, y: by, w: bw, h: bh }, 'edit', {
       size: TYPE.dimension,
     })
   ) {
-    actions.editDef(def);
+    actions.editDef(def)
   }
-  bx += step;
+  bx += step
   if (
-    button(vp, p, ui, { x: bx, y: by, w: bw, h: 28 }, "copy", {
+    button(vp, p, ui, { x: bx, y: by, w: bw, h: bh }, 'copy', {
       size: TYPE.dimension,
     })
   ) {
-    actions.copyText(formatCode(code), `the code for ${def.name}`);
+    actions.copyText(formatCode(code), `the code for ${def.name}`)
   }
-  if (!deletable || customIndex === undefined) return;
+  if (!deletable || customIndex === undefined) return
 
   /**
    * Delete, in two clicks — because there is no undo and never can be.
@@ -2224,16 +2483,16 @@ function codeCard(
    * Deliberately not a modal: this page is a grid you sweep through deleting three or four codes
    * somebody sent you, and a dialog per deletion turns that into a chore. See DECISIONS D-101.
    */
-  bx += step;
-  const armed = c.armedDelete === def.slug;
+  bx += step
+  const armed = c.armedDelete === def.slug
   if (
-    button(vp, p, ui, { x: bx, y: by, w: bw, h: 28 }, armed ? "sure?" : "del", {
+    button(vp, p, ui, { x: bx, y: by, w: bw, h: bh }, armed ? 'sure?' : 'del', {
       size: TYPE.dimension,
       primary: armed,
     })
   ) {
-    if (armed) actions.deleteCustomLock(customIndex);
-    else actions.armDelete(def.slug);
+    if (armed) actions.deleteCustomLock(customIndex)
+    else actions.armDelete(def.slug)
   }
 }
 
@@ -2249,17 +2508,198 @@ function codeCard(
  * one button to take a code off the clipboard, and the address of the site to send people to. See
  * DECISIONS D-099.
  */
+/**
+ * The codes page on a phone — a different page, not the same one squeezed.
+ *
+ * The flat layout is five columns of 136px cards, twenty-two of them, with an intro paragraph, an
+ * entry field, and two headed sections. At a phone's scale that is a card 96 CSS px wide holding
+ * four lines of type and three buttons, which is the *"very small — every piece of the element,
+ * and it looks like a mess"* in the report; the layout sweep counted over a thousand findings on
+ * this screen alone, two thirds of everything left in the game.
+ *
+ * Nothing here is squeezed, because squeezing is what produced that. The intro goes (the page is
+ * titled *Share codes*; the sentence explains what a code is to somebody already reading a page
+ * about codes), the entry field takes the full width it needs, and the two lists become **one**
+ * paged list of four — designs first, then the roster, with the heading naming whichever the
+ * current page is showing. One list means one pager and one swipe target, which is the right
+ * number for a thumb. See DECISIONS D-132.
+ */
+function drawCodesCompact(c: ShellContext): void {
+  const { vp, p, ui, progress, actions } = c
+  const { ctx } = vp
+  const readable = readableAccents(p)
+  screenFrame(c, 'Share codes', c.status ?? creditLine(progress))
+  navBar(c, [
+    ['Editor', () => actions.goto('editor')],
+    ['Bench', () => actions.goto('bench')],
+    ['Menu', () => actions.goto('menu')],
+  ])
+
+  const dim = typeFor(vp, TYPE.dimension)
+  const body = typeFor(vp, TYPE.body)
+  const heading = typeFor(vp, TYPE.heading)
+  const taught = progress.data.tutorial.length > 0
+  const entry = c.codeEntry ?? ''
+  const decoded = entry.trim() === '' ? null : decodeLock(entry, progress.data.customLocks.length)
+
+  // ── The entry row, across the top ──────────────────────────────────────────────────────
+  /*
+   * No "have a code?" heading on a phone — DECISIONS D-134.
+   *
+   * The field underneath it reads "type or paste a code". A label whose only content is the
+   * question its own control already asks is a row of type spent on nothing.
+   */
+  let y = 150
+  y += 14
+  const fieldH = Math.max(64, body * 2 + 16)
+  const paste = boxForCaption(vp, 'Paste', body, { w: 150, h: fieldH })
+  const add = boxForCaption(vp, 'Add', body, { w: 130, h: fieldH })
+  const fieldW = LOGICAL_WIDTH - MARGIN - 28 - BENCH_LEFT - paste.w - add.w - 24
+  const boxRect: Rect = { x: BENCH_LEFT, y, w: fieldW, h: fieldH }
+  const boxState = ui.widget(boxRect)
+  cardFrame(vp, p, boxRect, boxState, false)
+  label(
+    ctx,
+    entry === ''
+      ? c.codeFocus
+        ? '_'
+        : 'type or paste a code'
+      : `${entry}${c.codeFocus ? '_' : ''}`,
+    boxRect.x + 12,
+    boxRect.y + fieldH / 2 + body * 0.36,
+    {
+      font: font(body),
+      size: body,
+      // A placeholder is de-emphasised, not invisible: `rule` is 1.36:1 and WCAG applies to
+      // placeholder text like any other (D-135).
+      color: entry === '' && !c.codeFocus ? p.inkLight : c.codeFocus ? readable.amber : p.ink,
+    },
+  )
+  if (boxState.activated) actions.codeFocus(!c.codeFocus)
+  if (button(vp, p, ui, { x: boxRect.x + fieldW + 12, y, w: paste.w, h: fieldH }, 'Paste')) {
+    actions.codePaste()
+  }
+  if (
+    button(vp, p, ui, { x: boxRect.x + fieldW + paste.w + 24, y, w: add.w, h: fieldH }, 'Add', {
+      primary: true,
+      enabled: decoded !== null && decoded.problem === null,
+    })
+  ) {
+    actions.codeSubmit()
+  }
+  y += fieldH + 8
+  text(
+    ctx,
+    decoded === null
+      ? 'letters and digits, in groups of four'
+      : decoded.problem !== null
+        ? decoded.problem
+        : `${decoded.def.bitting.length} chambers · ready to add`,
+    BENCH_LEFT,
+    y + dim,
+    {
+      font: font(dim),
+      color:
+        decoded !== null && decoded.problem !== null
+          ? readable.crimson
+          : decoded !== null
+            ? readable.teal
+            : p.inkLight,
+    },
+  )
+  // The heading below is a 47px face on a phone and hangs 34px above its own baseline, so the
+  // gap has to be measured from *it*, not from the line above (D-132).
+  y += dim + Math.round(heading * 0.9)
+
+  // ── One list: your designs, then the roster ────────────────────────────────────────────
+  const custom = progress.data.customLocks
+  const roster = ALL_LOCKS.filter((def) => shareableCode(def) !== null)
+  const all = [
+    ...custom.map((def, i) => ({ def, own: true, index: i })),
+    ...roster.map((def) => ({ def, own: false, index: -1 })),
+  ]
+  const cols = 2
+  const rows = 2
+  const perPage = CODES_COMPACT_PER_PAGE
+  const pages = codesPageCount(vp, custom.length)
+  const page = Math.min(Math.max(0, c.codesPage ?? 0), pages - 1)
+  const shown = all.slice(page * perPage, page * perPage + perPage)
+  const owned = shown.filter((s) => s.own).length
+  label(
+    ctx,
+    owned === shown.length
+      ? 'your designs'
+      : owned > 0
+        ? 'your designs · the roster'
+        : 'the roster',
+    BENCH_LEFT,
+    y,
+    { font: font(heading), size: heading, color: p.ink },
+  )
+  const pageBox = boxForCaption(vp, '‹', body, { w: 64, h: Math.max(52, body * 2 + 10) })
+  const pagerY = y - heading
+  const pagerX = LOGICAL_WIDTH - MARGIN - 28 - pageBox.w * 2 - 12
+  if (button(vp, p, ui, { x: pagerX, y: pagerY, ...pageBox }, '‹', { enabled: page > 0 })) {
+    actions.codesPageBy(-1)
+  }
+  if (
+    button(vp, p, ui, { x: pagerX + pageBox.w + 12, y: pagerY, ...pageBox }, '›', {
+      enabled: page < pages - 1,
+    })
+  ) {
+    actions.codesPageBy(1)
+  }
+  text(
+    ctx,
+    `${page * perPage + 1}–${page * perPage + shown.length} of ${all.length}`,
+    pagerX - 16,
+    y,
+    { font: font(dim), color: p.inkLight, align: 'right' },
+  )
+
+  y += 20
+  const gridW = LOGICAL_WIDTH - MARGIN - 28 - BENCH_LEFT
+  const cardW = Math.floor((gridW - CARD_GAP) / cols)
+  /*
+   * The grid stops above the report link, not at a guess — DECISIONS D-132.
+   *
+   * That link is a registered widget in the bottom-right corner, and the widget layer has no
+   * z-order: two rects containing the same point both report activated, so a card's COPY button
+   * drawn under it would copy the code *and* open a GitHub issue on one tap. The link also grew
+   * with its own caption in this pass, so the old fixed 70px reserve stopped being enough.
+   */
+  const cardH = Math.floor((reportLink(vp).y - 12 - y - CARD_GAP) / rows)
+  shown.forEach((item, i) => {
+    codeCard(
+      c,
+      item.def,
+      {
+        x: BENCH_LEFT + (cardW + CARD_GAP) * (i % cols),
+        y: y + Math.floor(i / cols) * (cardH + CARD_GAP),
+        w: cardW,
+        h: cardH,
+      },
+      item.own ? taught : taught && progress.isTierUnlocked(item.def.tier),
+      ...(item.own ? ([item.index] as const) : ([] as const)),
+    )
+  })
+}
+
 export function drawCodes(c: ShellContext): void {
-  const { vp, p, ui, progress, actions } = c;
-  const { ctx } = vp;
-  const readable = readableAccents(p);
-  screenFrame(c, "Share codes", c.status ?? creditLine(progress));
+  if (isCompact(c.vp)) {
+    drawCodesCompact(c)
+    return
+  }
+  const { vp, p, ui, progress, actions } = c
+  const { ctx } = vp
+  const readable = readableAccents(p)
+  screenFrame(c, 'Share codes', c.status ?? creditLine(progress))
 
   navBar(c, [
-    ["Editor", () => actions.goto("editor")],
-    ["Bench", () => actions.goto("bench")],
-    ["Menu", () => actions.goto("menu")],
-  ]);
+    ['Editor', () => actions.goto('editor')],
+    ['Bench', () => actions.goto('bench')],
+    ['Menu', () => actions.goto('menu')],
+  ])
 
   /**
    * "A short code", not "sixteen characters" — because it is not sixteen characters.
@@ -2271,18 +2711,18 @@ export function drawCodes(c: ShellContext): void {
    */
   paragraph(
     ctx,
-    "Every lock below packs into a short code — longer for a bigger lock. Copy one, paste it to " +
-      "anybody, and they pick the lock you did.",
+    'Every lock below packs into a short code — longer for a bigger lock. Copy one, paste it to ' +
+      'anybody, and they pick the lock you did.',
     BENCH_LEFT,
     108,
     {
-      font: font(TYPE.body),
+      font: font(typeFor(vp, TYPE.body)),
       color: p.ink,
       maxWidth: 980,
       lineHeight: 30,
       maxLines: 2,
     },
-  );
+  )
 
   /**
    * A box you type a code into — and the Paste button now fills it rather than acting on its own.
@@ -2295,66 +2735,58 @@ export function drawCodes(c: ShellContext): void {
    * Validated as you type, out of `decodeLock`'s own sentences, so a code that is one character
    * short says so at the character rather than at the button. See DECISIONS D-101.
    */
-  const entry = c.codeEntry ?? "";
+  const entry = c.codeEntry ?? ''
   // The whole group is 620 wide and the frame's inner edge is at `LOGICAL_WIDTH - MARGIN`, so 640
   // leaves the Add button 20px clear of it instead of drawn against it.
-  const boxX = LOGICAL_WIDTH - MARGIN - 640;
-  label(ctx, "have a code?", boxX, 104, {
-    font: font(TYPE.dimension),
-    size: TYPE.dimension,
+  const boxX = LOGICAL_WIDTH - MARGIN - 640
+  label(ctx, 'have a code?', boxX, 104, {
+    font: font(typeFor(vp, TYPE.dimension)),
+    size: typeFor(vp, TYPE.dimension),
     color: p.inkLight,
-  });
-  const boxRect: Rect = { x: boxX, y: 114, w: 360, h: 44 };
-  const boxState = ui.widget(boxRect);
-  cardFrame(vp, p, boxRect, boxState, false);
+  })
+  const boxRect: Rect = { x: boxX, y: 114, w: 360, h: 44 }
+  const boxState = ui.widget(boxRect)
+  cardFrame(vp, p, boxRect, boxState, false)
   label(
     ctx,
-    entry === ""
+    entry === ''
       ? c.codeFocus
-        ? "_"
-        : "type or paste a code"
-      : `${entry}${c.codeFocus ? "_" : ""}`,
+        ? '_'
+        : 'type or paste a code'
+      : `${entry}${c.codeFocus ? '_' : ''}`,
     boxRect.x + 12,
     boxRect.y + 29,
     {
-      font: font(TYPE.heading),
-      size: TYPE.heading,
-      color:
-        entry === "" && !c.codeFocus
-          ? p.rule
-          : c.codeFocus
-            ? readable.amber
-            : p.ink,
+      font: font(typeFor(vp, TYPE.heading)),
+      size: typeFor(vp, TYPE.heading),
+      // Same as the compact field: a placeholder is de-emphasised, not invisible (D-135).
+      color: entry === '' && !c.codeFocus ? p.inkLight : c.codeFocus ? readable.amber : p.ink,
     },
-  );
-  if (boxState.activated) actions.codeFocus(!c.codeFocus);
+  )
+  if (boxState.activated) actions.codeFocus(!c.codeFocus)
 
-  const decoded =
-    entry.trim() === ""
-      ? null
-      : decodeLock(entry, progress.data.customLocks.length);
-  if (button(vp, p, ui, { x: boxX + 372, y: 114, w: 108, h: 44 }, "Paste"))
-    actions.codePaste();
+  const decoded = entry.trim() === '' ? null : decodeLock(entry, progress.data.customLocks.length)
+  if (button(vp, p, ui, { x: boxX + 372, y: 114, w: 108, h: 44 }, 'Paste')) actions.codePaste()
   if (
-    button(vp, p, ui, { x: boxX + 490, y: 114, w: 130, h: 44 }, "Add", {
+    button(vp, p, ui, { x: boxX + 490, y: 114, w: 130, h: 44 }, 'Add', {
       primary: true,
       enabled: decoded !== null && decoded.problem === null,
     })
   ) {
-    actions.codeSubmit();
+    actions.codeSubmit()
   }
   if (
-    entry !== "" &&
-    button(vp, p, ui, { x: boxX + 372, y: 166, w: 108, h: 26 }, "clear", {
+    entry !== '' &&
+    button(vp, p, ui, { x: boxX + 372, y: 166, w: 108, h: 26 }, 'clear', {
       size: TYPE.dimension,
     })
   ) {
-    actions.codeClear();
+    actions.codeClear()
   }
   text(
     ctx,
     decoded === null
-      ? "letters and digits, in groups of four — type it, or press Paste"
+      ? 'letters and digits, in groups of four — type it, or press Paste'
       : decoded.problem !== null
         ? decoded.problem
         : `${decoded.def.bitting.length} chambers · ready to add`,
@@ -2362,7 +2794,7 @@ export function drawCodes(c: ShellContext): void {
     // Below the `clear` button, not level with it: at 184 the sentence ran underneath it.
     204,
     {
-      font: font(TYPE.dimension),
+      font: font(typeFor(vp, TYPE.dimension)),
       color:
         decoded !== null && decoded.problem !== null
           ? readable.crimson
@@ -2370,7 +2802,7 @@ export function drawCodes(c: ShellContext): void {
             ? readable.teal
             : p.inkLight,
     },
-  );
+  )
 
   /**
    * The page has 1080px and no scrolling, and the roster is five rows of cards on its own.
@@ -2381,25 +2813,25 @@ export function drawCodes(c: ShellContext): void {
    * printed *through* the status line, which the overflow warning then dutifully reported, on top
    * of the status line, in red.
    */
-  let y = 206;
+  let y = 206
   // Same gate as the bench: the first lesson unlocks the game, and this page is not a way past it.
-  const taught = progress.data.tutorial.length > 0;
-  const custom = progress.data.customLocks;
-  label(ctx, "your designs", BENCH_LEFT, y, {
-    font: font(TYPE.heading),
-    size: TYPE.heading,
+  const taught = progress.data.tutorial.length > 0
+  const custom = progress.data.customLocks
+  label(ctx, 'your designs', BENCH_LEFT, y, {
+    font: font(typeFor(vp, TYPE.heading)),
+    size: typeFor(vp, TYPE.heading),
     color: p.ink,
-  });
-  y += 18;
+  })
+  y += 18
   if (custom.length === 0) {
     text(
       ctx,
-      "none yet — build one in the Editor, or paste a code somebody sent you",
+      'none yet — build one in the Editor, or paste a code somebody sent you',
       BENCH_LEFT,
       y + 18,
-      { font: font(TYPE.body), color: p.inkLight },
-    );
-    y += 44;
+      { font: font(typeFor(vp, TYPE.body)), color: p.inkLight },
+    )
+    y += 44
   } else {
     /**
      * Six at a time, with arrows — because the page cannot grow and the list can.
@@ -2410,49 +2842,32 @@ export function drawCodes(c: ShellContext): void {
      * for the reasons D-100 sets out, so a bounded list gets a pager instead. The count is spelled
      * out (`7–12 of 31`) so it is never ambiguous whether anything is being held back.
      */
-    const cg = codeGrid(vp);
-    const pages = codesPageCount(vp, custom.length);
-    const page = Math.min(Math.max(0, c.codesPage ?? 0), pages - 1);
-    const from = page * cg.cols;
-    const shown = custom.slice(from, from + cg.cols);
+    const cg = codeGrid(vp)
+    const pages = codesPageCount(vp, custom.length)
+    const page = Math.min(Math.max(0, c.codesPage ?? 0), pages - 1)
+    const from = page * cg.cols
+    const shown = custom.slice(from, from + cg.cols)
     if (pages > 1) {
       if (
-        button(
-          vp,
-          p,
-          ui,
-          { x: BENCH_LEFT + 210, y: y - 22, w: 40, h: 28 },
-          "‹",
-          {
-            size: TYPE.body,
-            enabled: page > 0,
-          },
-        )
+        button(vp, p, ui, { x: BENCH_LEFT + 210, y: y - 22, w: 40, h: 28 }, '‹', {
+          size: TYPE.body,
+          enabled: page > 0,
+        })
       ) {
-        actions.codesPageBy(-1);
+        actions.codesPageBy(-1)
       }
       if (
-        button(
-          vp,
-          p,
-          ui,
-          { x: BENCH_LEFT + 258, y: y - 22, w: 40, h: 28 },
-          "›",
-          {
-            size: TYPE.body,
-            enabled: page < pages - 1,
-          },
-        )
+        button(vp, p, ui, { x: BENCH_LEFT + 258, y: y - 22, w: 40, h: 28 }, '›', {
+          size: TYPE.body,
+          enabled: page < pages - 1,
+        })
       ) {
-        actions.codesPageBy(1);
+        actions.codesPageBy(1)
       }
-      text(
-        ctx,
-        `${from + 1}–${from + shown.length} of ${custom.length}`,
-        BENCH_LEFT + 312,
-        y,
-        { font: font(TYPE.dimension), color: p.inkLight },
-      );
+      text(ctx, `${from + 1}–${from + shown.length} of ${custom.length}`, BENCH_LEFT + 312, y, {
+        font: font(typeFor(vp, TYPE.dimension)),
+        color: p.inkLight,
+      })
     }
     shown.forEach((def, i) => {
       // Your own locks were never tier-gated — they are not on the ladder at all.
@@ -2467,16 +2882,16 @@ export function drawCodes(c: ShellContext): void {
         },
         taught,
         from + i,
-      );
-    });
-    y += cg.cardH + 30;
+      )
+    })
+    y += cg.cardH + 30
   }
 
-  label(ctx, "the roster", BENCH_LEFT, y, {
-    font: font(TYPE.heading),
-    size: TYPE.heading,
+  label(ctx, 'the roster', BENCH_LEFT, y, {
+    font: font(typeFor(vp, TYPE.heading)),
+    size: typeFor(vp, TYPE.heading),
     color: p.ink,
-  });
+  })
   /**
    * Only the locks that **have** a code.
    *
@@ -2488,8 +2903,8 @@ export function drawCodes(c: ShellContext): void {
    * The count is still said out loud below, because a roster that quietly shows twenty of
    * twenty-five is the silent-truncation habit this project keeps having to dig out of itself.
    */
-  const roster = ALL_LOCKS.filter((def) => shareableCode(def) !== null);
-  const missing = ALL_LOCKS.length - roster.length;
+  const roster = ALL_LOCKS.filter((def) => shareableCode(def) !== null)
+  const missing = ALL_LOCKS.length - roster.length
   if (missing > 0) {
     text(
       ctx,
@@ -2497,16 +2912,16 @@ export function drawCodes(c: ShellContext): void {
       BENCH_LEFT + 190,
       y,
       {
-        font: font(TYPE.dimension),
+        font: font(typeFor(vp, TYPE.dimension)),
         color: p.inkLight,
       },
-    );
+    )
   }
-  y += 18;
-  const rosterGrid = codeGrid(vp);
+  y += 18
+  const rosterGrid = codeGrid(vp)
   roster.forEach((def, i) => {
-    const col = i % rosterGrid.cols;
-    const row = Math.floor(i / rosterGrid.cols);
+    const col = i % rosterGrid.cols
+    const row = Math.floor(i / rosterGrid.cols)
     codeCard(
       c,
       def,
@@ -2517,10 +2932,10 @@ export function drawCodes(c: ShellContext): void {
         h: CODE_CARD_H,
       },
       taught && progress.isTierUnlocked(def.tier),
-    );
-  });
-  const rows = Math.ceil(roster.length / CODE_COLS);
-  y += rows * (CODE_CARD_H + CARD_GAP);
+    )
+  })
+  const rows = Math.ceil(roster.length / CODE_COLS)
+  y += rows * (CODE_CARD_H + CARD_GAP)
 
   // Same rule as the bench: this page does not scroll, so if it ever outgrows the stage, say so
   // rather than quietly dropping the last row off the bottom.
@@ -2531,36 +2946,80 @@ export function drawCodes(c: ShellContext): void {
       BENCH_LEFT,
       y,
       {
-        font: font(TYPE.dimension),
+        font: font(typeFor(vp, TYPE.dimension)),
         color: readable.crimson,
       },
-    );
+    )
   }
 }
 
+/**
+ * Below this stage scale the editor does not fit, and says so — DECISIONS D-132.
+ *
+ * It is the densest screen in the game: a name field, two spinners, a keyway control, a table of up
+ * to sixteen rows and five columns, an action row, a share-code block, a preview and a shelf. On a
+ * 658x320 phone the compact type scale is 2.2x and the stage is still 1080 tall, so the header
+ * alone takes 560 of the 740px the table has — leaving 36px rows for controls that need 84.
+ *
+ * That is arithmetic, not a layout that needs tuning. Dropping the preview and the shelf buys width
+ * and this is a height problem; shrinking the row type far enough would put it under four CSS
+ * pixels, which is the thing this whole pass exists to prevent. Every other screen in the game was
+ * made to fit a phone because every other screen is something you *play*; this one is an authoring
+ * tool, and an authoring tool that admits it needs a bigger window is better than one that draws
+ * its controls on top of each other and lets you press the wrong pin.
+ *
+ * 0.34 is where a five-chamber draft still gets rows tall enough to touch — a Galaxy S24 and up.
+ */
+export const EDITOR_MIN_SCALE = 0.34
+
 export function drawEditor(c: ShellContext): void {
-  const { vp, p, ui, actions, progress } = c;
-  const draft = c.draft;
-  if (!draft) return;
-  const { ctx } = vp;
+  const { vp, p, ui, actions, progress } = c
+  const draft = c.draft
+  if (!draft) return
+  if (vp.scale < EDITOR_MIN_SCALE) {
+    screenFrame(c, 'Editor', 'the editor needs a larger screen')
+    navBar(c, [
+      ['Codes', () => actions.goto('codes')],
+      ['Bench', () => actions.goto('bench')],
+      ['Menu', () => actions.goto('menu')],
+    ])
+    const size = typeFor(vp, TYPE.body)
+    paragraph(
+      c.vp.ctx,
+      'The editor lays out a table of up to sixteen chambers, and there is not enough height for ' +
+        'it here. Turn to a larger screen — a tablet, or a desktop — and it is waiting. Codes ' +
+        'somebody sent you still open on the Share codes page.',
+      MARGIN + 60,
+      260,
+      {
+        font: font(size),
+        color: p.ink,
+        maxWidth: LOGICAL_WIDTH - MARGIN * 2 - 120,
+        lineHeight: size + 10,
+        maxLines: 4,
+      },
+    )
+    return
+  }
+  const { ctx } = vp
   // The saved count belongs *in* the status line. As a second line of its own it sat 10px above the
   // one `screenFrame` draws, and 10px is not a line of 15px type — the two printed through each
   // other in the bottom-left corner of every visit to this screen (D-099).
   screenFrame(
     c,
-    "Editor",
+    'Editor',
     c.status ??
-      `design a lock, then pick it  ·  ${progress.data.customLocks.length} saved to the bench`,
-  );
+      `design a lock, then tap Test pick  ·  ${progress.data.customLocks.length} saved to the bench`,
+  )
   navBar(c, [
-    ["Codes", () => actions.goto("codes")],
-    ["Bench", () => actions.goto("bench")],
-    ["Menu", () => actions.goto("menu")],
-  ]);
+    ['Codes', () => actions.goto('codes')],
+    ['Bench', () => actions.goto('bench')],
+    ['Menu', () => actions.goto('menu')],
+  ])
 
-  const problem = draftProblem(draft, progress.data.customLocks.length);
-  const readable = readableAccents(p);
-  const left = BENCH_LEFT;
+  const problem = draftProblem(draft, progress.data.customLocks.length)
+  const readable = readableAccents(p)
+  const left = BENCH_LEFT
   /**
    * Two sizes on this screen and no others — reported as *"the editor has very different font
    * sizes"*, which it did: four.
@@ -2573,102 +3032,163 @@ export function drawEditor(c: ShellContext): void {
    * See DECISIONS D-099.
    */
   const dim = {
-    font: font(TYPE.dimension),
-    size: TYPE.dimension,
+    font: font(typeFor(vp, TYPE.dimension)),
+    size: typeFor(vp, TYPE.dimension),
     color: p.inkLight,
-  };
-  const value = { font: font(TYPE.body), size: TYPE.body, color: p.ink };
+  }
+  const value = { font: font(typeFor(vp, TYPE.body)), size: typeFor(vp, TYPE.body), color: p.ink }
 
   // ── The lock as a whole ───────────────────────────────────────────────────────────────
-  label(ctx, "name", left, 112, dim);
-  const nameRect: Rect = { x: left, y: 122, w: 420, h: 40 };
-  const nameState = ui.widget(nameRect);
-  cardFrame(vp, p, nameRect, nameState, false);
-  label(
-    ctx,
-    `${draft.name}${c.editingName ? "_" : ""}`,
-    nameRect.x + 12,
-    nameRect.y + 26,
-    {
-      font: font(TYPE.body),
-      size: TYPE.body,
-      color: c.editingName ? readable.amber : p.ink,
-    },
-  );
-  if (nameState.activated) actions.editorFocusName(!c.editingName);
+  label(ctx, 'name', left, 112, dim)
+  const nameRect: Rect = {
+    x: left,
+    y: 122,
+    w: 420,
+    h: Math.max(40, minControlH(vp, typeFor(vp, TYPE.body))),
+  }
+  const nameState = ui.widget(nameRect)
+  cardFrame(vp, p, nameRect, nameState, false)
+  label(ctx, `${draft.name}${c.editingName ? '_' : ''}`, nameRect.x + 12, nameRect.y + 26, {
+    font: font(typeFor(vp, TYPE.body)),
+    size: typeFor(vp, TYPE.body),
+    color: c.editingName ? readable.amber : p.ink,
+  })
+  if (nameState.activated) actions.editorFocusName(!c.editingName)
   text(
     ctx,
-    c.editingName
-      ? "typing — click again or press enter to stop"
-      : "click to rename",
+    c.editingName ? 'typing — tap again or press enter to stop' : 'tap to rename',
     nameRect.x + nameRect.w + 16,
     nameRect.y + 26,
-    { font: font(TYPE.dimension), color: p.inkLight },
-  );
+    { font: font(typeFor(vp, TYPE.dimension)), color: p.inkLight },
+  )
 
-  const rowY = 186;
-  label(ctx, "chambers", left, rowY - 8, dim);
-  if (
-    button(vp, p, ui, { x: left, y: rowY, w: 38, h: 34 }, "-", {
-      enabled: draft.chambers.length > MIN_CHAMBERS,
-    })
-  ) {
-    actions.editorChamberCount(draft.chambers.length - 1);
-  }
-  // The spinners are laid out around the *width of their value* at the current face. At 18px a
-  // two-digit count cleared `+` at left+84; at 21px it did not (D-102).
-  text(ctx, String(draft.chambers.length), left + 60, rowY + 24, value);
-  if (
-    button(vp, p, ui, { x: left + 100, y: rowY, w: 38, h: 34 }, "+", {
-      enabled: draft.chambers.length < MAX_CHAMBERS,
-    })
-  ) {
-    actions.editorChamberCount(draft.chambers.length + 1);
+  /**
+   * The lock-wide controls, laid out by measurement rather than by literal offsets (D-132).
+   *
+   * Every x in this row used to be a constant tuned against a 21px face — the spinners at +0/+100,
+   * tolerance at +210/+330, the capture window at +386, the keyway at +620. At the compact scale
+   * that face is 38px, so `capture window 0.62 mm` was printed straight across the STANDARD/TIGHT
+   * control and the chamber count landed on its own `+`. D-102 already caught this row once, at
+   * 18px to 21px, and fixed it by moving the literals; the literals were the problem.
+   *
+   * On a phone it wraps to two rows, because measured or not, four controls at the compact face are
+   * 1200px wide and the preview panel starts at 1032.
+   */
+  // The right-hand column, declared here because the header row clamps against it (D-133).
+  const rightX = left + 980
+  const rightW = LOGICAL_WIDTH - MARGIN - 28 - rightX
+
+  const editorCompact2 = isCompact(vp)
+  const bodySize = typeFor(vp, TYPE.body)
+  const dimSize = typeFor(vp, TYPE.dimension)
+  const spin = boxForCaption(vp, '+', bodySize, { w: 38, h: 34 })
+  const gap = 12
+  // Below the name field and the label that belongs to this row — 186 was measured against a
+  // 17px label under a 40px field, and both grow with the type now (D-132).
+  const rowY = Math.max(186, 122 + nameRect.h + typeFor(vp, TYPE.dimension) + 16)
+  // At least what button() will grow a spinner to, or the two rows of the compact header overlap.
+  const headRowH = Math.max(spin.h, minControlH(vp, bodySize))
+  const row2Y = editorCompact2 ? rowY + headRowH + dimSize + 22 : rowY
+
+  /** A -/value/+ spinner. Returns the x the next control may start at. */
+  const spinner = (
+    x: number,
+    y: number,
+    caption: string,
+    valueText: string,
+    canDown: boolean,
+    canUp: boolean,
+    onDown: () => void,
+    onUp: () => void,
+  ): number => {
+    label(ctx, caption, x, y - 8, dim)
+    if (button(vp, p, ui, { x, y, w: spin.w, h: headRowH }, '-', { enabled: canDown })) onDown()
+    const valW = Math.ceil(captionWidth(vp, valueText, bodySize)) + 8
+    const vx = x + spin.w + gap
+    text(ctx, valueText, vx, y + headRowH / 2 + bodySize * 0.36, value)
+    const px = vx + valW + gap
+    if (button(vp, p, ui, { x: px, y, w: spin.w, h: headRowH }, '+', { enabled: canUp })) onUp()
+    return px + spin.w
   }
 
-  label(ctx, "tolerance", left + 210, rowY - 8, dim);
-  if (
-    button(vp, p, ui, { x: left + 210, y: rowY, w: 38, h: 34 }, "-", {
-      enabled: draft.toleranceQuality > MIN_TOLERANCE + 1e-9,
-    })
-  ) {
-    actions.editorTolerance(draft.toleranceQuality - 0.05);
-  }
-  text(ctx, draft.toleranceQuality.toFixed(2), left + 262, rowY + 24, value);
-  if (
-    button(vp, p, ui, { x: left + 330, y: rowY, w: 38, h: 34 }, "+", {
-      enabled: draft.toleranceQuality < MAX_TOLERANCE - 1e-9,
-    })
-  ) {
-    actions.editorTolerance(draft.toleranceQuality + 0.05);
-  }
+  let hx = spinner(
+    left,
+    rowY,
+    'chambers',
+    String(draft.chambers.length),
+    draft.chambers.length > MIN_CHAMBERS,
+    draft.chambers.length < MAX_CHAMBERS,
+    () => actions.editorChamberCount(draft.chambers.length - 1),
+    () => actions.editorChamberCount(draft.chambers.length + 1),
+  )
+  hx = spinner(
+    hx + 40,
+    rowY,
+    'tolerance',
+    draft.toleranceQuality.toFixed(2),
+    draft.toleranceQuality > MIN_TOLERANCE + 1e-9,
+    draft.toleranceQuality < MAX_TOLERANCE - 1e-9,
+    () => actions.editorTolerance(draft.toleranceQuality - 0.05),
+    () => actions.editorTolerance(draft.toleranceQuality + 0.05),
+  )
+
   // The number nobody can picture until it is in millimetres: how much room you get to stop in.
-  text(
-    ctx,
-    `capture window ${windowWidth(draft).toFixed(2)} mm`,
-    left + 386,
-    rowY + 24,
-    {
-      font: font(TYPE.dimension),
-      color: p.inkLight,
-    },
-  );
+  // Named as well as measured — "capture window" is the game's own term and this is the one screen
+  // where somebody meets it before they have ever felt one (D-133).
+  const windowText = editorCompact2
+    ? `${windowWidth(draft).toFixed(2)} mm capture window`
+    : `${windowWidth(draft).toFixed(2)} mm to stop in — the capture window`
+  /**
+   * Controls first, then the readout they produce — DECISIONS D-133.
+   *
+   * The capture window used to sit between the tolerance spinner and the keyway control, which put
+   * a sentence in the middle of a row of controls — and once that sentence said what it meant, it
+   * pushed the keyway off the end of the row and under the preview panel. A readout goes after the
+   * things that decide it, and takes whatever width is left.
+   */
+  const keyW = Math.max(220, (Math.ceil(captionWidth(vp, 'standard', bodySize)) + 28) * 2)
+  const keyXWanted = editorCompact2
+    ? left + Math.ceil(captionWidth(vp, windowText, dimSize)) + 40
+    : hx + 28
+  // Clamped out of the right-hand column: a segmented control drawn under the preview panel is a
+  // control you can neither see nor press.
+  const keyX = Math.min(keyXWanted, rightX - keyW - 30)
+  const windowX = editorCompact2 ? left : keyX + keyW + 34
+  const windowY = editorCompact2
+    ? row2Y + headRowH / 2 + dimSize * 0.36
+    : rowY + headRowH / 2 + dimSize * 0.36
+  text(ctx, windowText, windowX, windowY, { font: font(dimSize), color: p.inkLight })
 
-  label(ctx, "keyway", left + 620, rowY - 8, dim);
+  label(
+    ctx,
+    editorCompact2 ? 'keyway' : 'keyway — tight is a narrower pick path',
+    keyX,
+    row2Y - 8,
+    dim,
+  )
   const kw = segmented(
     vp,
     p,
     ui,
-    { x: left + 620, y: rowY, w: 220, h: 34 },
-    ["standard", "tight"],
-    draft.keyway === "tight" ? 1 : 0,
-  );
-  if (kw !== (draft.keyway === "tight" ? 1 : 0)) {
-    actions.editorKeyway(kw === 1 ? "tight" : "standard");
+    { x: keyX, y: row2Y, w: keyW, h: headRowH },
+    ['standard', 'tight'],
+    draft.keyway === 'tight' ? 1 : 0,
+  )
+  if (kw !== (draft.keyway === 'tight' ? 1 : 0)) {
+    actions.editorKeyway(kw === 1 ? 'tight' : 'standard')
   }
 
+  // Far enough up that the tallest the action row can grow still clears the status line at
+  // `LOGICAL_HEIGHT - MARGIN - 24` — the buttons size themselves from their captions now (D-132).
+  const footY =
+    LOGICAL_HEIGHT -
+    MARGIN -
+    60 -
+    Math.max(116, boxForCaption(vp, 'Save to bench', typeFor(vp, TYPE.body)).h * 2 + 20)
+
   // ── Per-chamber rows ──────────────────────────────────────────────────────────────────
-  const top = 262;
+  // Below the header, wherever it ended — the header is one row on a full page and two on a phone.
+  const top = Math.max(262, row2Y + headRowH + 30)
   /**
    * On a phone the rows take whatever height the draft leaves spare — DECISIONS D-131.
    *
@@ -2681,24 +3201,31 @@ export function drawEditor(c: ShellContext): void {
    * rows, and a sixteen-chamber monster degrades to exactly the 36 it has always had. The table
    * gets no taller either way, so the preview panel beside it never moves.
    */
-  const editorCompact = isCompact(vp);
-  const ROWS_BOTTOM = 838;
+  const editorCompact = isCompact(vp)
+  // Above the action row, which moves with its own captions now — 838 was a constant chosen when
+  // the row below it was a fixed 46px tall (D-132).
+  const ROWS_BOTTOM = footY - 24
   const rowH = editorCompact
     ? Math.max(
         36,
-        Math.min(
-          76,
-          Math.floor((ROWS_BOTTOM - top) / Math.max(1, draft.chambers.length)),
-        ),
+        Math.min(104, Math.floor((ROWS_BOTTOM - top) / Math.max(1, draft.chambers.length))),
       )
-    : 36;
+    : 36
+  const rowText = typeFor(vp, TYPE.body)
   /** Control height and its offset inside the row, so everything stays vertically centred. */
-  const rowCtlH = Math.min(rowH - 8, editorCompact ? 60 : 28);
-  const rowCtlY = (rowTop: number): number => rowTop + (rowH - rowCtlH) / 2;
-  const rowText = typeFor(vp, TYPE.body);
+  // At least what `button` will grow a control to, or consecutive rows overlap each other by the
+  // difference — `fitBox` grows about the centre, so it eats into the row above as well (D-132).
+  const rowCtlH = Math.min(rowH - 8, Math.max(editorCompact ? minControlH(vp, rowText) : 28, 28))
+  const rowCtlY = (rowTop: number): number => rowTop + (rowH - rowCtlH) / 2
+  /** A cell's value, shrunk until it clears the chevron drawn at the cell's right edge. */
+  const fitLabel = (str: string, cell: Rect, baseline: number, want: number): void => {
+    const room = cell.w - 20 - Math.ceil(captionWidth(vp, '>', want)) - 14
+    let size = want
+    while (size > 10 && captionWidth(vp, str, size) > room) size -= 1
+    label(ctx, str, cell.x + 10, baseline, { font: font(size), size, color: p.ink })
+  }
   /** Baseline for text set in the middle of a row. */
-  const rowBase = (rowTop: number): number =>
-    rowTop + rowH / 2 + rowText * 0.36;
+  const rowBase = (rowTop: number): number => rowTop + rowH / 2 + rowText * 0.36
   /**
    * Column offsets, which have to widen with the type — DECISIONS D-131.
    *
@@ -2726,48 +3253,34 @@ export function drawEditor(c: ShellContext): void {
         driverW: 260,
         spring: 600,
         springW: 160,
-      };
-  label(ctx, "#", left + 8, top - 8, dim);
+      }
+  label(ctx, '#', left + 8, top - 8, dim)
   // The unit moves into the heading on a phone: `3.40 mm` is 160px of type at the compact face and
   // the gap between the two nudges is 120, and a unit repeated down every row is the part to cut.
-  label(
-    ctx,
-    editorCompact ? "key pin mm" : "key pin",
-    left + COL.minus,
-    top - 8,
-    dim,
-  );
-  label(ctx, "driver", left + COL.driver, top - 8, dim);
-  label(ctx, "spring", left + COL.spring, top - 8, dim);
+  label(ctx, editorCompact ? 'key pin mm' : 'key pin', left + COL.minus, top - 8, dim)
+  label(ctx, 'driver', left + COL.driver, top - 8, dim)
+  label(ctx, 'spring', left + COL.spring, top - 8, dim)
   if (!editorCompact) {
-    label(ctx, "sets at", left + 800, top - 8, dim);
-    label(ctx, "false sets", left + 900, top - 8, dim);
+    label(ctx, 'sets at', left + 800, top - 8, dim)
+    label(ctx, 'false sets', left + 890, top - 8, dim)
   }
 
   for (let i = 0; i < draft.chambers.length; i += 1) {
-    const row = draft.chambers[i];
-    if (!row) continue;
-    const y = top + i * rowH;
-    const base = rowBase(y);
-    const cy = rowCtlY(y);
+    const row = draft.chambers[i]
+    if (!row) continue
+    const y = top + i * rowH
+    const base = rowBase(y)
+    const cy = rowCtlY(y)
     text(ctx, String(i + 1), left + 8, base, {
       font: font(rowText),
       color: p.inkLight,
-    });
+    })
 
     // The two nudges are the smallest targets in the game. They keep their drawn size on a full
     // page and take the row's height on a phone; the near-miss floor (D-131) covers the rest.
-    const nudgeW = editorCompact ? 52 : 30;
-    if (
-      button(
-        vp,
-        p,
-        ui,
-        { x: left + COL.minus, y: cy, w: nudgeW, h: rowCtlH },
-        "-",
-      )
-    ) {
-      actions.editorDepth(i, row.depth - 0.1);
+    const nudgeW = editorCompact ? 52 : 30
+    if (button(vp, p, ui, { x: left + COL.minus, y: cy, w: nudgeW, h: rowCtlH }, '-')) {
+      actions.editorDepth(i, row.depth - 0.1)
     }
     text(
       ctx,
@@ -2778,18 +3291,10 @@ export function drawEditor(c: ShellContext): void {
         font: font(rowText),
         color: p.ink,
       },
-    );
+    )
     // `3.40 mm` is 88px at 21px type and used to be given 80 before the `+` landed (D-102).
-    if (
-      button(
-        vp,
-        p,
-        ui,
-        { x: left + COL.plus, y: cy, w: nudgeW, h: rowCtlH },
-        "+",
-      )
-    ) {
-      actions.editorDepth(i, row.depth + 0.1);
+    if (button(vp, p, ui, { x: left + COL.plus, y: cy, w: nudgeW, h: rowCtlH }, '+')) {
+      actions.editorDepth(i, row.depth + 0.1)
     }
 
     const pinRect: Rect = {
@@ -2797,65 +3302,49 @@ export function drawEditor(c: ShellContext): void {
       y: cy,
       w: COL.driverW,
       h: rowCtlH,
-    };
-    const pinState = ui.widget(pinRect);
-    cardFrame(vp, p, pinRect, pinState, false);
-    label(ctx, row.pin, pinRect.x + 10, base, {
-      font: font(rowText),
-      size: rowText,
-      color: p.ink,
-    });
-    text(ctx, ">", pinRect.x + pinRect.w - 12, base, {
+    }
+    const pinState = ui.widget(pinRect)
+    cardFrame(vp, p, pinRect, pinState, false)
+    fitLabel(row.pin, pinRect, base, rowText)
+    text(ctx, '>', pinRect.x + pinRect.w - 12, base, {
       font: font(rowText),
       color: p.inkLight,
-      align: "right",
-    });
-    if (pinState.activated) actions.editorCyclePin(i);
+      align: 'right',
+    })
+    if (pinState.activated) actions.editorCyclePin(i)
 
     const sprRect: Rect = {
       x: left + COL.spring,
       y: cy,
       w: COL.springW,
       h: rowCtlH,
-    };
-    const sprState = ui.widget(sprRect);
-    cardFrame(vp, p, sprRect, sprState, false);
-    label(
-      ctx,
-      SPRING_CHOICES[row.spring]?.label ?? "normal",
-      sprRect.x + 10,
-      base,
-      {
-        font: font(rowText),
-        size: rowText,
-        color: p.ink,
-      },
-    );
-    text(ctx, ">", sprRect.x + sprRect.w - 12, base, {
+    }
+    const sprState = ui.widget(sprRect)
+    cardFrame(vp, p, sprRect, sprState, false)
+    // The value stops short of the chevron's column — at the compact face NORMAL reached the
+    // card's right edge and printed straight through the `>` (D-132).
+    fitLabel(SPRING_CHOICES[row.spring]?.label ?? 'normal', sprRect, base, rowText)
+    // The chevron gets a column of its own; at the compact face 'NORMAL' reached the card's right
+    // edge and printed through it (D-132).
+    text(ctx, '>', sprRect.x + sprRect.w - 10, base, {
       font: font(rowText),
       color: p.inkLight,
-      align: "right",
-    });
-    if (sprState.activated) actions.editorCycleSpring(i);
+      align: 'right',
+    })
+    if (sprState.activated) actions.editorCycleSpring(i)
 
     // What those three choices add up to, in the simulation's own terms. Both are derived from the
     // driver named two columns left, so they are what the compact table can afford to lose.
     if (!editorCompact) {
-      const lies = PROFILES[row.pin].grooveCount;
-      text(
-        ctx,
-        `${(MAX_KEY_PIN - row.depth).toFixed(2)} mm`,
-        left + 800,
-        base,
-        {
-          ...value,
-          font: font(rowText),
-        },
-      );
-      text(ctx, lies === 0 ? "—" : String(lies), left + 900, base, {
+      const lies = PROFILES[row.pin].grooveCount
+      text(ctx, `${(MAX_KEY_PIN - row.depth).toFixed(2)} mm`, left + 800, base, {
+        ...value,
+        font: font(rowText),
+      })
+      text(ctx, lies === 0 ? '—' : String(lies), left + 900, base, {
         font: font(rowText),
         color: lies > 0 ? readable.violet : p.inkLight,
-      });
+      })
     }
   }
 
@@ -2881,43 +3370,75 @@ export function drawEditor(c: ShellContext): void {
    * Drawn from the same `LockDef` the Test pick button would hand the simulation, so what you are
    * looking at is what you are about to pick, not an illustration of it. See DECISIONS D-099, D-100.
    */
-  const previewDef = draftToLockDef(draft, progress.data.customLocks.length);
-  const preview: Rect = { x: left + 980, y: 254, w: 490, h: 430 };
-  panel(vp, p, preview, "preview");
-  drawLockGlyph(
-    vp,
-    p,
-    previewDef,
-    {
-      x: preview.x + 40,
-      y: preview.y + 70,
-      w: preview.w - 80,
-      h: preview.h - 170,
-    },
-    false,
-    14,
-  );
+  /**
+   * The preview and the shelf are the first things to go when the page runs out — D-132.
+   *
+   * The editor is the densest screen in the game: a name field, two spinners, a keyway control, a
+   * table of up to sixteen rows with five columns each, an action row, a share-code block, a live
+   * preview and a shelf of saved locks. On a 658x320 phone the type is 2.2x and the stage is the
+   * same 1920 wide, so the preview panel at x = left + 980 lands on the keyway control and the
+   * shelf's text runs through the preview.
+   *
+   * The table is the editor. The preview is a nicety you can get by pressing Test pick, and the
+   * shelf is a copy of a page that has its own entry in the nav bar directly above it. Below 0.34
+   * they both go, and the table takes the width — which is what makes the header stop wrapping too.
+   */
+  /**
+   * The preview and the shelf are desktop furniture — DECISIONS D-134.
+   *
+   * They were gated at 0.34, which kept them on a mid-sized phone, and a mid-sized phone is exactly
+   * where they hurt: reported as *"in the mobile editor there are too many buttons and things — Your
+   * locks is just a mess"*. Both are duplicates of something a tap away. The preview shows the lock
+   * you are about to pick and `Test pick` shows you the real one; the shelf lists locks you have
+   * saved and the Share codes page in the nav bar directly above it lists them with more room and
+   * more to do with them.
+   *
+   * What is left is the table, which is the editor, and the row of actions under it.
+   */
+  const roomy = !isCompact(vp)
+  /**
+   * The right of the page is **one column**, on one left edge — DECISIONS D-133.
+   *
+   * It was three things at three different x: a preview panel at left+980, a shelf of saved locks
+   * pushed out to left+1500, and the share-code block at left+850 — which is not even clear of the
+   * table's own last column. A review measured a 22px step between two blocks stacked in the same
+   * column and found the shelf sitting unframed in the leftover strip, wrapping to four short lines
+   * and truncating. Three edges is not a column; it is three things that happen to be on the right.
+   *
+   * One x, one width, everything in it framed the same way.
+   */
+  const previewDef = draftToLockDef(draft, progress.data.customLocks.length)
+  const preview: Rect = { x: rightX, y: 254, w: rightW, h: 330 }
+  if (roomy) panel(vp, p, preview, 'preview')
+  if (roomy)
+    drawLockGlyph(
+      vp,
+      p,
+      previewDef,
+      { x: preview.x + 40, y: preview.y + 70, w: preview.w - 80, h: preview.h - 170 },
+      false,
+      14,
+    )
   // The keyway and the capture window are both already spelled out in the controls above; repeating
   // them here cost a third line and got the summary truncated to "· no…" instead (D-102).
-  const security = draft.chambers.filter(
-    (r) => PROFILES[r.pin].grooveCount > 0,
-  ).length;
-  paragraph(
-    ctx,
-    `${draft.chambers.length} chambers  ·  ` +
-      (security === 0
-        ? "no security pins"
-        : `${security} security pin${security === 1 ? "" : "s"}`),
-    preview.x + 40,
-    preview.y + preview.h - 52,
-    {
-      font: font(TYPE.body),
-      color: p.inkLight,
-      maxWidth: preview.w - 80,
-      lineHeight: 28,
-      maxLines: 2,
-    },
-  );
+  const security = draft.chambers.filter((r) => PROFILES[r.pin].grooveCount > 0).length
+  if (roomy)
+    paragraph(
+      ctx,
+      `${draft.chambers.length} chambers  ·  ` +
+        (security === 0
+          ? 'no security pins'
+          : `${security} security pin${security === 1 ? '' : 's'}`),
+      preview.x + 40,
+      preview.y + preview.h - 52,
+      {
+        font: font(typeFor(vp, TYPE.body)),
+        color: p.inkLight,
+        maxWidth: preview.w - 80,
+        lineHeight: 28,
+        maxLines: 2,
+      },
+    )
 
   // ── Locks this player has already built ───────────────────────────────────────────────
   //
@@ -2925,101 +3446,104 @@ export function drawEditor(c: ShellContext): void {
   // an overflow warning to prove it, and a lock you made belongs next to the thing that made it.
   // Pushed out past the preview column, and clear of `false sets` so the header stops reading as a
   // seventh column of the table.
-  const shelfX = left + 1500;
-  label(ctx, "your locks", shelfX, top - 8, dim);
-  const saved = progress.data.customLocks;
-  if (saved.length === 0) {
-    paragraph(
-      ctx,
-      "nothing saved yet — build one on the left and press Save to bench",
-      shelfX,
-      top + 20,
-      {
-        font: font(TYPE.dimension),
-        color: p.inkLight,
-        maxWidth: 310,
-        lineHeight: 17,
-        maxLines: 3,
-      },
-    );
-  }
-  saved.forEach((def, i) => {
-    const rect: Rect = { x: shelfX, y: top + i * 46, w: 320, h: 40 };
-    if (rect.y + rect.h > LOGICAL_HEIGHT - MARGIN - 150) return;
-    const st = ui.widget(rect);
-    cardFrame(vp, p, rect, st, false);
-    paragraph(ctx, def.name, rect.x + 10, rect.y + 18, {
-      font: font(TYPE.body),
-      color: p.ink,
-      maxWidth: 200,
-      lineHeight: 15,
-      maxLines: 1,
-    });
-    text(ctx, `${def.bitting.length} chambers`, rect.x + 10, rect.y + 33, {
-      font: font(TYPE.dimension),
-      color: p.inkLight,
-    });
-    if (st.activated) actions.startLock(def);
-    if (
-      button(
-        vp,
-        p,
-        ui,
-        { x: rect.x + 232, y: rect.y + 6, w: 78, h: 28 },
-        "edit",
+  // In the same column as the preview, framed like it, under it — not parked in the strip that
+  // was left over. It goes with the preview on the smallest phones (D-132): it is a copy of the
+  // codes page, which is one tap away in the nav bar directly above this column.
+  const shelf: Rect = { x: rightX, y: preview.y + preview.h + 26, w: rightW, h: 210 }
+  const shelfX = shelf.x + 16
+  if (roomy) {
+    panel(vp, p, shelf, 'your locks')
+    const saved = progress.data.customLocks
+    if (saved.length === 0) {
+      paragraph(
+        ctx,
+        'nothing saved yet — build one on the left and press Save to bench',
+        shelfX,
+        shelf.y + 60,
+        {
+          font: font(typeFor(vp, TYPE.dimension)),
+          color: p.inkLight,
+          maxWidth: rightW - 32,
+          lineHeight: typeFor(vp, TYPE.dimension) + 5,
+          maxLines: 3,
+        },
       )
-    ) {
-      actions.editorLoad(i);
     }
-  });
+    saved.forEach((def, i) => {
+      const rect: Rect = { x: shelfX, y: shelf.y + 44 + i * 46, w: rightW - 32, h: 40 }
+      if (rect.y + rect.h > shelf.y + shelf.h - 10) return
+      const st = ui.widget(rect)
+      cardFrame(vp, p, rect, st, false)
+      paragraph(ctx, def.name, rect.x + 10, rect.y + 18, {
+        font: font(typeFor(vp, TYPE.body)),
+        color: p.ink,
+        maxWidth: 200,
+        lineHeight: 15,
+        maxLines: 1,
+      })
+      text(ctx, `${def.bitting.length} chambers`, rect.x + 10, rect.y + 33, {
+        font: font(typeFor(vp, TYPE.dimension)),
+        color: p.inkLight,
+      })
+      if (st.activated) actions.startLock(def)
+      if (button(vp, p, ui, { x: rect.x + 232, y: rect.y + 6, w: 78, h: 28 }, 'edit')) {
+        actions.editorLoad(i)
+      }
+    })
 
-  // ── Verdict and actions ───────────────────────────────────────────────────────────────
-  /**
-   * The verdict, and **only when there is one**.
-   *
-   * This line exists to say why `Save to bench` is greyed out. When nothing is wrong it used to
-   * print "valid — every chamber sets, and every groove sits below the shear line", which is a
-   * permanent sentence that tells you what the two enabled buttons underneath it already tell you.
-   * Asked directly: *"there is a text 'valid — every chamber' — why is it there?"* — and the honest
-   * answer was that it did not need to be. Silence is the valid state now. See DECISIONS D-103.
-   */
-  const footY = LOGICAL_HEIGHT - MARGIN - 116;
-  if (problem) {
-    paragraph(ctx, problem, left, footY - 14, {
-      font: font(TYPE.body),
-      color: readable.crimson,
-      maxWidth: BENCH_WIDTH,
-      lineHeight: 24,
-      maxLines: 2,
-    });
+    // ── Verdict and actions ───────────────────────────────────────────────────────────────
+    /**
+     * The verdict, and **only when there is one**.
+     *
+     * This line exists to say why `Save to bench` is greyed out. When nothing is wrong it used to
+     * print "valid — every chamber sets, and every groove sits below the shear line", which is a
+     * permanent sentence that tells you what the two enabled buttons underneath it already tell you.
+     * Asked directly: *"there is a text 'valid — every chamber' — why is it there?"* — and the honest
+     * answer was that it did not need to be. Silence is the valid state now. See DECISIONS D-103.
+     */
+    if (problem) {
+      paragraph(ctx, problem, left, footY - 14, {
+        font: font(typeFor(vp, TYPE.body)),
+        color: readable.crimson,
+        maxWidth: BENCH_WIDTH,
+        lineHeight: 24,
+        maxLines: 2,
+      })
+    }
   }
+
+  /**
+   * The footer's three actions, measured from their own captions — DECISIONS D-132.
+   *
+   * `Save to bench` in a 220px box is fine at 21px type and impossible at 38: `button` shrinks a
+   * caption that will not fit across, so on a phone the primary action on this screen was drawn at
+   * seven CSS px. Widths come from the words, and the row is laid out left to right from them so
+   * the three cannot overlap whatever they grow to.
+   */
+  const footCaps = ['Test pick', 'Save to bench', 'New draft'] as const
+  const footSize = typeFor(vp, TYPE.body)
+  const footBtn = (caption: string): { w: number; h: number } =>
+    boxForCaption(vp, caption, footSize, { w: 170, h: 46 })
+  const footX = (i: number): number =>
+    left + footCaps.slice(0, i).reduce((sum, cap) => sum + footBtn(cap).w + 20, 0)
 
   if (
-    button(vp, p, ui, { x: left, y: footY, w: 200, h: 46 }, "Test pick", {
+    button(vp, p, ui, { x: left, y: footY, ...footBtn('Test pick') }, 'Test pick', {
       primary: true,
       enabled: !problem,
     })
   ) {
-    actions.editorTest();
+    actions.editorTest()
   }
   if (
-    button(
-      vp,
-      p,
-      ui,
-      { x: left + 220, y: footY, w: 220, h: 46 },
-      "Save to bench",
-      {
-        enabled: !problem,
-      },
-    )
+    button(vp, p, ui, { x: footX(1), y: footY, ...footBtn('Save to bench') }, 'Save to bench', {
+      enabled: !problem,
+    })
   ) {
-    actions.editorSave();
+    actions.editorSave()
   }
-  if (
-    button(vp, p, ui, { x: left + 460, y: footY, w: 170, h: 46 }, "New draft")
-  ) {
-    actions.editorReset();
+  if (button(vp, p, ui, { x: footX(2), y: footY, ...footBtn('New draft') }, 'New draft')) {
+    actions.editorReset()
   }
 
   /**
@@ -3030,35 +3554,65 @@ export function drawEditor(c: ShellContext): void {
    * turn a dial. It is copy and paste rather than a text field because a share code is a thing you
    * receive from somewhere else, and typing sixteen characters by hand is not the flow (D-093).
    */
-  const code = problem
-    ? null
-    : encodeLock(draftToLockDef(draft, progress.data.customLocks.length));
-  label(ctx, "share code", left + 850, footY - 14, dim);
-  text(ctx, code ? formatCode(code) : "—", left + 850, footY + 20, {
-    font: font(TYPE.heading),
+  const code = problem ? null : encodeLock(draftToLockDef(draft, progress.data.customLocks.length))
+  /*
+   * The share-code block, stacked from its own type — DECISIONS D-132.
+   *
+   * Heading at -14, the code at +20 and a button row at +34: an 18px gap between a 26px face and
+   * the row under it, which is a collision at any scale above the one it was drawn for. The code
+   * was printed through its own `SHARE CODE` label and the buttons through the code.
+   */
+  const codeSize = typeFor(vp, TYPE.heading)
+  // To the right of wherever the action row actually ended — those three buttons are sized from
+  // their own captions now, so 850 is no longer guaranteed to be clear of them (D-132).
+  // The same edge as the preview and the shelf above it, and still clear of the action row.
+  const shareX = Math.max(rightX, footX(3) + 40)
+  label(ctx, 'share code', shareX, footY - 14, dim)
+  text(ctx, code ? formatCode(code) : '—', shareX, footY + codeSize * 0.9, {
+    font: font(codeSize),
     color: code ? p.ink : p.rule,
-  });
+  })
+  const clipY = footY + codeSize + 16
   if (
-    button(vp, p, ui, { x: left + 850, y: footY + 34, w: 120, h: 34 }, "Copy", {
+    button(vp, p, ui, { x: shareX, y: clipY, ...footBtn('Copy') }, 'Copy', {
       enabled: !!code,
     })
   ) {
-    actions.editorCopyCode();
+    actions.editorCopyCode()
   }
+  /*
+   * Paste and All codes are not drawn on a phone — DECISIONS D-134.
+   *
+   * Pasting a code to edit, and browsing every code, are both the Share codes page's job — and it
+   * is in the nav bar at the top of this screen. What the editor uniquely produces is *this* lock's
+   * code, so the code and Copy stay and the two navigational duplicates go.
+   */
   if (
-    button(vp, p, ui, { x: left + 985, y: footY + 34, w: 120, h: 34 }, "Paste")
-  ) {
-    actions.editorPasteCode();
-  }
-  if (
+    roomy &&
     button(
       vp,
       p,
       ui,
-      { x: left + 1120, y: footY + 34, w: 190, h: 34 },
-      "All codes",
+      { x: shareX + footBtn('Copy').w + 15, y: clipY, ...footBtn('Paste') },
+      'Paste',
     )
   ) {
-    actions.goto("codes");
+    actions.editorPasteCode()
+  }
+  if (
+    roomy &&
+    button(
+      vp,
+      p,
+      ui,
+      {
+        x: shareX + footBtn('Copy').w + footBtn('Paste').w + 30,
+        y: clipY,
+        ...footBtn('All codes'),
+      },
+      'All codes',
+    )
+  ) {
+    actions.goto('codes')
   }
 }

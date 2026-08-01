@@ -7,11 +7,9 @@ import {
   captureStage,
   getState,
   loadLock,
+  openCurrentLock,
   renderOnce,
-  setInput,
   setManual,
-  stepTicks,
-  type StateSnapshot,
 } from './harness'
 
 async function screen(page: Page): Promise<string> {
@@ -39,29 +37,6 @@ async function setSave(page: Page, data: SaveDataShape): Promise<void> {
 }
 
 /** Drive the currently-loaded lock to an open through the scripted input API. */
-async function openCurrentLock(page: Page, tension = 0.45): Promise<StateSnapshot> {
-  await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: tension })
-  await stepTicks(page, 60)
-  for (let round = 0; round < 40; round += 1) {
-    const state = await getState(page)
-    if (state.opened) return state
-    const b = state.bindingChamber
-    const target = b >= 0 ? state.chambers[b] : state.chambers.find((c) => c.state === 'FALSE_SET')
-    if (!target) {
-      await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: 0.6 })
-      await stepTicks(page, 120)
-      continue
-    }
-    await setInput(page, {
-      chamber: target.index,
-      liftTarget: target.setLift + target.captureWindow * 0.5,
-      tensionHeld: true,
-      tensionLevel: tension,
-    })
-    await stepTicks(page, 240)
-  }
-  return getState(page)
-}
 
 test('menu to bench to pick to results to bench', async ({ page }) => {
   const watcher = await bootGame(page, { frames: 3 })

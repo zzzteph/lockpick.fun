@@ -56,9 +56,21 @@ export const DRAFTING: Palette = {
   paper: '#F4F1EA',
   paperShade: '#E7E2D8',
   ink: '#1C1B19',
-  // Spec said #6B6862; that lands at 4.35:1 on `paperShade` and fails the WCAG AA rule
-  // the same document sets. Darkened to the nearest value that clears 4.5:1. See D-004.
-  inkLight: '#666460',
+  /**
+   * Spec said #6B6862; that lands at 4.35:1 on `paperShade` and fails the WCAG AA rule the same
+   * document sets. Darkened to the nearest value that clears 4.5:1 (D-004) — and darkened again to
+   * #5C5A56 for **DECISIONS D-135**.
+   *
+   * 4.57:1 on `paperShade` was measured against the *palette*, and the palette is not what text is
+   * drawn on. The page is drafting paper: a lattice of `rule` hairlines over `paper`, with panels
+   * and cards over that, so the real ground under a caption ranges down to about #DBD6CD — where
+   * #666460 is 4.08:1 and fails. Nothing had ever measured it, because nothing had ever *sampled*
+   * it; the check that found this reads the pixels under each run before the glyphs go down.
+   *
+   * #5C5A56 is 4.76:1 on the worst ground the sweep observes, 6.10:1 on paper and 5.33:1 on
+   * paperShade. Still visibly a secondary tone against `ink` at 16.4:1.
+   */
+  inkLight: '#5C5A56',
   rule: '#C9C3B6',
   steel: '#8C9199',
   plugBody: '#E9DFC0',
@@ -232,7 +244,16 @@ const readableCache = new Map<ThemeName, ReadableAccents>()
 export function readableAccents(p: Palette): ReadableAccents {
   const hit = readableCache.get(p.name)
   if (hit) return hit
-  const bg = p.paperShade
+  /**
+   * Measured against `rule`, not `paperShade` — DECISIONS D-135.
+   *
+   * `paperShade` is the lightest surface an accent word lands on and therefore the *easiest* test.
+   * The page is drafting paper — a lattice of `rule` hairlines under everything — so a caption's
+   * real ground runs down to about #DBD6CD, and accents tuned to 4.5:1 on paperShade came out at
+   * 3.86:1 there. `rule` is the darkest ground text ever sits on, so tuning to it clears every
+   * lighter one by construction.
+   */
+  const bg = p.rule
   const out: ReadableAccents = {
     amber: ensureContrast(p.amber, bg),
     teal: ensureContrast(p.teal, bg),

@@ -524,3 +524,34 @@ export async function workChamber(page: Page, chamber: number, liftMm: number): 
   const { pickStrain } = await getState(page)
   if (pickStrain > 0.45) await relieve(page)
 }
+
+/**
+ * Open the current lock the way a scripted player would — DECISIONS D-136.
+ *
+ * Lives here rather than in a spec because Playwright forbids one spec importing another, and
+ * because "open a lock" is a thing three suites now need: the shell flow, the mobile results audit,
+ * and anything else that has to get past the pick screen. Two copies of it would drift.
+ */
+export async function openCurrentLock(page: Page, tension = 0.45): Promise<HookStateType> {
+  await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: tension })
+  await stepTicks(page, 60)
+  for (let round = 0; round < 40; round += 1) {
+    const state = await getState(page)
+    if (state.opened) return state
+    const b = state.bindingChamber
+    const target = b >= 0 ? state.chambers[b] : state.chambers.find((c) => c.state === 'FALSE_SET')
+    if (!target) {
+      await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: 0.6 })
+      await stepTicks(page, 120)
+      continue
+    }
+    await setInput(page, {
+      chamber: target.index,
+      liftTarget: target.setLift + target.captureWindow * 0.5,
+      tensionHeld: true,
+      tensionLevel: tension,
+    })
+    await stepTicks(page, 240)
+  }
+  return getState(page)
+}

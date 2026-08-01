@@ -310,12 +310,21 @@ describe('the key legend', () => {
 })
 
 describe('the touch controls', () => {
-  it('sit in the gutter, clear of the lock at every chamber count', () => {
+  /**
+   * Each pad is clear of the lock in **its own** gutter — DECISIONS D-133.
+   *
+   * This used to check all three against the left edge of the assembly, which was right while all
+   * three lived in the left gutter. Pause moved to the right one, so that assertion stopped meaning
+   * "clear of the lock" and started meaning "on the left" — and the property worth keeping is the
+   * first. The lock widens with the chamber count, so it is still checked at every count.
+   */
+  it('sit in a gutter, clear of the lock at every chamber count', () => {
     for (let n = MIN_CHAMBERS; n <= MAX_CHAMBERS; n += 1) {
       const assembly = assemblyBounds(computeLayout(n, 0))
-      for (const r of [WRENCH_SLIDER, WITHDRAW_PAD, PAUSE_PAD]) {
-        expect(r.x + r.w, `n=${n}`).toBeLessThanOrEqual(assembly.x)
+      for (const r of [WRENCH_SLIDER, WITHDRAW_PAD]) {
+        expect(r.x + r.w, `left gutter, n=${n}`).toBeLessThanOrEqual(assembly.x)
       }
+      expect(PAUSE_PAD.x, `right gutter, n=${n}`).toBeGreaterThanOrEqual(assembly.x + assembly.w)
     }
   })
 

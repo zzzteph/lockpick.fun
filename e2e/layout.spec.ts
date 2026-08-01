@@ -1,0 +1,173 @@
+/**
+ * Every screen, on every phone, checked by the drawing itself — DECISIONS D-132.
+ *
+ * The mobile bugs in this project have all been found the same way: somebody looked at a
+ * screenshot. That does not cover ten screens across twelve devices, and it never catches what
+ * nobody thought to look at — `help` had text drawn through its own tab row on a Galaxy S24 for as
+ * long as the screen existed, and the suite rendered `help` on exactly one viewport.
+ *
+ * So the drawing reports itself. `auditScreen` renders one frame with the probe on and returns
+ * every glyph run's box; the rules in `src/render/audit.ts` then say whether anything is
+ * unreadably small, on top of anything else, or off the edge of the stage.
+ *
+ * This is a **sweep**, not a demonstration: it is meant to fail loudly with a list, and the list is
+ * the work queue.
+ */
+
+import { expect, test, type Page } from '@playwright/test'
+import { bootGame, loadLock, renderOnce, setInput, setManual, stepTicks } from './harness'
+
+/** The same roster the pick-screen matrix uses, so one device list serves both. */
+export const PHONES: { name: string; width: number; height: number }[] = [
+  { name: 'iphone-se3', width: 667, height: 375 },
+  { name: 'iphone-13-mini', width: 629, height: 375 },
+  { name: 'iphone-13', width: 664, height: 390 },
+  { name: 'iphone-14-pro', width: 660, height: 393 },
+  { name: 'iphone-15-pro-max', width: 739, height: 430 },
+  { name: 'iphone-16-pro', width: 681, height: 402 },
+  { name: 'iphone-17-pro-max', width: 763, height: 440 },
+  { name: 'galaxy-s9-plus', width: 658, height: 320 },
+  { name: 'galaxy-s24', width: 780, height: 360 },
+  { name: 'galaxy-z-flip-7', width: 764, height: 360 },
+  { name: 'galaxy-z-fold-7', width: 1016, height: 984 },
+  { name: 'galaxy-tab-s9', width: 1024, height: 640 },
+  /**
+   * The extremes — DECISIONS D-135.
+   *
+   * "It must be accessible and usable under every single mobile screen." The list above is the
+   * phones people actually hold; these are the edges of the space, and an edge is where a layout
+   * that merely *fits* stops fitting. `iphone-se1` is the smallest landscape viewport a browser
+   * still ships (0.296 stage scale is not the floor — 0.264 is), and the folds are the widest and
+   * the squarest.
+   */
+  { name: 'iphone-se1', width: 568, height: 320 },
+  { name: 'pixel-4a', width: 700, height: 340 },
+  { name: 'galaxy-a14', width: 720, height: 340 },
+  { name: 'pixel-9-pro-fold', width: 1080, height: 892 },
+  { name: 'ipad-mini', width: 1024, height: 768 },
+]
+
+/** Two desktop sizes as well, so a fix for a phone cannot quietly break the full page. */
+const DESKTOPS = [
+  { name: 'laptop-1280', width: 1280, height: 800 },
+  { name: 'desktop-1920', width: 1920, height: 1080 },
+]
+
+type Finding = { kind: string; detail: string; value: number }
+
+async function audit(page: Page): Promise<{ findings: Finding[]; drawn: number; scale: number }> {
+  return page.evaluate(() => globalThis.__shearline!.auditScreen())
+}
+
+async function goto(page: Page, name: string): Promise<void> {
+  await page.evaluate((n) => {
+    globalThis.__shearline?.goto(n)
+  }, name)
+  await renderOnce(page)
+}
+
+/**
+ * Put the game on a screen with something real on it.
+ *
+ * An empty screen passes every layout rule trivially, so each of these arranges for the state that
+ * actually draws text: a lock loaded, a draft in the editor, an attempt finished.
+ */
+const SCREENS: { name: string; arrange: (page: Page) => Promise<void> }[] = [
+  { name: 'menu', arrange: async (p) => goto(p, 'menu') },
+  { name: 'bench', arrange: async (p) => goto(p, 'bench') },
+  { name: 'trophies', arrange: async (p) => goto(p, 'trophies') },
+  { name: 'codes', arrange: async (p) => goto(p, 'codes') },
+  { name: 'editor', arrange: async (p) => goto(p, 'editor') },
+  { name: 'settings', arrange: async (p) => goto(p, 'settings') },
+  { name: 'help', arrange: async (p) => goto(p, 'help') },
+  {
+    name: 'pick',
+    arrange: async (p) => {
+      await setManual(p, true)
+      await loadLock(p, 22, 5)
+      await setInput(p, { chamber: 2, liftTarget: 1.2, tensionHeld: true, tensionLevel: 0.45 })
+      await stepTicks(p, 90)
+      await renderOnce(p)
+    },
+  },
+  {
+    /**
+     * The pause screen was never audited — DECISIONS D-135.
+     *
+     * The sweep listed the eight screens somebody navigates *to*, and pause is reached by pressing
+     * a button mid-attempt, so it fell through the gap. It is drawn over a live pick screen with
+     * its own panel and buttons, which is exactly the arrangement that goes wrong when type scales.
+     */
+    name: 'pause',
+    arrange: async (p) => {
+      await setManual(p, true)
+      await loadLock(p, 22, 5)
+      await setInput(p, { chamber: 2, liftTarget: 1.2, tensionHeld: true, tensionLevel: 0.45 })
+      await stepTicks(p, 90)
+      await goto(p, 'pause')
+    },
+  },
+]
+
+/** One line per finding, worst first, so a failure message is a work queue. */
+function report(where: string, findings: Finding[]): string {
+  const lines = findings.slice(0, 14).map((f) => `  [${f.kind}] ${f.detail}`)
+  const more = findings.length > lines.length ? `\n  …and ${findings.length - lines.length} more` : ''
+  return `${where}: ${findings.length} layout findings\n${lines.join('\n')}${more}`
+}
+
+/**
+ * Both themes — DECISIONS D-135.
+ *
+ * Blueprint is a cosmetic alternate: the same layout in a dark palette, with the accents brightened
+ * to clear contrast against a dark ground. "Cosmetic" is exactly why it needs checking — every
+ * contrast figure in the game was tuned for Drafting, and a reversed palette is where a colour
+ * chosen by eye stops working. It is a setting a player can turn on and then never leave.
+ */
+const THEMES = ['drafting', 'blueprint'] as const
+
+/** Boot with a theme already chosen, so the first frame is drawn in it. */
+async function useTheme(page: Page, theme: string): Promise<void> {
+  await page.addInitScript((t) => {
+    const raw = {
+      version: 5,
+      records: {},
+      achievements: [],
+      tutorial: [],
+      playDays: {},
+      customLocks: [],
+      settings: { theme: t },
+    }
+    localStorage.setItem('shearline.save.v1', JSON.stringify(raw))
+  }, theme)
+}
+
+for (const device of [...PHONES, ...DESKTOPS]) {
+  for (const theme of THEMES) {
+    test.describe(`${device.name} · ${theme}`, () => {
+      test.use({
+        viewport: { width: device.width, height: device.height },
+        hasTouch: true,
+        isMobile: device.width < 1100,
+      })
+
+      for (const screen of SCREENS) {
+        test(`${screen.name} is laid out for ${device.name} in ${theme}`, async ({ page }) => {
+          await useTheme(page, theme)
+          const watcher = await bootGame(page, { frames: 3 })
+          await screen.arrange(page)
+          const result = await audit(page)
+          expect(
+            result.drawn,
+            'the screen drew nothing — the audit would pass vacuously',
+          ).toBeGreaterThan(3)
+          expect(
+            result.findings,
+            report(`${screen.name} @ ${device.name} (${theme})`, result.findings),
+          ).toEqual([])
+          watcher.assertClean()
+        })
+      }
+    })
+  }
+}

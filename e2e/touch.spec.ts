@@ -152,6 +152,64 @@ test('dragging up lifts the pin under the finger, and letting go drops it', asyn
   watcher.assertClean()
 })
 
+/**
+ * Playable at every size, not merely laid out at every size — DECISIONS D-135.
+ *
+ * `layout.spec.ts` proves nothing collides and everything is readable and reachable on nineteen
+ * devices. It cannot prove the game can be *finished* on them: the wrench is a geared drag, the lift
+ * is a geared drag, and both are expressed in logical pixels that shrink with the stage. On the
+ * smallest phone a full-range wrench drag is 620 logical px against a 320px-tall viewport — the
+ * gesture leaves the screen, and whether that still works is a question about pointer capture, not
+ * about layout.
+ *
+ * So the strongest usability assertion available is run at the edges of the matrix: open a lock,
+ * with touches only, on the smallest screen a browser ships and on the largest fold.
+ */
+const PLAYABLE_ON = [
+  { name: 'iphone-se1', width: 568, height: 320 },
+  { name: 'galaxy-s9-plus', width: 658, height: 320 },
+  { name: 'iphone-13', width: 664, height: 390 },
+  { name: 'galaxy-z-fold-7', width: 1016, height: 984 },
+]
+
+for (const device of PLAYABLE_ON) {
+  test.describe(`playable on ${device.name}`, () => {
+    test.use({ viewport: { width: device.width, height: device.height } })
+
+    test(`a lock can be opened with touches alone on ${device.name}`, async ({ page }) => {
+      const watcher = await bootGame(page)
+      await loadLock(page, PRACTICE, 3)
+      await setManual(page, true)
+      await setWrench(page, 5)
+
+      const geometry = await page.evaluate(() => globalThis.__shearline?.getGeometry())
+      const centres = (geometry?.chambers ?? []).map((c) => c.shellX)
+
+      for (let attempt = 0; attempt < 24; attempt += 1) {
+        const state = await getState(page)
+        if (state.opened) break
+        const binding = state.bindingChamber
+        const index = binding >= 0 ? binding : attempt % Math.max(1, centres.length)
+        const x = centres[index] ?? 960
+        await touch(page, 'pointerdown', x, 820)
+        await advanceSeconds(page, 0.15)
+        for (let y = 800; y >= 480; y -= 40) {
+          await touch(page, 'pointermove', x, y)
+          await advanceSeconds(page, 0.12)
+          const now = await getState(page)
+          if (now.chambers[index]?.state === 'SET') break
+          if (now.chambers[index]?.state === 'OVERSET') break
+        }
+        await touch(page, 'pointerup', x, 480)
+        await advanceSeconds(page, 0.3)
+      }
+
+      expect((await getState(page)).opened, `could not open the lock on ${device.name}`).toBe(true)
+      watcher.assertClean()
+    })
+  })
+}
+
 test('a lock can be opened with touches alone', async ({ page }) => {
   const watcher = await bootGame(page)
   await loadLock(page, PRACTICE, 3)

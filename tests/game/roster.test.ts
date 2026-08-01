@@ -10,6 +10,10 @@ import {
   makeConfig,
   validateLockDef,
 } from '../../src/sim'
+import { CODES_COMPACT_PER_PAGE, codesPageCount } from '../../src/ui/shell'
+import { shareableCode } from '../../src/game/sharecode'
+import { LESSONS } from '../../src/game/tutorial'
+import type { Viewport } from '../../src/render/viewport'
 
 const ROOT = path.resolve(__dirname, '../..')
 
@@ -201,5 +205,41 @@ describe('roster balance matches CONTENT.md', () => {
         expect(security > 0 || tightEnough, `${d.slug} is a Tier 2 lock wearing a badge`).toBe(true)
       }
     }
+  })
+})
+
+/**
+ * Reachability on a phone — DECISIONS D-136.
+ *
+ * Two things were unreachable and nothing could see it, because both were *drawn* correctly and
+ * only the surrounding arithmetic disagreed. Neither the layout audit nor a screenshot can catch
+ * "this control is enabled and does nothing" or "this card will disappear after you press it".
+ */
+describe('nothing on a phone becomes unreachable', () => {
+  it('the codes pager can reach every shareable lock', () => {
+    const compact = { scale: 0.3 } as Viewport
+    const shareable = ALL_LOCKS.filter((def) => shareableCode(def) !== null).length
+    expect(shareable).toBeGreaterThan(4)
+
+    // With no designs of your own, the roster alone still has to be pageable.
+    const pages = codesPageCount(compact, 0)
+    expect(pages, 'the roster needs more than one page').toBeGreaterThan(1)
+    expect(pages * CODES_COMPACT_PER_PAGE).toBeGreaterThanOrEqual(shareable)
+
+    // And a design of your own adds to the same run rather than a separate count.
+    expect(codesPageCount(compact, 8)).toBe(Math.ceil((shareable + 8) / CODES_COMPACT_PER_PAGE))
+  })
+
+  it('every lesson stays reachable until all of them are done', () => {
+    // `startLesson` is called from exactly two places: the menu's shortcut, which always goes to
+    // the first lesson, and the bench's lesson cards. So while any lesson is unfinished, the cards
+    // are the only route to it and must be drawn.
+    expect(LESSONS.length).toBeGreaterThan(1)
+    const afterFirst = [LESSONS[0]!.id]
+    const allDone = LESSONS.map((l) => l.id)
+    const stripShows = (done: string[]): boolean => !LESSONS.every((l) => done.includes(l.id))
+    expect(stripShows([]), 'before any lesson').toBe(true)
+    expect(stripShows(afterFirst), 'after lesson one — two and three are still unreached').toBe(true)
+    expect(stripShows(allDone), 'once every lesson is done').toBe(false)
   })
 })

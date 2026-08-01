@@ -17,7 +17,9 @@ import {
   liftForDrag,
   OFF_BAND_SHARE,
   WRENCH_DRAG_PX,
+  TAP_SLOP,
   inOffZone,
+  stepAtY,
   stepForDrag,
   targetAt,
   tensionForTouchStep,
@@ -27,6 +29,7 @@ import {
 } from '../../src/ui/touch'
 import { TENSION_STEPS, tensionForStep } from '../../src/ui/input'
 import { T_MIN_HOLD } from '../../src/sim'
+import { LOGICAL_WIDTH } from '../../src/render/viewport'
 
 /** A wrench drag that began at `step`, with the finger at the middle of the slider. */
 function grabbedAt(step: number) {
@@ -203,10 +206,34 @@ describe('where a touch lands', () => {
   })
 
   it('the controls sit clear of the cutaway, which is centred', () => {
-    // The lock is drawn across the middle of the stage; the gutter is where the hands go.
-    for (const r of [WRENCH_SLIDER, WITHDRAW_PAD, PAUSE_PAD]) {
-      expect(r.x + r.w).toBeLessThan(200)
+    // The lock is drawn across the middle of the stage; both gutters are where the hands go.
+    for (const r of [WRENCH_SLIDER, WITHDRAW_PAD]) {
+      expect(r.x + r.w, 'the wrench hand works down the left gutter').toBeLessThan(200)
     }
+    for (const r of [PAUSE_PAD, LIFT_PAD]) {
+      expect(r.x, 'the pick hand works down the right one').toBeGreaterThan(LOGICAL_WIDTH - 500)
+    }
+  })
+
+  /**
+   * Nothing that ends a run may share a gutter with the wrench — DECISIONS D-133.
+   *
+   * Pause and the bench link used to be stacked either side of the slider, in the same 50px column
+   * a thumb holds tension in for the whole attempt. The review that found it measured 32px between
+   * a raised thumb and the pause box. This is the property that was missing, so it is asserted
+   * rather than left to the next person to notice.
+   */
+  it('keeps the pause pad out of the wrench thumb’s column', () => {
+    const wrenchRight = WRENCH_SLIDER.x + WRENCH_SLIDER.w
+    expect(PAUSE_PAD.x).toBeGreaterThan(wrenchRight)
+    // …and out of the pick-out pad's column too, since that shares the wrench's gutter now.
+    expect(PAUSE_PAD.x).toBeGreaterThan(WITHDRAW_PAD.x + WITHDRAW_PAD.w)
+  })
+
+  it('gives the wrench the whole of its own gutter, down to the footer', () => {
+    // 940 is the footer panel's top edge; the slider is meant to reach it, not stop short.
+    expect(WRENCH_SLIDER.y + WRENCH_SLIDER.h).toBeGreaterThan(900)
+    expect(WRENCH_SLIDER.y + WRENCH_SLIDER.h).toBeLessThanOrEqual(940)
   })
 
   it('and inside the stage', () => {
@@ -285,5 +312,52 @@ describe('the two hands', () => {
         expect(overlaps, `control ${i} overlaps control ${j}`).toBe(false)
       }
     }
+  })
+})
+
+/**
+ * Tapping a band picks it; dragging is still relative — DECISIONS D-134.
+ *
+ * D-131 made the wrench relative so a grab could not jump the tension and drop every set pin. That
+ * left the ten drawn, numbered bands inert: *"I cannot freely click on the tension measure, I need
+ * to click and drag"*. A tap is a different gesture with a different intent — you looked, you chose,
+ * you put your finger on it — so it gets the absolute answer and the drag keeps the relative one.
+ */
+describe('tapping the wrench', () => {
+  it('reads the band the finger landed on', () => {
+    for (let step = 1; step <= TENSION_STEPS; step += 1) {
+      const middle = (yForStep(step) + yForStep(step + 1)) / 2
+      expect(stepAtY(middle), `band ${step}`).toBe(step)
+    }
+  })
+
+  it('reads the whole fat bottom band as off', () => {
+    const offMiddle = (yForStep(0) + yForStep(1)) / 2
+    expect(stepAtY(offMiddle)).toBe(0)
+    expect(stepAtY(WRENCH_SLIDER.y + WRENCH_SLIDER.h - 1)).toBe(0)
+    // …and the band immediately above it is step 1, not off.
+    expect(stepAtY(yForStep(1) - 1)).toBe(1)
+  })
+
+  it('is the exact inverse of the bands that are drawn', () => {
+    // If these two ever disagree, a player taps one number and gets another.
+    for (let step = 0; step <= TENSION_STEPS; step += 1) {
+      const top = yForStep(step + 1)
+      const bottom = yForStep(step)
+      expect(stepAtY((top + bottom) / 2), `drawn band ${step}`).toBe(step)
+    }
+  })
+
+  it('never reports a step outside the range', () => {
+    for (const y of [-5000, 0, WRENCH_SLIDER.y - 400, WRENCH_SLIDER.y + WRENCH_SLIDER.h + 400, 5e4]) {
+      const step = stepAtY(y)
+      expect(step).toBeGreaterThanOrEqual(0)
+      expect(step).toBeLessThanOrEqual(TENSION_STEPS)
+    }
+  })
+
+  it('needs less travel to count as a drag than one geared step costs', () => {
+    // Or a deliberate one-step drag would be read as a tap and jump somewhere else entirely.
+    expect(TAP_SLOP).toBeLessThan(WRENCH_DRAG_PX / TENSION_STEPS)
   })
 })

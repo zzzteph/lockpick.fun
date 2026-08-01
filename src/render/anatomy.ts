@@ -26,7 +26,7 @@ import {
 } from './layout'
 import { KEYWAY_FLOOR } from '../sim'
 import { STROKE, TYPE, alpha, font, mix, type Palette } from './palette'
-import { LOGICAL_WIDTH, type Viewport } from './viewport'
+import { LOGICAL_WIDTH, typeFor, type Viewport } from './viewport'
 
 /** Which end of the body the keyway opens at, and which end is the tail. */
 function ends(layout: CutawayLayout): {
@@ -93,12 +93,12 @@ export function drawPartNames(vp: Viewport, p: Palette, layout: CutawayLayout): 
 
   const pair = (name: string, note: string, y: number, atX = padX): void => {
     text(ctx, name, atX, y - 6, {
-      font: font(TYPE.dimension),
+      font: font(typeFor(vp, TYPE.dimension)),
       color: p.inkLight,
       align: 'center',
     })
     text(ctx, note, atX, y + 9, {
-      font: font(TYPE.dimension),
+      font: font(typeFor(vp, TYPE.dimension)),
       color: alpha(p.inkLight, 0.75),
       align: 'center',
     })
@@ -141,12 +141,12 @@ export function drawShearLabel(vp: Viewport, p: Palette, layout: CutawayLayout):
   const x = mouth - 26 * sign
   ctx.save()
   text(ctx, 'SHEAR LINE', x, y - 12, {
-    font: font(TYPE.dimension),
+    font: font(typeFor(vp, TYPE.dimension)),
     color: p.ink,
     align: sign > 0 ? 'right' : 'left',
   })
   text(ctx, 'set every stack here', x, y + 20, {
-    font: font(TYPE.dimension),
+    font: font(typeFor(vp, TYPE.dimension)),
     color: p.inkLight,
     align: sign > 0 ? 'right' : 'left',
   })
@@ -160,7 +160,7 @@ export function drawKeywayLabel(vp: Viewport, p: Palette, layout: CutawayLayout)
   const mid = (mmToY(layout, KEYWAY_FLOOR) + mmToY(layout, KEYWAY_BOTTOM_MM)) / 2
   ctx.save()
   text(ctx, 'KEYWAY', tail - (layout.endPad / 2) * sign, mid + 4, {
-    font: font(TYPE.dimension),
+    font: font(typeFor(vp, TYPE.dimension)),
     color: alpha(p.inkLight, 0.8),
     align: 'center',
   })
@@ -190,7 +190,7 @@ export function drawAnatomyKey(vp: Viewport, p: Palette, layout: CutawayLayout):
   const row = (name: string, paint: () => void): void => {
     paint()
     text(ctx, name, tx, y + swatchH - 4, {
-      font: font(TYPE.dimension),
+      font: font(typeFor(vp, TYPE.dimension)),
       color: p.inkLight,
       align,
     })
@@ -199,7 +199,7 @@ export function drawAnatomyKey(vp: Viewport, p: Palette, layout: CutawayLayout):
 
   ctx.save()
   text(ctx, 'PIN STACK', tx, y - 10, {
-    font: font(TYPE.dimension),
+    font: font(typeFor(vp, TYPE.dimension)),
     color: p.ink,
     align,
   })

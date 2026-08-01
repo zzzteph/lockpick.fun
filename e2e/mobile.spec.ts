@@ -11,7 +11,17 @@
  */
 
 import { expect, test, type Page } from '@playwright/test'
-import { bootGame, captureStage, loadLock, renderOnce, setInput, setManual, stepTicks } from './harness'
+import {
+  advanceSeconds,
+  bootGame,
+  captureStage,
+  loadLock,
+  openCurrentLock,
+  renderOnce,
+  setInput,
+  setManual,
+  stepTicks,
+} from './harness'
 
 /** iPhone 14-ish, landscape — the orientation the game asks for. */
 const PHONE_LANDSCAPE = { width: 844, height: 390 }
@@ -374,4 +384,228 @@ test.describe('the shell screens on a phone', () => {
     await captureStage(page, 'mobile-screen-pause')
     watcher.assertClean()
   })
+})
+
+/**
+ * Every screen, photographed on a real phone — the raw material for the UX review.
+ *
+ * `layout.spec.ts` proves nothing collides. It cannot say whether the result is *good*: whether the
+ * hierarchy reads, whether a first-time player knows what to press, whether two screens that should
+ * feel alike do. That needs eyes, and eyes need pictures of every screen at the size it is actually
+ * used. See DECISIONS D-132.
+ */
+test.describe('phone review set', () => {
+  test.use({ viewport: PHONE_LANDSCAPE, hasTouch: true, isMobile: true })
+
+  for (const name of ['menu', 'bench', 'trophies', 'codes', 'editor', 'settings', 'help']) {
+    test(`@screenshot review-${name}`, async ({ page }) => {
+      const watcher = await bootGame(page)
+      await goto(page, name)
+      await captureStage(page, `review-${name}`)
+      watcher.assertClean()
+    })
+  }
+
+  test('@screenshot review-pick', async ({ page }) => {
+    const watcher = await bootGame(page, { frames: 3 })
+    await setManual(page, true)
+    await loadLock(page, 22, 5)
+    await touchTap(page, 900, 600)
+    await setInput(page, { chamber: 2, liftTarget: 1.2, tensionHeld: true, tensionLevel: 0.45 })
+    await stepTicks(page, 90)
+    await renderOnce(page)
+    await captureStage(page, 'review-pick')
+    watcher.assertClean()
+  })
+})
+
+/** The smallest phone in the matrix, where the type scale is at its most aggressive. */
+test.describe('smallest phone', () => {
+  test.use({ viewport: { width: 658, height: 320 }, hasTouch: true, isMobile: true })
+  for (const name of ['codes', 'editor']) {
+    test(`@screenshot tiny-${name}`, async ({ page }) => {
+      const watcher = await bootGame(page)
+      await goto(page, name)
+      await captureStage(page, `tiny-${name}`)
+      watcher.assertClean()
+    })
+  }
+})
+
+/**
+ * Held in the right hand — DECISIONS D-134.
+ *
+ * `handedness` mirrors the cutaway, the touch controls and the readouts, which is three separate
+ * mirrorings that have to agree. Nothing in the suite had ever rendered the pick screen with it on.
+ */
+test.describe('right-handed', () => {
+  test.use({ viewport: PHONE_LANDSCAPE, hasTouch: true, isMobile: true })
+
+  test('@screenshot mirrored-pick', async ({ page }) => {
+    await page.addInitScript(() => {
+      const raw = { version: 5, records: {}, achievements: [], tutorial: [], playDays: {},
+        customLocks: [], settings: { handedness: 'right' } }
+      localStorage.setItem('shearline.save.v1', JSON.stringify(raw))
+    })
+    const watcher = await bootGame(page, { frames: 3 })
+    await setManual(page, true)
+    await loadLock(page, 22, 5)
+    await touchTap(page, 900, 600)
+    await setInput(page, { chamber: 2, liftTarget: 1.2, tensionHeld: true, tensionLevel: 0.45 })
+    await stepTicks(page, 90)
+    await renderOnce(page)
+    await captureStage(page, 'mirrored-pick')
+    watcher.assertClean()
+  })
+
+  /**
+   * The arrow keys move the pick the way the arrow points — DECISIONS D-134.
+   *
+   * Chamber 0 is the front pin, and `handedness: right` mirrors the cutaway about its own centre, so
+   * the chambers count leftward from the right of the screen. The keys were wired straight to the
+   * chamber index, so pressing → walked the pick ←. Reported from play, and nothing in the suite had
+   * ever pressed an arrow key with the lock mirrored.
+   */
+  test('→ moves the pick right even when the lock is mirrored', async ({ page }) => {
+    await page.addInitScript(() => {
+      const raw = { version: 5, records: {}, achievements: [], tutorial: [], playDays: {},
+        customLocks: [], settings: { handedness: 'right' } }
+      localStorage.setItem('shearline.save.v1', JSON.stringify(raw))
+    })
+    const watcher = await bootGame(page, { frames: 3 })
+    await setManual(page, true)
+    await loadLock(page, 22, 5)
+
+    const tipX = async (): Promise<number> =>
+      page.evaluate(() => globalThis.__shearline!.pickTip().x)
+
+    // Ticks, not just a render: the tip the renderer draws follows the *simulation*, and a frame
+    // of zero seconds does not advance it.
+    const settle = async (): Promise<void> => {
+      await stepTicks(page, 30)
+      await renderOnce(page)
+    }
+    // The pick starts at chamber 0 — the front pin — which mirrored is the *rightmost* on screen.
+    await page.keyboard.press('ArrowRight')
+    await settle()
+    const start = await tipX()
+    expect(start, 'the first press puts the pick in the lock').toBeGreaterThan(0)
+
+    await page.keyboard.press('ArrowLeft')
+    await settle()
+    const left = await tipX()
+    expect(left, 'ArrowLeft moves the tip left on screen').toBeLessThan(start)
+
+    await page.keyboard.press('ArrowRight')
+    await settle()
+    expect(await tipX(), 'and ArrowRight brings it back right').toBeCloseTo(start, 0)
+    watcher.assertClean()
+  })
+})
+
+/**
+ * The results screen on a phone — DECISIONS D-134.
+ *
+ * It is the one screen every successful attempt ends on, and it was never rendered at a phone size
+ * anywhere in the suite: the lock name goes in a box sized for a rank letter, and the row of
+ * buttons underneath is the only navigation off it.
+ */
+test.describe('results on a phone', () => {
+  test.use({ viewport: PHONE_LANDSCAPE, hasTouch: true, isMobile: true })
+
+  test('@screenshot mobile-results', async ({ page }) => {
+    const watcher = await bootGame(page, { frames: 3 })
+    await setManual(page, true)
+    // A long name, on purpose: this is the case the box has to survive.
+    await loadLock(page, 22, 11)
+    await openCurrentLock(page)
+    await advanceSeconds(page, 12)
+    await renderOnce(page)
+    expect(
+      await page.evaluate(() => globalThis.__shearline!.getScreen()),
+      'the payoff sequence has to have finished',
+    ).toBe('results')
+    await captureStage(page, 'mobile-results')
+    watcher.assertClean()
+  })
+})
+
+/**
+ * The removal survey — every screen at four real phone sizes.
+ *
+ * Layout correctness is already asserted by `layout.spec.ts` on twelve devices. This is for the
+ * other question, which no assertion can answer: **what is on this screen that does not need to
+ * be?** A phone has a fifth of the page a desktop has and none of the precision, so the same
+ * content is not merely tighter, it is a different editorial problem. See DECISIONS D-134.
+ */
+const SURVEY: { name: string; width: number; height: number }[] = [
+  { name: 's9', width: 658, height: 320 },
+  { name: 's24', width: 780, height: 360 },
+  { name: 'i13', width: 664, height: 390 },
+  { name: 'max', width: 763, height: 440 },
+]
+
+for (const d of SURVEY) {
+  test.describe(`survey ${d.name}`, () => {
+    test.use({ viewport: { width: d.width, height: d.height }, hasTouch: true, isMobile: true })
+
+    for (const name of ['menu', 'bench', 'trophies', 'codes', 'editor', 'settings', 'help']) {
+      test(`@screenshot survey-${d.name}-${name}`, async ({ page }) => {
+        const watcher = await bootGame(page)
+        await goto(page, name)
+        await captureStage(page, `survey-${d.name}-${name}`)
+        watcher.assertClean()
+      })
+    }
+
+    test(`@screenshot survey-${d.name}-pick`, async ({ page }) => {
+      const watcher = await bootGame(page, { frames: 3 })
+      await setManual(page, true)
+      await loadLock(page, 22, 5)
+      await touchTap(page, 900, 600)
+      await setInput(page, { chamber: 2, liftTarget: 1.2, tensionHeld: true, tensionLevel: 0.45 })
+      await stepTicks(page, 90)
+      await renderOnce(page)
+      await captureStage(page, `survey-${d.name}-pick`)
+      watcher.assertClean()
+    })
+  })
+}
+
+/**
+ * The results screen, audited — DECISIONS D-135.
+ *
+ * The layout sweep reaches its screens with `goto`, and results cannot be reached that way: it needs
+ * a real `AttemptOutcome`, which means actually solving a lock. So it sat outside the audit while
+ * every other screen was checked on nineteen devices — and it is the screen every successful attempt
+ * ends on. Solved here, on a representative spread rather than the full matrix, because a solver run
+ * costs seconds and the layout it produces does not vary with the device beyond the compact split.
+ */
+test.describe('the results screen is laid out', () => {
+  for (const d of [
+    { name: 'galaxy-s9-plus', width: 658, height: 320 },
+    { name: 'iphone-13', width: 664, height: 390 },
+    { name: 'iphone-17-pro-max', width: 763, height: 440 },
+    { name: 'desktop-1920', width: 1920, height: 1080 },
+  ]) {
+    test(`results is laid out for ${d.name}`, async ({ page }) => {
+      test.slow()
+      await page.setViewportSize({ width: d.width, height: d.height })
+      const watcher = await bootGame(page, { frames: 3 })
+      await setManual(page, true)
+      await loadLock(page, 22, 11)
+      await openCurrentLock(page)
+      await advanceSeconds(page, 12)
+      await renderOnce(page)
+      expect(await page.evaluate(() => globalThis.__shearline!.getScreen())).toBe('results')
+
+      const result = await page.evaluate(() => globalThis.__shearline!.auditScreen())
+      expect(result.drawn).toBeGreaterThan(3)
+      expect(
+        result.findings,
+        `results @ ${d.name}: ${result.findings.map((f) => `[${f.kind}] ${f.detail}`).join('\n  ')}`,
+      ).toEqual([])
+      watcher.assertClean()
+    })
+  }
 })

@@ -109,6 +109,7 @@ import {
   beginFrame,
   clipToStage,
   createViewport,
+  isCompact,
   syncViewport,
   touchFloorFor,
 } from './render/viewport'
@@ -117,6 +118,7 @@ import {
   STARTER_TOOLS,
   THETA_OPEN,
   T_MIN_HOLD,
+  pickedButUnturned,
   falseSetLifts,
   makeConfig,
   withTools,
@@ -128,6 +130,16 @@ import {
 } from './sim'
 import { DEFAULT_INPUT_SETTINGS, InputController, LIFT_PX_PER_MM } from './ui/input'
 import { Haptics, detectVibrator } from './ui/haptics'
+import { auditLayout, type Box, type Finding } from './render/audit'
+import { assemblyBounds } from './render/layout'
+import { startRecording, stopRecording } from './render/probe'
+import {
+  LIFT_PAD,
+  PAUSE_PAD,
+  WITHDRAW_PAD,
+  WRENCH_SLIDER,
+  mirrorRect,
+} from './ui/touch'
 import {
   EDITABLE_PINS,
   MAX_TOLERANCE,
@@ -146,8 +158,9 @@ import {
 import { decodeLock, encodeLock, formatCode } from './game/sharecode'
 import { REPO_URL, newIssueUrl } from './game/repo'
 import {
-  FORK_LINK,
-  REPORT_LINK,
+  forkLink,
+  outwardLinksOn,
+  reportLink,
   drawBench,
   drawCodes,
   drawEditor,
@@ -751,12 +764,22 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         // them can steal nothing.
         const floor = input.touch.active ? touchFloorFor(vp) : 0
         const inside = (r: Rect): boolean => pointInRect(grown(r, floor), x, y)
+        /*
+         * Only where the link is actually drawn — DECISIONS D-135.
+         *
+         * Both are gated on a phone now, and a hit test that did not follow would leave an
+         * invisible 250x90 rectangle in the corner of six screens that opens a browser tab. The
+         * screen names here are the same titles `screenFrame` is called with, so the two cannot
+         * drift: `outwardLinksOn` is the single answer.
+         */
         const framed = screen !== 'pick' && screen !== 'pause'
-        if (framed && inside(REPORT_LINK)) {
+        const title =
+          screen === 'menu' ? 'Shear line' : screen === 'settings' ? 'Settings' : screen
+        if (framed && outwardLinksOn(vp, title) && inside(reportLink(vp))) {
           actions.reportIssue()
           return true
         }
-        if (screen === 'menu' && inside(FORK_LINK)) {
+        if (screen === 'menu' && !isCompact(vp) && inside(forkLink(vp))) {
           actions.openRepo()
           return true
         }
@@ -1244,9 +1267,11 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
           `drag the wrench up the ${mirrored() ? 'right' : 'left'} edge`
         : 'hold [Q] to turn the wrench',
       // Teach the grip that makes this playable one-handed-per-control, until it has happened.
-      ...(input.touch.active && !input.usedBothThumbs
-        ? { heldHint: 'keep that thumb there — lift with the other' }
-        : {}),
+      ...(session && pickedButUnturned(session.state)
+        ? { heldHint: 'every pin is up — turn harder' }
+        : input.touch.active && !input.usedBothThumbs
+          ? { heldHint: 'keep that thumb there — lift with the other' }
+          : {}),
       par: session.def.par,
       mirrored: mirrored(),
       pressureStep: input.wrenchStep,
@@ -1334,6 +1359,41 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   }
   hook.renderOnce = (): void => {
     frame(0)
+  }
+  /**
+   * Draw one frame with the probe on, and report what the layout rules make of it (D-132).
+   *
+   * The rects come from the widget layer's own registry rather than from a second list kept in
+   * step by hand — the whole point is that this cannot drift from what was actually drawn. The
+   * touch pads are added because they are hit-tested outside the `Ui` and would otherwise be the
+   * one part of the screen the audit could not see.
+   */
+  hook.auditScreen = (): { findings: Finding[]; drawn: number; scale: number } => {
+    startRecording()
+    frame(0)
+    const drawn = stopRecording()
+    const rects: Box[] = [...ui.registeredRects()]
+    if (input.touch.active && screen === 'pick') {
+      const flip = mirrored()
+      for (const r of [WRENCH_SLIDER, PAUSE_PAD, WITHDRAW_PAD, LIFT_PAD]) {
+        rects.push(mirrorRect(r, flip))
+      }
+    }
+        /*
+     * The lock's bounds, **on a phone**, on the one screen that has a lock.
+     *
+     * Not on a full page, because there the anatomy key deliberately writes SHELL, PLUG and KEYWAY
+     * across the metal to name it (D-050) — that is the drawing doing its job. It is already
+     * dropped on a phone (D-122), which is exactly where scaled chrome starts intruding, so the
+     * rule and the exception happen to have the same boundary. Scoping it this way is honest;
+     * carrying a list of allowed strings would not be.
+     */
+    const lock = isCompact(vp) && screen === 'pick' && session ? assemblyBounds(layout) : null
+    return {
+      findings: auditLayout(drawn, vp.scale, rects, lock),
+      drawn: drawn.length,
+      scale: vp.scale,
+    }
   }
   hook.advanceSeconds = (seconds: number): void => {
     const step = 1 / 60

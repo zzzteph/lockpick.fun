@@ -21,7 +21,9 @@ import {
   inRect,
   liftForDrag,
   SWIPE_MIN_PX,
+  TAP_SLOP,
   inOffZone,
+  stepAtY,
   stepForDrag,
   targetAt,
   tensionForTouchStep,
@@ -173,6 +175,8 @@ export class InputController {
   private swipeId: number | null = null
   /** -1 for a swipe left, 1 for right, 0 for none. Consumed by `takeSwipe`. */
   private pendingSwipe = 0
+  /** True once the wrench pointer has moved far enough to be a drag rather than a tap (D-134). */
+  private wrenchDragged = false
   /**
    * True once the player has held the wrench and lifted a pin at the same time — DECISIONS D-131.
    *
@@ -293,7 +297,11 @@ export class InputController {
        * ends with must not also turn a page.
        */
       const swiped = e.pointerType === 'touch' ? this.readSwipe(e) : false
-      if (e.pointerType === 'touch') this.touchUp(e.pointerId)
+      if (e.pointerType === 'touch') {
+        // Where it ended matters now: a wrench press that never moved sets the band it landed on.
+        const up = clientToLogical(this.vp, e.clientX, e.clientY)
+        this.touchUp(e.pointerId, up.y)
+      }
       // A swipe is not a click. Without this the gesture pages *and* presses whatever it ended on.
       if (e.button === 0 && !swiped) {
         /**
@@ -315,7 +323,9 @@ export class InputController {
       }
     })
     this.on(window, 'pointercancel', (e) => {
-      this.touchUp(e.pointerId)
+      // A cancelled pointer is not a tap. The system took the gesture — a browser scroll, a call
+      // arriving — and finishing it as a press would set a tension the player never chose.
+      this.touchUp(e.pointerId, this.touch.wrenchOriginY, true)
     })
     // The lift drag has to keep tracking once the finger leaves the canvas, or dragging a pin up
     // past the top of the screen silently stops raising it at the edge.
@@ -339,10 +349,10 @@ export class InputController {
           this.spaceDown = true
           break
         case 'ArrowLeft':
-          this.stepChamber(-1)
+          this.stepChamber(this.settings.mirrored ? 1 : -1)
           break
         case 'ArrowRight':
-          this.stepChamber(1)
+          this.stepChamber(this.settings.mirrored ? -1 : 1)
           break
         case 'ArrowUp':
           this.nudgeLift(KEY_LIFT_NUDGE)
@@ -462,6 +472,7 @@ export class InputController {
       this.touch.wrenchPointer = id
       this.touch.wrenchOriginY = y
       this.touch.wrenchOriginStep = this.touch.step
+      this.wrenchDragged = false
       if (inOffZone(y)) this.touch.step = 0
       if (this.touch.liftPointer !== null) this.usedBothThumbs = true
       return
@@ -500,6 +511,7 @@ export class InputController {
 
   private touchMove(id: number, _x: number, y: number): void {
     if (id === this.touch.wrenchPointer) {
+      if (Math.abs(y - this.touch.wrenchOriginY) > TAP_SLOP) this.wrenchDragged = true
       const next = stepForDrag(this.touch, y)
       if (next !== this.touch.step) this.hooks.onWrenchStep?.(next)
       this.touch.step = next
@@ -511,9 +523,22 @@ export class InputController {
     this.touchLift = liftForDrag(this.touch, y, this.liftCeiling)
   }
 
-  private touchUp(id: number): void {
+  private touchUp(id: number, y: number, cancelled = false): void {
     if (id === this.touch.wrenchPointer) {
+      /*
+       * A tap picks the band it landed on; a drag has already had its say (D-134).
+       *
+       * The two cannot be told apart on the way down — they start identically — so it is decided
+       * here, by whether the finger ever moved. A tap that never moved would otherwise do nothing
+       * at all, which is what made the drawn, numbered bands feel inert.
+       */
+      if (!this.wrenchDragged && !cancelled) {
+        const next = stepAtY(y)
+        if (next !== this.touch.step) this.hooks.onWrenchStep?.(next)
+        this.touch.step = next
+      }
       this.touch.wrenchPointer = null
+      this.wrenchDragged = false
       return
     }
     if (id !== this.touch.liftPointer) return
@@ -538,6 +563,19 @@ export class InputController {
    * arrived at every new pin with your hand already at full height and slammed it up. Left and
    * right are the *travel* keys; Space is the lift key. Separating them is what makes the two
    * input schemes the same game.
+   */
+  /**
+   * Move the tip along the keyway by `delta` **chambers**, which is not always `delta` screen
+   * directions — DECISIONS D-134.
+   *
+   * Chamber 0 is the front pin, nearest the mouth of the keyway. `handedness` mirrors the cutaway
+   * about its own centre (D-047), so on `right` the mouth is on the *right* of the screen and the
+   * chambers count leftward from it. The arrow keys were wired straight to the index, so a
+   * right-handed player pressing → watched the pick travel ←.
+   *
+   * The keys are inverted at the call site rather than inside here, because `delta` genuinely means
+   * chambers everywhere else — `chamberLimit`, the lift reset and the pick-drop rule all reason in
+   * chamber order — and the only thing that has two directions is the arrow on the keycap.
    */
   private stepChamber(delta: number): void {
     if (this.keyChamber < 0) {

@@ -140,6 +140,46 @@ export default tseslint.config(
     rules: simPurityRules,
   },
   {
+    /**
+     * Type drawn on a screen that can go compact must go through the scaler — DECISIONS D-132.
+     *
+     * D-122 built `typeScaleFor` and wired it into `button()` and about a dozen other places. The
+     * other 118 `font(TYPE.x)` calls in the game kept drawing at literal logical pixels, which is
+     * six or seven CSS px on a phone — the single cause behind most of a long list of reports about
+     * unreadable and overlapping text. That is exactly the failure mode this project keeps hitting:
+     * a mechanism built, tested, and then not actually applied.
+     *
+     * A lint rule rather than a convention, because the next person to add a label will reach for
+     * `font(TYPE.body)` — it is shorter, it reads better, and on the desktop it looks perfect.
+     */
+    files: ['src/render/**/*.ts', 'src/ui/**/*.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'CallExpression[callee.name="font"] > MemberExpression.arguments[object.name="TYPE"]',
+          message:
+            'Scale it: font(typeFor(vp, TYPE.x)), or ts(TYPE.x) where the module has one. A literal TYPE size is ~7 CSS px on a phone (D-132).',
+        },
+        {
+          /*
+           * Scoped to `label` calls, because `size` means two different things.
+           *
+           * On `label` it is the tracking, and it has to match the face the font is set at — an
+           * unscaled one there is a real bug. On `button` it is a *request*, which the widget then
+           * puts through `typeFor` itself, so a raw `TYPE.x` is exactly right and a pre-scaled one
+           * is the bug: it scales twice, and on the smallest phone in the matrix that turned a 17px
+           * face into 81 and dragged the button's whole box up with it.
+           */
+          selector:
+            'CallExpression[callee.name="label"] Property[key.name="size"] > MemberExpression.value[object.name="TYPE"]',
+          message:
+            "label()'s `size` sets the tracking and must match the face it is drawn in — scale it the same way as the font (D-132).",
+        },
+      ],
+    },
+  },
+  {
     files: ['tests/**/*.ts', 'e2e/**/*.ts', '*.config.ts'],
     languageOptions: { globals: { ...globals.node } },
     rules: {
