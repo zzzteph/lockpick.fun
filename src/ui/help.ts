@@ -16,7 +16,8 @@
 import { PROFILES, type PinTypeName } from '../sim'
 import { label, paragraph, text } from '../render/draw'
 import { STROKE, TYPE, font, readableAccents, type Palette } from '../render/palette'
-import { LOGICAL_HEIGHT, LOGICAL_WIDTH, snapX, snapY, type Viewport } from '../render/viewport'
+import { driverOutline } from '../render/layout'
+import { LOGICAL_HEIGHT, LOGICAL_WIDTH, type Viewport } from '../render/viewport'
 import { screenFrame, type ShellContext } from './shell'
 import { button, type Rect } from './widgets'
 
@@ -30,23 +31,43 @@ const LEFT = MARGIN + 28
  * from `rect`'s base. A reduced band is drawn narrow, which is the whole of what a security pin is:
  * a place where the driver is thinner than the bore, for the plug's ledge to catch in.
  */
+/**
+ * The nine profiles, drawn from their own band data — DECISIONS D-125.
+ *
+ * This is the one screen where the pin types are seen **side by side**, so it is the screen where
+ * two of them looking alike is a bug rather than a nuance. It had two, and together they made six
+ * profiles draw as roughly the same picture:
+ *
+ * - every reduced band was drawn at a flat `rect.w * 0.44`, so `grooveDepth` — the number that says
+ *   how narrow the waist actually is — was thrown away entirely. A wafer's 0.50 gate and a
+ *   spool-slim's 0.24 nick came out identical.
+ * - `taper` was never drawn anywhere in the game, so a mushroom's cone and a T-pin's square step
+ *   were the same rectangle.
+ *
+ * Both are now read from the profile, through the same `driverOutline` the cutaway uses, so what is
+ * on this page is what the simulation is working with rather than a diagram of it.
+ */
 function drawDriver(vp: Viewport, p: Palette, name: PinTypeName, rect: Rect): void {
   const { ctx } = vp
-  const bands = PROFILES[name].bands
-  const total = bands.reduce((sum, b) => sum + b.length, 0) || 1
-  const cx = rect.x + rect.w / 2
-  let cursor = rect.y + rect.h
+  const outline = driverOutline(
+    PROFILES[name].bands,
+    rect.x + rect.w / 2,
+    rect.y + rect.h,
+    rect.w,
+    rect.h,
+  )
   ctx.save()
-  ctx.lineWidth = STROKE.hairline
-  ctx.strokeStyle = p.inkLight
-  for (const band of bands) {
-    const h = (rect.h * band.length) / total
-    const w = band.reduced ? rect.w * 0.44 : rect.w
-    ctx.fillStyle = band.reduced ? p.paper : p.paperShade
-    ctx.fillRect(cx - w / 2, cursor - h, w, h)
-    ctx.strokeRect(snapX(vp, cx - w / 2, 1), snapY(vp, cursor - h, 1), w, h)
-    cursor -= h
-  }
+  ctx.beginPath()
+  outline.forEach((pt, i) => {
+    if (i === 0) ctx.moveTo(pt.x, pt.y)
+    else ctx.lineTo(pt.x, pt.y)
+  })
+  ctx.closePath()
+  ctx.fillStyle = p.paperShade
+  ctx.fill()
+  ctx.lineWidth = STROKE.standard
+  ctx.strokeStyle = p.ink
+  ctx.stroke()
   ctx.restore()
 }
 
@@ -63,8 +84,8 @@ const PINS: readonly (readonly [PinTypeName, string])[] = [
   ['spool-deep', 'A deep waist that bites. The plug gives a long way first.'],
   ['spool-double', 'Two waists. Push through one and it lies to you again.'],
   ['serrated', 'Four shallow steps — four small false sets on the way up.'],
-  ['mushroom', 'A bevelled shoulder. It drags rather than catching cleanly.'],
-  ['t-pin', 'A narrow stem under a wide head. It falls a long way.'],
+  ['mushroom', 'A bevelled shoulder. It shoves your pick out — ease the wrench off.'],
+  ['t-pin', 'A square stem. Barely pushes back, but the plug gives a long way.'],
   ['wafer', 'One flat plate. Its gate must sit level with the shear line.'],
 ]
 

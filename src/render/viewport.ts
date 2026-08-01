@@ -79,6 +79,57 @@ export function deviceScale(vp: Viewport): number {
 }
 
 /**
+ * Below this stage scale the page is too small to read, and the screens draw a reduced version.
+ *
+ * Everything is laid out across a fixed 1920x1080 and letterboxed, so *all* type shrinks with the
+ * viewport: `vp.scale` is exactly the factor by which. On an 844x390 phone it is 0.36, which puts
+ * `TYPE.dimension` at **six CSS pixels** — not small, unreadable. Reported as *"the text on the
+ * mobile device is VERY small"*, and it had been true of every screen since the stage was fixed.
+ *
+ * 0.60 is where `TYPE.dimension` lands at about 10px. Above it the full page is legible and is
+ * drawn; below it the screens keep what a player needs and drop what a bigger page can afford —
+ * see `compactType` and the call sites. A phone is compact, a small tablet is compact, a 1280x800
+ * laptop (0.667) is not. See DECISIONS D-122.
+ */
+export const COMPACT_SCALE = 0.6
+
+export function isCompact(vp: Viewport): boolean {
+  return vp.scale < COMPACT_SCALE
+}
+
+/**
+ * The smallest type this game will render, in **CSS pixels**, once a screen is compact.
+ *
+ * Not a multiplier — a target. A flat "1.8x on small screens" is the obvious version and it is
+ * wrong at both ends of the range: the phones this has to work on run from a Galaxy S9+ at 0.296
+ * stage scale to a Tab S9 at 0.533, so one multiplier either leaves the small end at nine pixels
+ * or blows the large end up for no reason. Asking for a rendered size instead makes every device
+ * land in the same place.
+ */
+export const MIN_TYPE_CSS = 11
+
+/**
+ * A type size for the current viewport, in logical pixels.
+ *
+ * Full size above the compact threshold. Below it, scaled by whatever it takes to put
+ * `TYPE.dimension` — the smallest face in the game, and the one carrying labels — on
+ * `MIN_TYPE_CSS` actual pixels, capped so a very small viewport cannot produce absurd type.
+ *
+ * This only works because compact also draws *fewer* things: raising the scale alone would make
+ * everything collide, which is what D-102 means by "a type scale is a layout". See D-122.
+ */
+export function typeScaleFor(vp: Viewport): number {
+  if (!isCompact(vp)) return 1
+  const smallest = 17 // TYPE.dimension, named here to keep viewport free of a palette import
+  const needed = MIN_TYPE_CSS / (smallest * Math.max(vp.scale, 0.01))
+  return Math.min(2.4, Math.max(1, needed))
+}
+
+export function typeFor(vp: Viewport, size: number): number {
+  return Math.round(size * typeScaleFor(vp))
+}
+
+/**
  * Put the context into logical space: origin at the top-left of the 1920x1080 stage,
  * one unit = one logical pixel. Call once per frame before drawing anything.
  */

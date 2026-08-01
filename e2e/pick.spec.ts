@@ -279,15 +279,26 @@ test('the fine trim is Training only, and the legend does not claim it elsewhere
 })
 
 /**
- * The frame budget.
+ * A smoke check on per-frame cost — **not** the 60fps claim.
  *
- * Asserted on the *work* the game does per frame, not on the interval between frames. A
- * headless Chromium under six parallel workers throttles `requestAnimationFrame` to 30Hz no
- * matter what the page is doing, so the interval measures the harness. What decides whether
- * the game can hold 60fps is whether simulate-plus-draw fits inside 16.6ms, and that is
- * entirely the game's business. Phase 14 repeats this on the 12-pin lock with a histogram.
+ * Asserted on the *work* the game does per frame rather than the interval between frames, because
+ * a headless Chromium under six parallel workers throttles `requestAnimationFrame` to 30Hz however
+ * idle the page is. That much was always right. What was wrong is the bound: this test ran a
+ * **p95 < 16.6ms** assertion from inside the parallel suite, where five other Chromiums are
+ * competing for the same cores — so the work genuinely does take longer, and the number it was
+ * checking was partly a measurement of the machine.
+ *
+ * It failed at 18.4ms in a full run and passed three times out of three on its own, which is the
+ * signature D-022 and D-038 both describe. The honest 60fps measurement is `npm run perf`: one
+ * worker, nothing else running, four seconds of samples and a histogram, exactly so that the
+ * percentile means something.
+ *
+ * So this keeps the assertion it can make under load — the median frame is nowhere near the
+ * budget, which catches a real regression like an accidental O(n²) in the draw — and leaves the
+ * tail to the test that can measure it properly. The p95 bound is two frames' worth: it is there
+ * to catch a stall, not to certify a frame rate.
  */
-test('simulate and draw fit inside the 60fps frame budget', async ({ page }) => {
+test('simulate and draw cost a sane amount per frame', async ({ page }) => {
   const watcher = await bootGame(page, { frames: 10 })
   await loadLock(page, 3, 1)
   await setInput(page, { chamber: 1, liftTarget: 1.2, tensionHeld: true, tensionLevel: 0.45 })
@@ -300,7 +311,7 @@ test('simulate and draw fit inside the 60fps frame budget', async ({ page }) => 
   const p95 = sorted[Math.floor(sorted.length * 0.95)] ?? 0
   const median = sorted[Math.floor(sorted.length * 0.5)] ?? 0
   expect(median, `median frame work ${median.toFixed(2)}ms`).toBeLessThan(16.6)
-  expect(p95, `p95 frame work ${p95.toFixed(2)}ms`).toBeLessThan(16.6)
+  expect(p95, `p95 frame work ${p95.toFixed(2)}ms`).toBeLessThan(33.2)
   watcher.assertClean()
 })
 

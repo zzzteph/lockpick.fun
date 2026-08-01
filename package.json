@@ -1,7 +1,7 @@
 {
   "name": "shear-line",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.1",
   "type": "module",
   "description": "SHEAR LINE - a realistic 2D lockpicking simulator",
   "scripts": {
@@ -9,11 +9,12 @@
     "play": "vite --host 0.0.0.0 --open",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src tests e2e --max-warnings 0",
+    "lint": "eslint src tests e2e dev --max-warnings 0",
     "test": "vitest run --coverage",
     "e2e": "playwright test",
     "perf": "playwright test --config playwright.perf.config.ts",
     "shots": "playwright test --grep @screenshot",
+    "bump": "node dev/bump.ts",
     "verify": "npm run typecheck && npm run lint && npm run test && npm run build && npm run e2e && npm run perf",
     "verify:ci": "npm run typecheck && npm run lint && npm run test && npm run build && npm run e2e"
   },

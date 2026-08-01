@@ -24,7 +24,7 @@ import type { AttemptOutcome, AttemptResult, Progress } from '../game/progress'
 import { LESSONS } from '../game/tutorial'
 import { hatchRect, label, paragraph, text } from '../render/draw'
 import { STROKE, TYPE, alpha, font, readableAccents, type Palette } from '../render/palette'
-import { LOGICAL_HEIGHT, LOGICAL_WIDTH, snapX, snapY, type Viewport } from '../render/viewport'
+import { LOGICAL_HEIGHT, LOGICAL_WIDTH, snapX, snapY, type Viewport, isCompact, typeFor } from '../render/viewport'
 import { MAX_CHAMBERS, MAX_KEY_PIN, MIN_CHAMBERS, PROFILES, type KeywayGrade } from '../sim'
 import type { LockDef, SettingsData } from './shellTypes'
 import {
@@ -285,11 +285,23 @@ export function drawMenu(c: ShellContext): void {
   // Keyboard only — see `REPORT_LINK` (D-103).
   if (forkState.activated) actions.openRepo()
 
-  const w = 380
-  const h = 56
+  /**
+   * Taller, wider buttons on a phone, and the row of them centred in what is left.
+   *
+   * The menu is the first thing anybody sees and on a 390px-tall landscape phone it was six 56px
+   * buttons of 21px type — about 20px and 8px once the stage is scaled, which is below the size a
+   * thumb can hit reliably, never mind read. Asked for as *"menu, when the device is mobile, must
+   * be more mobile friendly"*.
+   *
+   * The button stack is the whole screen on a phone: the side columns go (see below), so the row
+   * can take the width it needs and start higher up. See DECISIONS D-122.
+   */
+  const compact = isCompact(vp)
+  const w = compact ? 760 : 380
+  const h = compact ? 96 : 56
   const x = (LOGICAL_WIDTH - w) / 2
-  let y = 320
-  const gap = 74
+  let y = compact ? 250 : 320
+  const gap = compact ? 118 : 74
 
   // A brand-new player is sent to the first lesson, not to a wall of thirty-five locks. The
   // game is unusually unforgiving of not knowing what tension is for, and "Start picking"
@@ -309,7 +321,7 @@ export function drawMenu(c: ShellContext): void {
    * "what this is" column (D-102). The left half of this screen is empty; right-aligning against
    * the button stack puts it beside its button with nothing to collide with.
    */
-  if (!taught) {
+  if (!taught && !compact) {
     label(ctx, 'five minutes, and the rest of the game makes sense', x - 24, y + h / 2 + 6, {
       font: font(TYPE.dimension),
       size: TYPE.dimension,
@@ -344,8 +356,18 @@ export function drawMenu(c: ShellContext): void {
    * most recent ones on the way *in* is what makes them feel like a record of your own play rather
    * than a list somebody else wrote. Newest first, because that is the one you just earned.
    */
+  /**
+   * Both side columns go on a phone (D-122).
+   *
+   * The button stack takes the full width there, so "what this is" and the recent-trophy list
+   * have nowhere left to be — and at the compact scale three sentences of blurb beside six
+   * buttons is the crowding the request was about. The blurb is on the page they came from and
+   * the trophies have a screen of their own.
+   */
   const earned = progress.data.achievements
-  if (earned.length === 0) {
+  if (compact) {
+    // Nothing beside the buttons.
+  } else if (earned.length === 0) {
     /**
      * What the game *is*, on the one screen where somebody might not know yet.
      *
@@ -466,8 +488,53 @@ const CARD_GAP = 12
  */
 const BENCH_COLS = 3
 const BENCH_GAP = 24
-const BENCH_CARD_W = Math.floor((LOGICAL_WIDTH - (MARGIN + 28) * 2 - BENCH_GAP * 2) / BENCH_COLS)
 const BENCH_CARD_H = 250
+/** Bench card height on a phone: two columns and three rows have to fit above the status line. */
+const COMPACT_CARD_H = 210
+
+/**
+ * Two to a row on a phone, not three — DECISIONS D-123.
+ *
+ * The bench is a grid of cards whose text is the point of them, and on a 664x390 landscape phone a
+ * three-column card is 596 logical px wide showing a 26px name: nine actual pixels. Two columns is
+ * 908 wide, which is enough card to carry the name and the stats at the compact type scale and
+ * still leave the lock drawing legible.
+ *
+ * Six locks then need three rows rather than two, and the room for the third comes from the lesson
+ * strip, which compact drops once the lessons are done — see `drawBench`.
+ */
+function benchGrid(vp: Viewport): { cols: number; cardW: number; cardH: number } {
+  const cols = isCompact(vp) ? 2 : BENCH_COLS
+  const cardW = Math.floor((LOGICAL_WIDTH - (MARGIN + 28) * 2 - BENCH_GAP * (cols - 1)) / cols)
+  return { cols, cardW, cardH: isCompact(vp) ? COMPACT_CARD_H : BENCH_CARD_H }
+}
+
+/**
+ * Codes cards — the **same** grid at every size, and this is a deliberate stop rather than an
+ * oversight (D-123).
+ *
+ * Two columns was tried, and it reads beautifully: big cards, a name that fits, `PLAY EDIT COPY`
+ * you could actually hit with a thumb. It is also unusable, because there are twenty shareable
+ * locks and two columns is **ten rows** on a page that does not scroll — so half the roster is
+ * drawn below the bottom of the phone, where it is not merely ugly but unreachable. That is the
+ * exact failure `PROGRESS.md` records from Phase 13, when the bench outgrew the screen and ten
+ * locks became unclickable while every test stayed green.
+ *
+ * The bench got away with two columns because it shows **one tier at a time** — at most six cards.
+ * This page shows everything at once, so making it phone-shaped means paging it, and paging it
+ * means a second page index, a second control, and deciding what the existing `‹ ›` above the
+ * player's own designs now refers to. That is a screen's worth of design, not a column count.
+ *
+ * So it stays as it is: the cards are small on a phone and the buttons on them are legible, which
+ * `button`'s shrink-to-fit now guarantees. Better a dense page you can reach all of than a
+ * comfortable one you cannot.
+ */
+function codeGrid(_vp: Viewport): { cols: number; cardW: number; cardH: number } {
+  const cardW = Math.floor(
+    (LOGICAL_WIDTH - (MARGIN + 28) * 2 - CARD_GAP * (CODE_COLS - 1)) / CODE_COLS,
+  )
+  return { cols: CODE_COLS, cardW, cardH: CODE_CARD_H }
+}
 /** Lesson card height — one line of title over two of blurb, at the larger face. */
 const LESSON_H = 104
 
@@ -479,7 +546,6 @@ const LESSON_H = 104
  * 353 wide, which fits every name in the game, and twenty shareable locks still land in four rows.
  */
 const CODE_COLS = 5
-const CODE_CARD_W = Math.floor((LOGICAL_WIDTH - (MARGIN + 28) * 2 - CARD_GAP * (CODE_COLS - 1)) / CODE_COLS)
 const CODE_CARD_H = 136
 const BENCH_LEFT = MARGIN + 28
 const BENCH_WIDTH = LOGICAL_WIDTH - BENCH_LEFT * 2
@@ -697,11 +763,15 @@ export function drawBench(c: ShellContext): void {
   // the spool lesson three tiers later should not have to hunt for it.
   let y = 120
   const taughtBasics = progress.data.tutorial.length > 0
-  label(ctx, 'lessons', BENCH_LEFT, y, {
-    font: font(TYPE.heading),
-    size: TYPE.heading,
-    color: p.ink,
-  })
+  const grid = benchGrid(vp)
+  // A heading with nothing under it is an orphan: it goes with the strip it heads (D-123).
+  const showLessons = !isCompact(vp) || !taughtBasics
+  if (showLessons)
+    label(ctx, 'lessons', BENCH_LEFT, y, {
+      font: font(typeFor(vp, TYPE.heading)),
+      size: typeFor(vp, TYPE.heading),
+      color: p.ink,
+    })
   if (!taughtBasics) {
     text(ctx, 'start here — the locks below unlock once you finish the first one', BENCH_LEFT + 160, y, {
       font: font(TYPE.body),
@@ -709,13 +779,22 @@ export function drawBench(c: ShellContext): void {
     })
   }
   y += 18
+  /**
+   * On a phone, the lesson strip goes once the lessons are done (D-123).
+   *
+   * Three cards of one-line summaries, permanently marked `done`, are the least useful 104px on
+   * the page — and they are exactly the 104px the third row of lock cards needs once the grid
+   * drops to two columns. Before the lessons are finished they stay, because then they are the
+   * most useful thing on it.
+   */
+  if (showLessons)
   LESSONS.forEach((lesson, i) => {
     // On the same three-column grid as the locks below, so the page has one rhythm rather than
     // two — and so a lesson's one-line summary is not cut to "…leaning" to fit a 288px card.
     const rect: Rect = {
-      x: BENCH_LEFT + (BENCH_CARD_W + BENCH_GAP) * i,
+      x: BENCH_LEFT + (grid.cardW + BENCH_GAP) * i,
       y,
-      w: BENCH_CARD_W,
+      w: grid.cardW,
       h: LESSON_H,
     }
     const done = progress.data.tutorial.includes(lesson.id)
@@ -750,7 +829,7 @@ export function drawBench(c: ShellContext): void {
    * through the bottom border of the lesson card above them. Two bordered boxes sharing an edge
    * read as one broken box. 46 leaves a clean 24px. See DECISIONS D-109.
    */
-  y += LESSON_H + 46
+  y += (showLessons ? LESSON_H : 0) + 46
 
   /**
    * One tier at a time, chosen from a row of buttons — the bench used to be all twenty-five at once.
@@ -836,13 +915,13 @@ export function drawBench(c: ShellContext): void {
     y += 24
 
     locks.forEach((def, i) => {
-      const col = i % BENCH_COLS
-      const row = Math.floor(i / BENCH_COLS)
+      const col = i % grid.cols
+      const row = Math.floor(i / grid.cols)
       const rect: Rect = {
-        x: BENCH_LEFT + (BENCH_CARD_W + BENCH_GAP) * col,
-        y: y + row * (BENCH_CARD_H + BENCH_GAP),
-        w: BENCH_CARD_W,
-        h: BENCH_CARD_H,
+        x: BENCH_LEFT + (grid.cardW + BENCH_GAP) * col,
+        y: y + row * (grid.cardH + BENCH_GAP),
+        w: grid.cardW,
+        h: grid.cardH,
       }
       const st = ui.widget(rect, unlocked)
       cardFrame(vp, p, rect, st, !unlocked)
@@ -867,7 +946,7 @@ export function drawBench(c: ShellContext): void {
       const readable = readableAccents(p)
 
       paragraph(ctx, def.name, rect.x + 22, rect.y + 38, {
-        font: font(TYPE.heading),
+        font: font(typeFor(vp, TYPE.heading)),
         color: unlocked ? p.ink : p.inkLight,
         maxWidth: rect.w - (record.opens > 0 ? 110 : 44),
         lineHeight: 28,
@@ -944,15 +1023,31 @@ export function drawBench(c: ShellContext): void {
  * because the question the test is asking ("does the bench fit for this roster") is unchanged, and
  * a roster whose biggest tier grew is exactly what it still needs to catch.
  */
-export function benchHeight(lockCount: number, tierCount: number, lessonCount: number): number {
-  const lessonRows = Math.ceil(lessonCount / CARDS_PER_ROW)
+export function benchHeight(
+  lockCount: number,
+  tierCount: number,
+  lessonCount: number,
+  /**
+   * The compact bench is a different shape and has to be checked as one (D-123).
+   *
+   * Two columns instead of three means a six-lock tier is **three** rows rather than two, and the
+   * room for the third comes from dropping the lesson strip. Both changes are in the same budget,
+   * so a helper that only knew the desktop shape would cheerfully report that a bench which runs
+   * off the bottom of a phone fits.
+   */
+  compact = false,
+): number {
+  const showLessons = !compact || lessonCount === 0
+  const lessonRows = showLessons ? Math.ceil(lessonCount / CARDS_PER_ROW) : 0
   // The `+ 46` mirrors the gap under the lesson cards, which had to grow from 18 because the tier
   // strip's buttons are drawn at `y - 22` and were landing inside the cards (D-109).
   let y = 120 + 18 + lessonRows * (LESSON_H + 6) + 46
   // Tier buttons, then the lock/locked line, then the biggest tier's rows.
   y += 58 + 24
+  const cols = compact ? 2 : BENCH_COLS
+  const cardH = compact ? COMPACT_CARD_H : BENCH_CARD_H
   const biggest = Math.ceil(lockCount / Math.max(1, tierCount))
-  y += Math.ceil(biggest / BENCH_COLS) * (BENCH_CARD_H + BENCH_GAP)
+  y += Math.ceil(biggest / cols) * (cardH + BENCH_GAP)
   return y
 }
 
@@ -1765,10 +1860,11 @@ export function drawCodes(c: ShellContext): void {
      * for the reasons D-100 sets out, so a bounded list gets a pager instead. The count is spelled
      * out (`7–12 of 31`) so it is never ambiguous whether anything is being held back.
      */
-    const pages = Math.max(1, Math.ceil(custom.length / CODE_COLS))
+    const cg = codeGrid(vp)
+    const pages = Math.max(1, Math.ceil(custom.length / cg.cols))
     const page = Math.min(Math.max(0, c.codesPage ?? 0), pages - 1)
-    const from = page * CODE_COLS
-    const shown = custom.slice(from, from + CODE_COLS)
+    const from = page * cg.cols
+    const shown = custom.slice(from, from + cg.cols)
     if (pages > 1) {
       if (button(vp, p, ui, { x: BENCH_LEFT + 210, y: y - 22, w: 40, h: 28 }, '‹', {
         size: TYPE.body,
@@ -1795,12 +1891,12 @@ export function drawCodes(c: ShellContext): void {
       codeCard(
         c,
         def,
-        { x: BENCH_LEFT + (CODE_CARD_W + CARD_GAP) * i, y, w: CODE_CARD_W, h: CODE_CARD_H },
+        { x: BENCH_LEFT + (cg.cardW + CARD_GAP) * i, y, w: cg.cardW, h: cg.cardH },
         taught,
         from + i,
       )
     })
-    y += CODE_CARD_H + 30
+    y += cg.cardH + 30
   }
 
   label(ctx, 'the roster', BENCH_LEFT, y, {
@@ -1828,16 +1924,17 @@ export function drawCodes(c: ShellContext): void {
     })
   }
   y += 18
+  const rosterGrid = codeGrid(vp)
   roster.forEach((def, i) => {
-    const col = i % CODE_COLS
-    const row = Math.floor(i / CODE_COLS)
+    const col = i % rosterGrid.cols
+    const row = Math.floor(i / rosterGrid.cols)
     codeCard(
       c,
       def,
       {
-        x: BENCH_LEFT + (CODE_CARD_W + CARD_GAP) * col,
-        y: y + row * (CODE_CARD_H + CARD_GAP),
-        w: CODE_CARD_W,
+        x: BENCH_LEFT + (rosterGrid.cardW + CARD_GAP) * col,
+        y: y + row * (rosterGrid.cardH + CARD_GAP),
+        w: rosterGrid.cardW,
         h: CODE_CARD_H,
       },
       taught && progress.isTierUnlocked(def.tier),

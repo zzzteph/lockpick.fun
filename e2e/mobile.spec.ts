@@ -27,6 +27,47 @@ async function goto(page: Page, name: string): Promise<void> {
   await renderOnce(page)
 }
 
+/**
+ * Put the game into touch mode with a real `PointerEvent`, the way `touch.spec.ts` does.
+ *
+ * Playwright's `touchscreen.tap` does not reach the canvas `pointerdown` listener in this setup,
+ * and `touch.active` is what decides whether the wrench slider and pads are drawn at all — so
+ * without this every "mobile" screenshot is the desktop chrome at a phone size.
+ */
+async function touchTap(page: Page, logicalX: number, logicalY: number): Promise<void> {
+  const client = await page.evaluate(
+    (pt) => {
+      const c = document.querySelector('canvas') as HTMLCanvasElement
+      const r = c.getBoundingClientRect()
+      const scale = Math.min(r.width / 1920, r.height / 1080)
+      return {
+        x: r.left + (r.width - 1920 * scale) / 2 + pt.x * scale,
+        y: r.top + (r.height - 1080 * scale) / 2 + pt.y * scale,
+      }
+    },
+    { x: logicalX, y: logicalY },
+  )
+  await page.evaluate((c) => {
+    const canvas = document.querySelector('canvas')
+    if (!canvas) throw new Error('no canvas')
+    const ev = (type: string, target: EventTarget): void => {
+      target.dispatchEvent(
+        new PointerEvent(type, {
+          pointerId: 1,
+          pointerType: 'touch',
+          clientX: c.x,
+          clientY: c.y,
+          bubbles: true,
+          cancelable: true,
+        }),
+      )
+    }
+    ev('pointerdown', canvas)
+    ev('pointerup', window)
+  }, client)
+  await renderOnce(page)
+}
+
 test.describe('phone, landscape', () => {
   test.use({ viewport: PHONE_LANDSCAPE, hasTouch: true, isMobile: true })
 
@@ -43,13 +84,25 @@ test.describe('phone, landscape', () => {
     watcher.assertClean()
   })
 
+  /**
+   * With the touch controls **actually on**, which is the only honest version of this shot.
+   *
+   * `setInput` drives the simulation without the input layer, so `touch.active` stays false and
+   * the wrench slider and pads are never drawn — the previous version of this test photographed a
+   * phone-sized screen with the *desktop* chrome on it and called it the mobile view. A real
+   * `PointerEvent` of `pointerType: 'touch'` is what flips the game into touch mode, exactly as
+   * `touch.spec.ts` does it.
+   */
   test('@screenshot picking on a phone', async ({ page }) => {
     const watcher = await bootGame(page, { frames: 3 })
     await setManual(page, true)
     await loadLock(page, 3, 5)
+    await touchTap(page, 900, 600)
     await setInput(page, { chamber: 1, liftTarget: 1.2, tensionHeld: true, tensionLevel: 0.45 })
     await stepTicks(page, 90)
     await renderOnce(page)
+    const touching = await page.evaluate(() => globalThis.__shearline?.getTouch() ?? false)
+    expect(touching, 'the shot has to be of the touch chrome, not the desktop chrome').toBe(true)
     await captureStage(page, 'mobile-pick')
     watcher.assertClean()
   })
@@ -102,6 +155,130 @@ test.describe('tablet, landscape', () => {
     await stepTicks(page, 90)
     await renderOnce(page)
     await captureStage(page, 'mobile-tablet-pick')
+    watcher.assertClean()
+  })
+})
+
+/**
+ * Every phone, strictly — DECISIONS D-122.
+ *
+ * `tests/render/compact.test.ts` proves the type scale is right on each of these without a browser.
+ * What this adds is the part arithmetic cannot answer: on a real render at a real device size, is
+ * anything drawn **on top of** anything else, and is the lock still usable.
+ *
+ * The overlap that prompted this was concrete: the key legend moved into the left gutter (D-115),
+ * which on touch is where the pause pad, the wrench slider and the withdraw pad live — so on a
+ * phone the legend was drawn straight across all three. Reported as *"some of the elements overlap
+ * with the fonts… pause, wrench for example"*. So the assertions are about that gutter, and about
+ * the lock having somewhere to be.
+ */
+const PHONES: { name: string; width: number; height: number }[] = [
+  { name: 'iphone-se3', width: 667, height: 375 },
+  { name: 'iphone-13-mini', width: 629, height: 375 },
+  { name: 'iphone-13', width: 664, height: 390 },
+  { name: 'iphone-14-pro', width: 660, height: 393 },
+  { name: 'iphone-15-pro-max', width: 739, height: 430 },
+  { name: 'iphone-16-pro', width: 681, height: 402 },
+  { name: 'iphone-17-pro-max', width: 763, height: 440 },
+  { name: 'galaxy-s9-plus', width: 658, height: 320 },
+  { name: 'galaxy-s24', width: 780, height: 360 },
+  { name: 'galaxy-z-flip-7', width: 764, height: 360 },
+  { name: 'galaxy-z-fold-7', width: 1016, height: 984 },
+  { name: 'galaxy-tab-s9', width: 1024, height: 640 },
+]
+
+for (const phone of PHONES) {
+  test.describe(phone.name, () => {
+    test.use({
+      viewport: { width: phone.width, height: phone.height },
+      hasTouch: true,
+      isMobile: true,
+    })
+
+    test(`the pick screen is laid out for ${phone.name}`, async ({ page }) => {
+      const watcher = await bootGame(page, { frames: 3 })
+      await setManual(page, true)
+      await loadLock(page, 22, 5) // a six-chamber lock: the widest the assembly ever gets
+      await touchTap(page, 900, 600)
+      await setInput(page, { chamber: 2, liftTarget: 1.2, tensionHeld: true, tensionLevel: 0.45 })
+      await stepTicks(page, 90)
+      await renderOnce(page)
+
+      const info = await page.evaluate(() => {
+        const c = document.querySelector('canvas') as HTMLCanvasElement
+        const r = c.getBoundingClientRect()
+        return {
+          touch: globalThis.__shearline?.getTouch() ?? false,
+          scale: Math.min(r.width / 1920, r.height / 1080),
+          geom: globalThis.__shearline?.getGeometry(),
+        }
+      })
+
+      expect(info.touch, 'the touch chrome must be what is being measured').toBe(true)
+      expect(info.scale, 'this device should be in compact mode').toBeLessThan(0.6)
+
+      /**
+       * The left gutter belongs to the touch controls, whole.
+       *
+       * `PAUSE_PAD`, `WRENCH_SLIDER` and `WITHDRAW_PAD` all sit at x 30..162 and between them
+       * cover y 96..932 — effectively the entire gutter. Nothing else may be drawn into it, and
+       * the lock must start to the right of it.
+       */
+      const assembly = info.geom?.layout
+      expect(assembly, 'geometry should be available').toBeDefined()
+      if (!assembly) return
+      expect(assembly.left, 'the lock must clear the touch gutter').toBeGreaterThanOrEqual(162)
+
+      // The lock is still worth looking at: at least a third of the stage wide.
+      expect(assembly.right - assembly.left).toBeGreaterThan(1920 / 3)
+
+      await captureStage(page, `mobile-${phone.name}`)
+      watcher.assertClean()
+    })
+  })
+}
+
+/**
+ * Every shell screen at phone size — DECISIONS D-123.
+ *
+ * D-122 did the pick screen and the menu, which is where a phone player lives, and left the rest
+ * with nothing but larger button captions. These write the PNGs for the rest of them so the layout
+ * can be judged from a picture rather than from theory, which is how every layout bug in this
+ * project has actually been found.
+ */
+test.describe('the shell screens on a phone', () => {
+  test.use({ viewport: { width: 664, height: 390 }, hasTouch: true, isMobile: true })
+
+  test('@screenshot every shell screen', async ({ page }) => {
+    const watcher = await bootGame(page, { frames: 3 })
+    // A save with progress, so the bench and trophies have something in them rather than showing
+    // their empty states — an empty screen cannot be crowded.
+    await page.evaluate(() => {
+      const h = globalThis.__shearline
+      if (!h) throw new Error('no hook')
+      const save = h.getSave()
+      const records: Record<string, unknown> = {}
+      for (const slug of h.lockSlugs().slice(0, 9)) {
+        records[slug] = { opens: 2, bestTime: 41.5, bestOversets: 0, bestRank: 1, challenges: [] }
+      }
+      h.setSave({
+        ...save,
+        records: records as never,
+        tutorial: ['lesson-1', 'lesson-2', 'lesson-3'],
+        achievements: ['first-blood', 'apprentice', 'under-par'],
+      })
+    })
+
+    for (const name of ['bench', 'settings', 'trophies', 'help', 'codes', 'editor']) {
+      await goto(page, name)
+      expect(await page.evaluate(() => globalThis.__shearline?.getScreen()), name).toBe(name)
+      await captureStage(page, `mobile-screen-${name}`)
+    }
+
+    // Pause and results both need a lock behind them.
+    await loadLock(page, 1, 5)
+    await goto(page, 'pause')
+    await captureStage(page, 'mobile-screen-pause')
     watcher.assertClean()
   })
 })

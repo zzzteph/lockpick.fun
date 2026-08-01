@@ -599,7 +599,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       const url = newIssueUrl({
         screen,
         lock: session?.def.name,
-        version: `save v${progress.data.version}`,
+        version: `${__APP_VERSION__} · save v${progress.data.version}`,
       })
       if (!openTab(url)) status = `blocked — report issues at ${REPO_URL}/issues`
     },
@@ -1340,6 +1340,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     count: ui.widgetCount,
     keyboardMode: ui.keyboardMode,
   })
+  hook.getTouch = (): boolean => input.touch.active
   hook.events = (): SimEvent[] => eventLog.slice()
   hook.waitForEvent = async (type: string, timeoutMs = 15_000): Promise<void> => {
     if (eventLog.some((e) => e.type === type)) return

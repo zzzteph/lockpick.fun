@@ -9,7 +9,7 @@
 
 import { label, roundRectPath, text } from '../render/draw'
 import { STROKE, TYPE, alpha, font, type Palette } from '../render/palette'
-import { snapX, snapY, type Viewport } from '../render/viewport'
+import { snapX, snapY, type Viewport, typeFor } from '../render/viewport'
 
 export interface Rect {
   x: number
@@ -141,7 +141,15 @@ export function button(
   const { ctx } = vp
   const enabled = opts.enabled ?? true
   const st = ui.widget(rect, enabled)
-  const size = opts.size ?? TYPE.body
+  /**
+   * A button's caption follows the viewport (D-122).
+   *
+   * Every screen in the game is made of these, so scaling the default here is what makes the shell
+   * legible on a phone without touching eleven `draw*` functions. An explicit `opts.size` is
+   * scaled too — a caller asking for the dimension face wants the dimension face *for this screen*,
+   * not seventeen literal pixels on a 390px-tall display.
+   */
+  const size = typeFor(vp, opts.size ?? TYPE.body)
 
   ctx.save()
   const x = snapX(vp, rect.x, STROKE.standard)
@@ -158,9 +166,33 @@ export function button(
   ctx.restore()
 
   const ink = !enabled ? p.inkLight : opts.primary ? p.paper : p.ink
-  label(ctx, caption, rect.x + rect.w / 2, rect.y + rect.h / 2 + size * 0.36, {
-    font: font(size),
-    size,
+  /**
+   * The caption is shrunk until it fits inside its own frame — DECISIONS D-123.
+   *
+   * The safety net for the whole shell, and it exists because D-122 removed one. Scaling the
+   * default caption size by the viewport made every button legible on a phone and made a good
+   * number of them **wider than the box they are drawn in**: the bench's tier strip is a row of
+   * 96px buttons at 108px pitch, so `TIER 1` at the compact size ran into `TIER 2` and the four of
+   * them read as one smear. Same on the codes page, where `PLAY EDIT COPY` sit in a card's inner
+   * width, and on `PASTE`/`ADD`.
+   *
+   * A rect is a hit target and a layout commitment; a caption is text. When they disagree the text
+   * gives way, because a button drawn over its neighbour is unreadable *and* unhittable, while a
+   * slightly smaller word is neither. Measured against the real face — the canvas knows how wide
+   * the string is (D-102), and this is the fifth place in this codebase to need telling.
+   */
+  const room = rect.w - 16
+  let fitted = size
+  ctx.save()
+  const drawnWidth = (s: number): number => {
+    ctx.font = font(s)
+    return ctx.measureText(caption.toUpperCase()).width + s * 0.08 * Math.max(0, caption.length - 1)
+  }
+  while (fitted > 9 && drawnWidth(fitted) > room) fitted -= 1
+  ctx.restore()
+  label(ctx, caption, rect.x + rect.w / 2, rect.y + rect.h / 2 + fitted * 0.36, {
+    font: font(fitted),
+    size: fitted,
     color: ink,
     align: 'center',
   })

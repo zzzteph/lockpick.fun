@@ -12,7 +12,7 @@ import { TENSION_STEPS, tensionForStep } from '../ui/input'
 import { PAUSE_PAD, WITHDRAW_PAD, WRENCH_SLIDER, yForStep, type TouchState } from '../ui/touch'
 import { hatchRect, label, text } from './draw'
 import { STROKE, TYPE, alpha, font, readableAccents, type Palette } from './palette'
-import { snapX, snapY, type Viewport } from './viewport'
+import { snapX, snapY, typeFor, type Viewport } from './viewport'
 
 function pad(
   vp: Viewport,
@@ -34,9 +34,24 @@ function pad(
     rect.h,
   )
   ctx.restore()
-  label(ctx, caption, rect.x + rect.w / 2, rect.y + rect.h / 2 + 6, {
-    font: font(TYPE.dimension),
-    size: TYPE.dimension,
+  /**
+   * Sized to fit the pad, measured against the real face.
+   *
+   * The compact scale is chosen for the *smallest readable size* (D-122), not for the widest box
+   * it has to sit in — so on a large phone `pick out` came out at 152px inside a 132px pad and
+   * hung off both ends of its own frame. Shrink-to-fit rather than a shorter word, because "pick
+   * out" is what the control does and the pad is a fixed part of the touch layout.
+   */
+  const max = rect.w - 12
+  let size = typeFor(vp, TYPE.dimension)
+  const drawn = (s: number): number => {
+    ctx.font = font(s)
+    return ctx.measureText(caption.toUpperCase()).width + s * 0.08 * Math.max(0, caption.length - 1)
+  }
+  while (size > 10 && drawn(size) > max) size -= 1
+  label(ctx, caption, rect.x + rect.w / 2, rect.y + rect.h / 2 + size * 0.35, {
+    font: font(size),
+    size,
     color: p.ink,
     align: 'center',
   })
@@ -62,8 +77,8 @@ export function drawTouchControls(
   pad(vp, p, PAUSE_PAD, 'pause')
 
   label(ctx, 'wrench', WRENCH_SLIDER.x + WRENCH_SLIDER.w / 2, WRENCH_SLIDER.y - 12, {
-    font: font(TYPE.dimension),
-    size: TYPE.dimension,
+    font: font(typeFor(vp, TYPE.dimension)),
+    size: typeFor(vp, TYPE.dimension),
     color: p.inkLight,
     align: 'center',
   })
@@ -101,8 +116,8 @@ export function drawTouchControls(
     ctx.restore()
     if (step === 0) {
       label(ctx, 'off', WRENCH_SLIDER.x + WRENCH_SLIDER.w / 2, bottom - h / 2 + 6, {
-        font: font(TYPE.dimension),
-        size: TYPE.dimension,
+        font: font(typeFor(vp, TYPE.dimension)),
+        size: typeFor(vp, TYPE.dimension),
         color: touch.step === 0 ? p.ink : p.inkLight,
         align: 'center',
       })
@@ -127,7 +142,7 @@ export function drawTouchControls(
     touch.step === 0 ? '—' : String(touch.step),
     WRENCH_SLIDER.x + WRENCH_SLIDER.w / 2,
     WRENCH_SLIDER.y - 34,
-    { font: font(TYPE.heading), color: touch.step > 0 ? readable.amber : p.inkLight, align: 'center' },
+    { font: font(typeFor(vp, TYPE.heading)), color: touch.step > 0 ? readable.amber : p.inkLight, align: 'center' },
   )
   if (touch.step > 0) {
     text(
@@ -135,7 +150,7 @@ export function drawTouchControls(
       tensionForStep(touch.step).toFixed(2),
       WRENCH_SLIDER.x + WRENCH_SLIDER.w / 2,
       WRENCH_SLIDER.y + WRENCH_SLIDER.h + 26,
-      { font: font(TYPE.dimension), color: p.inkLight, align: 'center' },
+      { font: font(typeFor(vp, TYPE.dimension)), color: p.inkLight, align: 'center' },
     )
   }
 

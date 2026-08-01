@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig, type Plugin } from 'vite'
 
@@ -23,7 +24,19 @@ function classicScriptTag(): Plugin {
   }
 }
 
+/**
+ * The build version, injected from package.json — DECISIONS D-126.
+ *
+ * A bug report used to carry the *save schema* version, which says nothing about which build the
+ * bug is in: the schema changes about once a quarter and the game changes daily. Reading it from
+ * `package.json` at build time means the number in a report is the number in the release list, and
+ * there is one place it is written down.
+ */
+const VERSION = JSON.parse(readFileSync(resolve(import.meta.dirname, 'package.json'), 'utf8'))
+  .version as string
+
 export default defineConfig({
+  define: { __APP_VERSION__: JSON.stringify(VERSION) },
   plugins: [classicScriptTag()],
   server: { port: 5173, strictPort: true },
   // Relative asset paths so `dist/` runs from a subdirectory as well as a domain root.

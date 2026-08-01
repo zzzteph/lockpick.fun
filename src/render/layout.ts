@@ -364,6 +364,68 @@ export function bandRects(layout: CutawayLayout, c: Chamber): Rect[] {
   return out
 }
 
+/**
+ * The driver's silhouette as a polygon, with **bevelled shoulders** — DECISIONS D-125.
+ *
+ * `bandRects` draws every band as a rectangle, so the only thing separating one profile from
+ * another on screen is how long and how wide its groove is. `taper` — which is the *shape* of the
+ * shoulder, and the number the simulation turns into counter-rotation force — was never drawn at
+ * all. A mushroom's bevelled cone and a T-pin's square step therefore rendered as the same
+ * picture, and were reported as one: *"T-pin and mushroom are the same now."*
+ *
+ * They are not the same and they never were. A mushroom shoves your pick out (taper 0.85 puts its
+ * counter-rotation at 4.4x a T-pin's); a T-pin barely shoves at all and instead gives a long, deep,
+ * convincing false set. That is two different techniques — light tension against a mushroom,
+ * precision against a T-pin — and the drawing was flattening both into "a pin with a waist".
+ *
+ * So the outline slopes each shoulder over a distance proportional to the taper of the bands
+ * meeting there. Square stays square, a cone looks like a cone, and every profile in the game gets
+ * a distinguishable outline out of data that was already there.
+ *
+ * Returned in logical px, bottom-up, as a closed left-then-right polygon.
+ */
+export function driverOutline(
+  bands: readonly { length: number; grooveDepth: number; taper: number }[],
+  cx: number,
+  bottomY: number,
+  width: number,
+  height: number,
+): { x: number; y: number }[] {
+  const total = bands.reduce((s, b) => s + b.length, 0) || 1
+  const yAt = (depth: number): number => bottomY - (depth / total) * height
+  const halfAt = (i: number): number => (width * (1 - (bands[i]?.grooveDepth ?? 0))) / 2
+
+  /** How far a shoulder slopes, in mm, from the tapers of the two bands that meet at it. */
+  const bevelAt = (i: number): number => {
+    const below = bands[i]
+    const above = bands[i + 1]
+    if (!below || !above) return 0
+    const t = Math.max(below.taper, above.taper)
+    return t * 0.5 * Math.min(below.length, above.length)
+  }
+
+  // Sample the profile as (depth, half-width) pairs going up: each band contributes its own
+  // straight section, and each internal boundary contributes a slope centred on it.
+  const samples: { d: number; half: number }[] = []
+  let depth = 0
+  for (let i = 0; i < bands.length; i += 1) {
+    const band = bands[i]
+    if (!band) continue
+    const bevBelow = i > 0 ? bevelAt(i - 1) : 0
+    const bevAbove = i < bands.length - 1 ? bevelAt(i) : 0
+    const from = depth + bevBelow / 2
+    const to = depth + band.length - bevAbove / 2
+    samples.push({ d: from, half: halfAt(i) })
+    // A band shorter than its own bevels collapses to a point rather than inverting.
+    samples.push({ d: Math.max(from, to), half: halfAt(i) })
+    depth += band.length
+  }
+
+  const left = samples.map((s) => ({ x: cx - s.half, y: yAt(s.d) }))
+  const right = [...samples].reverse().map((s) => ({ x: cx + s.half, y: yAt(s.d) }))
+  return [...left, ...right]
+}
+
 /** The spring above the driver, from the driver's top to the chamber ceiling. */
 export function springSpan(layout: CutawayLayout, c: Chamber): { top: number; bottom: number } {
   // Sits on the driver, so it follows the driver — including staying compressed once the

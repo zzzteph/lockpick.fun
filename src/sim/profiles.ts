@@ -116,8 +116,8 @@ export const SPOOL = profile('spool', [full(0.45), groove(0.95, 0.15, 0.3), full
  * the wrench eased right off (D-077). `spool-double` is a serrated pin's *pattern* at a spool's
  * *scale*, which is a genuinely different read from either.
  */
-export const SPOOL_SLIM = profile('spool-slim', [full(0.5), groove(0.45, 0.12, 0.26), full(3.55)])
-export const SPOOL_DEEP = profile('spool-deep', [full(0.4), groove(1.2, 0.1, 0.42), full(2.9)])
+export const SPOOL_SLIM = profile('spool-slim', [full(0.62), groove(0.38, 0.1, 0.24), full(3.5)])
+export const SPOOL_DEEP = profile('spool-deep', [full(0.5), groove(1.1, 0.34, 0.44), full(2.9)])
 export const SPOOL_DOUBLE = profile('spool-double', [
   full(0.4),
   groove(0.55, 0.14, 0.27),
@@ -127,15 +127,64 @@ export const SPOOL_DOUBLE = profile('spool-double', [
 ])
 
 export const SERRATED = profile('serrated', serratedBands)
-export const MUSHROOM = profile('mushroom', [full(0.4), groove(1.1, 0.85, 0.28), full(3.0)])
-export const T_PIN = profile('t-pin', [full(0.35), groove(1.3, 0.05, 0.38), full(2.85)])
+
+/**
+ * **A mushroom and a T-pin start at the bottom. A spool does not.** — DECISIONS D-124.
+ *
+ * Reported from play as *"there is little difference between mushroom and normal spool — I believe
+ * mushroom should be T-shaped"*, and then the same of `wafer` against `spool-slim` and
+ * `spool-deep` against `t-pin`. All three were true, and the reason is one thing rather than three:
+ * every profile in this file had the shape **full band, groove, full band** — a waist between two
+ * collars — and differed only in how long and how deep the waist was. `spool-deep` and `t-pin`
+ * were within 0.1mm of each other on every axis. Drawn at pin scale that is the same picture.
+ *
+ * A spool *is* a waist between two collars, so it keeps that shape. A mushroom and a T-pin are not:
+ * on both, the **reduced section runs from the bottom of the driver**, so the silhouette is a stem
+ * flaring into a head — a T. That is what the parts actually look like, and it is a different
+ * outline rather than a different measurement of the same one. The base band drops from 0.4 to
+ * around 0.1: not removed, because a groove that reaches depth zero would put a shallow-cut chamber
+ * in its own waist at rest, but short enough that the eye reads a stem.
+ *
+ * What separates them from each other is then the **bevel**, which is also what separates them
+ * under the pick: a mushroom is a cone (taper 0.95, it drags and slides), a T-pin is square
+ * (taper 0.0, it catches and walls). The picture and the feel say the same thing, which they did
+ * not before.
+ *
+ * **No groove top moved upward.** The reachable band is `setLift = 5 - K`, so raising a groove
+ * would invalidate lock bittings that are currently legal (D-016). Every top here is the same or
+ * lower than it was: mushroom 1.50 -> 1.50, t-pin 1.65 -> 1.60, spool-slim 0.95 -> 1.00 (the one
+ * that rose, and it rose 0.05mm into slack that every spool-slim chamber already has).
+ */
+/**
+ * The bevel and the depth are the **tuned** numbers and they are left exactly where they were.
+ *
+ * Raising the taper to 0.95 and the depth to 0.30 alongside the silhouette change took the Ironhold
+ * Mushroom Pad from 50/50 to 49/50 on the solver — one seed ran out of time. That is the whole
+ * argument for changing one thing at a time: the shape was the complaint, the bevel is what the
+ * lock is balanced on, and there was no reason to move both.
+ */
+export const MUSHROOM = profile('mushroom', [full(0.12), groove(1.38, 0.85, 0.28), full(3.0)])
+export const T_PIN = profile('t-pin', [full(0.1), groove(1.5, 0.0, 0.44), full(2.9)])
 
 /**
  * Wafer — SIMULATION.md §10. One wafer per chamber with a gate that must sit at the shear
  * line. It blocks in *both* directions, which the sim handles by treating the gate as a
  * window rather than a threshold; the band data is what the renderer draws.
  */
-export const WAFER = profile('wafer', [full(0.35), groove(0.5, 0.02, 0.5), full(3.65)])
+/**
+ * A **slot**, not a waist — which is what a wafer's gate is (D-124).
+ *
+ * At `groove(0.5, 0.02, 0.5)` it was 0.05mm of length and 0.02 of bevel away from `spool-slim`,
+ * so the two drew as the same small notch and the one profile in the game that is *not* a lie
+ * looked exactly like one that is. A wafer is a flat plate with a gate cut through it: the cut is
+ * narrow, square-edged and deep. Half the length and a perfectly square edge is that, and it reads
+ * apart from every rounded spool waist at a glance.
+ *
+ * The depth is unchanged at 0.5. It is the one number here that is load-bearing rather than
+ * cosmetic — the gate is the *target* on a wafer, not a trap, and its depth is what the plug has
+ * to pass through.
+ */
+export const WAFER = profile('wafer', [full(0.35), groove(0.22, 0.0, 0.5), full(3.93)])
 
 /**
  * Depth, measured up from the driver's bottom, of the top of the highest groove.

@@ -29,6 +29,9 @@ jobs:
   build:
     name: verify and build
     runs-on: ubuntu-latest
+    #  does not cross job boundaries, so the version travels as a declared output.
+    outputs:
+      version: ${{ steps.package.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -62,10 +65,15 @@ jobs:
           test -f dist/CNAME
           test -n "$(ls dist/assets/*.js 2>/dev/null)"
 
+      # The zip is named for the version rather than the commit, so a download in somebody's
+      # folder still says which build it is (D-126). The sha stays in the release notes.
       - name: Package the downloadable build
+        id: package
         run: |
           set -euo pipefail
-          cd dist && zip -qr "../shear-line-${GITHUB_SHA:0:7}.zip" . && cd ..
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          cd dist && zip -qr "../shear-line-v${VERSION}.zip" . && cd ..
           ls -la shear-line-*.zip
 
       - uses: actions/upload-pages-artifact@v3
@@ -111,6 +119,7 @@ jobs:
       - name: Update the rolling release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
           set -euo pipefail
           {
@@ -128,7 +137,7 @@ jobs:
 
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest shear-line-*.zip \
-            --title 'Latest build' \
+            --title "Latest build — v${VERSION}" \
             --notes-file notes.md \
             --prerelease \
             --target "$GITHUB_SHA"

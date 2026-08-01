@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest'
 import {
   DT,
   PERFECT_TOOLS,
+  PROFILES,
   THETA_OPEN,
   countEvents,
   createSimState,
@@ -452,5 +453,74 @@ describe('a pin stack is two bodies — DECISIONS D-042', () => {
     // A set wafer does not move at all: the ledge is in its gate.
     expect(c.keyLift).toBeCloseTo(c.lift, 6)
     expect(c.lift).toBeCloseTo(c.setLift, 2)
+  })
+})
+
+/**
+ * A mushroom and a T-pin are different pins — DECISIONS D-124, D-125.
+ *
+ * Reported together: *"T-pin and mushroom are the same now"* and *"their behaviour should also be
+ * very different"*. The drawing was genuinely identical and is fixed elsewhere; this is the other
+ * half — proving the two are not the same lock problem, and pinning which way round they differ so
+ * a future retune cannot quietly collapse them again.
+ *
+ * The two axes are the two numbers a profile carries beyond its length:
+ *
+ * - `taper` is the bevel, and `counterForce = FORCE x T x (0.25 + taper)`. A mushroom is a cone: it
+ *   cams against the plug and **shoves the pick out**. A T-pin is square: nothing to cam on, so it
+ *   barely pushes at all.
+ * - `grooveDepth` is how far into the pin the waist cuts, and therefore how far the plug turns
+ *   before it stops. A T-pin's is deeper, so it tells the **longer, more convincing lie**.
+ *
+ * Opposite ends of both, which is two different techniques: ease the wrench off a mushroom, and be
+ * precise with a T-pin.
+ */
+describe('mushroom against t-pin', () => {
+  const MUSH_ONLY = makeLock({
+    slug: 'fixture-mushroom-only',
+    bitting: [3.2],
+    pins: ['mushroom'],
+    toleranceQuality: 1.2,
+  })
+  const TPIN_ONLY = makeLock({
+    slug: 'fixture-tpin-only',
+    bitting: [3.2],
+    pins: ['t-pin'],
+    toleranceQuality: 1.2,
+  })
+
+  /** Park the single chamber in its groove under tension and read what the lock does back. */
+  function inGroove(def: typeof MUSH_ONLY): { counter: number; theta: number } {
+    const s = createSimState(def, 5, PERFECT_CONFIG)
+    const c = s.chambers[0]
+    if (!c) throw new Error('no chamber')
+    const target = c.setLift * 0.55
+    holdFor(s, tensionOnly(0.6), 0.3)
+    holdAt(s, 0, target, 0.6, 2.5)
+    return { counter: s.stats.maxCounterForce, theta: s.thetaMax }
+  }
+
+  it('the mushroom shoves the pick out and the t-pin does not', () => {
+    const m = inGroove(MUSH_ONLY)
+    const t = inGroove(TPIN_ONLY)
+    expect(m.counter, 'a mushroom cams against the plug').toBeGreaterThan(0)
+    expect(
+      m.counter,
+      `mushroom ${m.counter.toFixed(2)} vs t-pin ${t.counter.toFixed(2)}`,
+    ).toBeGreaterThan(t.counter * 2)
+  })
+
+  it('their grooves are cut to different depths, so the lies are different lengths', () => {
+    const mush = PROFILES.mushroom
+    const tpin = PROFILES['t-pin']
+    expect(tpin.maxGrooveDepth, 'a t-pin cuts deeper').toBeGreaterThan(mush.maxGrooveDepth)
+    // …and by enough to be a different reading, not a rounding difference.
+    expect(tpin.maxGrooveDepth - mush.maxGrooveDepth).toBeGreaterThan(0.1)
+  })
+
+  it('and they are shaped differently, which is what the drawing now shows', () => {
+    // The bevel is the shape *and* the force, so this is the same number the test above measures.
+    expect(PROFILES.mushroom.bands.find((b) => b.reduced)?.taper).toBeGreaterThan(0.5)
+    expect(PROFILES['t-pin'].bands.find((b) => b.reduced)?.taper).toBe(0)
   })
 })

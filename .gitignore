@@ -5,15 +5,9 @@
 # ── Dependencies and build output ───────────────────────────────────────────────────────
 node_modules/
 dist/
+shear-line/
 .vite/
 *.tsbuildinfo
-
-# ── The Steam port ──────────────────────────────────────────────────────────────────────
-# The desktop wrapper that carries the game onto Steam: an Electron shell, a Steamworks bridge
-# and the packaging config. The game itself stays here and stays MIT; the wrapper that sells it
-# does not, so it lives beside the repository rather than in it. Nothing in `src/` knows it
-# exists — the wrapper reaches the game through `dist/`, the same bundle the website serves.
-shear-line/
 
 # ── Test and measurement output ─────────────────────────────────────────────────────────
 coverage/

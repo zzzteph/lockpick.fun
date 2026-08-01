@@ -285,9 +285,24 @@ export interface DevHook {
   subtitles(): string[]
   /** Which widget the keyboard is on, and whether the ring is showing. */
   focusState(): { index: number; count: number; keyboardMode: boolean }
+  /**
+   * Whether the game has switched to the touch scheme — set by the first touch that lands.
+   *
+   * A mobile screenshot taken without this is a screenshot of the *desktop* chrome at a phone
+   * size, because the wrench slider and the pads are only drawn once `touch.active` is true
+   * (D-082). Asking is how that test stops being a lie.
+   */
+  getTouch(): boolean
 }
 
 declare global {
+  /**
+   * The build version, replaced at build time by Vite from package.json (D-126).
+   *
+   * Declared rather than imported so nothing in  reads a JSON file at runtime, and so the
+   * constant folds away into a string literal in the bundle.
+   */
+  const __APP_VERSION__: string
   var __shearline: DevHook | undefined
 }
 

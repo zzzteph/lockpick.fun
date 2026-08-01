@@ -125,9 +125,20 @@ test('60fps on the heaviest locks, with a histogram to prove it', async ({ page 
     await setInput(page, { chamber: 5, liftTarget: 1.4, tensionHeld: true, tensionLevel: 0.45 })
     await stepTicks(page, 120)
 
-    // Let the real loop run for a couple of seconds of wall time.
+    /**
+     * Four seconds, not two — so that `p99` means what the assertion below thinks it means.
+     *
+     * At 2200ms the sample was about 130 frames, which makes the 99th percentile the *second
+     * worst frame in the run*. One garbage collection, or one moment of the machine still tearing
+     * down the browser suite that `npm run verify` runs immediately before this, and a build that
+     * holds a 2ms mean fails on a 60ms hitch. That happened, and the fix is not a looser bound: a
+     * percentile taken over 130 samples is not a percentile. Four seconds is ~240 frames, where
+     * p99 is a genuine tail rather than a single outlier, and the settle below keeps the
+     * measurement from starting while the previous suite is still exiting. See DECISIONS D-038.
+     */
+    await page.waitForTimeout(600)
     await page.evaluate(() => globalThis.__shearline?.setManual(false))
-    await page.waitForTimeout(2200)
+    await page.waitForTimeout(4000)
     const stats = await frameStats(page)
     await page.evaluate(() => globalThis.__shearline?.setManual(true))
 

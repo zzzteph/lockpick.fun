@@ -20,7 +20,15 @@ import { RANKS, rankIndexFor, secondsLeftInRank } from '../game/ranks'
 import { assemblyBounds, computeLayout } from './layout'
 import { hatchRect, label, paragraph, text } from './draw'
 import { STROKE, TYPE, alpha, font, readableAccents, type Palette } from './palette'
-import { LOGICAL_HEIGHT, LOGICAL_WIDTH, snapX, snapY, type Viewport } from './viewport'
+import {
+  LOGICAL_HEIGHT,
+  LOGICAL_WIDTH,
+  isCompact,
+  snapX,
+  snapY,
+  typeFor,
+  type Viewport,
+} from './viewport'
 
 const MARGIN = 24
 const HEADER_H = 64
@@ -354,6 +362,22 @@ function drawSidebarLamp(vp: Viewport, p: Palette, state: SimState, footerY: num
 
 export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOptions): void {
   const { ctx } = vp
+  /**
+   * On a small screen this page keeps what you need and drops what you can do without.
+   *
+   * At 0.36 stage scale — an 844x390 phone — everything here renders at about a third of its
+   * logical size, and `TYPE.dimension` lands on six CSS pixels. The answer is not to shrink the
+   * layout further or to scroll it: it is to draw **less**, and draw what is left at nearly twice
+   * the size. What goes: the key legend (the touch controls are on screen and labelled, so the
+   * legend was describing controls the player is looking at), the force column and both captions
+   * explaining the pair, the tension and plug captions, and the pick-depth readout.
+   *
+   * What stays is what a hand needs mid-pick: the lock, the clock, the rank, the wrench and its
+   * pressure, how far the plug has turned, and **resistance** — the one continuous channel the
+   * simulation has back to the player (`SIMULATION.md §8`). See DECISIONS D-122.
+   */
+  const compact = isCompact(vp)
+  const ts = (size: number): number => typeFor(vp, size)
 
   // ── Header ────────────────────────────────────────────────────────────────────────────
   ctx.save()
@@ -568,9 +592,14 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
    * The wrench is the only thing in the game that has a pressure, and the reason a player cannot
    * infer that is that they have never seen it named next to the meter it drives (D-107).
    */
-  label(ctx, `tension wrench — pressure ${opts.pressureStep} of 10`, leftX, footerY + 30, {
-    font: font(TYPE.dimension),
-    size: TYPE.dimension,
+  label(
+    ctx,
+    compact ? `wrench ${opts.pressureStep} of 10` : `tension wrench — pressure ${opts.pressureStep} of 10`,
+    leftX,
+    footerY + 30,
+    {
+    font: font(ts(TYPE.dimension)),
+    size: ts(TYPE.dimension),
     color: p.inkLight,
   })
   meter(
@@ -584,8 +613,8 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
     { height: BAR_H },
   )
   label(ctx, String(opts.pressureStep), leftX + meterW + 20, footerY + 68, {
-    font: font(TYPE.heading, 'bold'),
-    size: TYPE.heading,
+    font: font(ts(TYPE.heading), 'bold'),
+    size: ts(TYPE.heading),
     color: p.ink,
   })
   text(ctx, state.tension.toFixed(2), leftX + meterW + 58, footerY + 68, {
@@ -628,6 +657,9 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
    * tension wrench"*. See DECISIONS D-107.
    */
   const wrenchOff = state.tension < T_MIN_HOLD
+  // On a phone the prompt survives and the explanation does not: 'hold the wrench' is the one
+  // sentence a stuck player needs, and the notch is visible on the meter itself (D-122).
+  if (!compact || wrenchOff)
   label(
     ctx,
     wrenchOff ? opts.tensionHint : 'past the notch, set pins hold while you work',
@@ -700,30 +732,45 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
     const WORD_Y = 552 // the state word — the headline reading of the pair
     const NUM_Y = 586 // both numbers, in the heading face
     const LABEL_Y = colBottom + 26 // `force` / `resistance`, under their bars
-    column(vp, p, forceX, colBottom, colH, state.pickForce, alpha(p.inkLight, 0.7), 10, colW)
+    // The pair is a *comparison* (D-064) and a phone has room for one bar. Resistance is the one
+    // that survives: it is the simulation's only continuous channel back to the player, and force
+    // is knowable from the hand that is making it (D-122).
+    if (!compact) {
+      column(vp, p, forceX, colBottom, colH, state.pickForce, alpha(p.inkLight, 0.7), 10, colW)
     text(ctx, state.pickForce.toFixed(2), forceX + colW / 2, NUM_Y, {
       font: font(TYPE.heading),
       color: p.ink,
       align: 'center',
     })
-    label(ctx, 'force', forceX + colW / 2, LABEL_Y, {
-      font: font(TYPE.dimension),
-      size: TYPE.dimension,
-      color: p.inkLight,
-      align: 'center',
-    })
+      label(ctx, 'force', forceX + colW / 2, LABEL_Y, {
+        font: font(TYPE.dimension),
+        size: TYPE.dimension,
+        color: p.inkLight,
+        align: 'center',
+      })
+    }
 
+    /**
+     * Centred on the column normally; **right-aligned to the margin** when compact.
+     *
+     * The column sits 110px off the right edge, which is fine for a 17px label centred on it and
+     * not fine for the same label at 37. `PUSH TO FEEL` at the compact size is about 375px wide
+     * and ran a hundred pixels off the side of the screen. Anchoring to the margin instead of to
+     * the column is what keeps a reading that got bigger from also getting cut off (D-122).
+     */
+    const readX = compact ? LOGICAL_WIDTH - MARGIN : colX + colW / 2
+    const readAlign = compact ? ('right' as const) : ('center' as const)
     column(vp, p, colX, colBottom, colH, state.resistance, named ? stateInk(state, p) : p.ink)
-    text(ctx, state.resistance.toFixed(2), colX + colW / 2, NUM_Y, {
-      font: font(TYPE.heading),
+    text(ctx, state.resistance.toFixed(2), readX, NUM_Y, {
+      font: font(ts(TYPE.heading)),
       color: named ? stateInk(state, p) : p.ink,
-      align: 'center',
+      align: readAlign,
     })
-    label(ctx, 'resistance', colX + colW / 2, LABEL_Y, {
-      font: font(TYPE.dimension),
-      size: TYPE.dimension,
+    label(ctx, 'resistance', readX, LABEL_Y, {
+      font: font(ts(TYPE.dimension)),
+      size: ts(TYPE.dimension),
       color: p.inkLight,
-      align: 'center',
+      align: readAlign,
     })
     /**
      * What the pair is *for*, in the strip of page to the right of the lock.
@@ -748,6 +795,7 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
      */
     const captionW = LOGICAL_WIDTH - MARGIN - 8 - GUTTER_LEFT
     let cy = CAPTION_Y
+    if (compact) cy = -1000 // drawn off-stage; the sentences explain a pair that is not there
     for (const line of ['force — how hard you push', 'resistance — how hard it pushes back']) {
       cy += paragraph(ctx, line, GUTTER_LEFT, cy, {
         font: font(TYPE.dimension),
@@ -757,11 +805,11 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
       }) * 22
     }
     if (named) {
-      label(ctx, stateWord(state), colX + colW / 2, WORD_Y, {
-        font: font(TYPE.body),
-        size: TYPE.body,
+      label(ctx, stateWord(state), readX, WORD_Y, {
+        font: font(ts(TYPE.body)),
+        size: ts(TYPE.body),
         color: stateInk(state, p),
-        align: 'center',
+        align: readAlign,
       })
     }
   }
@@ -782,8 +830,8 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
   const plugX = LOGICAL_WIDTH / 2 + 40
   const plugW = 300
   label(ctx, turningBack ? 'plug — turning back' : 'plug', plugX, footerY + 30, {
-    font: font(TYPE.dimension),
-    size: TYPE.dimension,
+    font: font(ts(TYPE.dimension)),
+    size: ts(TYPE.dimension),
     color: turningBack ? readableAccents(p).crimson : p.inkLight,
   })
   const turned = clamp01(state.theta / THETA_OPEN)
@@ -803,13 +851,14 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
   ctx.restore()
   // The bar was unlabelled beyond the word "plug", so the notch read as decoration. It is the
   // finish line: fill past it and the lock is open (D-100).
+  if (!compact)
   label(ctx, 'how far it has turned — past the notch it opens', plugX, footerY + 100, {
     font: font(TYPE.dimension),
     size: TYPE.dimension,
     color: p.inkLight,
   })
 
-  if (opts.depthMm !== null && opts.depthMm !== undefined) {
+  if (!compact && opts.depthMm !== null && opts.depthMm !== undefined) {
     const dx = LOGICAL_WIDTH / 2 - 150
     label(ctx, 'pick depth', dx, footerY + 30, {
       font: font(TYPE.dimension),
@@ -865,7 +914,10 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
 
   drawSidebarLamp(vp, p, state, footerY)
 
-  drawKeyLegend(vp, p, opts.keys)
+  // The touch controls are drawn on screen and labelled, so on a phone this legend described
+  // controls the player was looking at — and did it *on top of them*, straight across the pause
+  // pad and the wrench slider, which share the same gutter (D-122).
+  if (!compact) drawKeyLegend(vp, p, opts.keys)
 }
 
 /**

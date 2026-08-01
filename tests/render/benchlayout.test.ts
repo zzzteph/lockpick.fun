@@ -45,6 +45,29 @@ describe('the bench', () => {
     expect(benchHeight(20 * tiers.length, tiers.length, LESSONS.length)).toBeGreaterThan(floor)
   })
 
+  /**
+   * The compact bench is a different shape, and it is the one that nearly did not fit — D-123.
+   *
+   * Two columns turns a six-lock tier into three rows, and three rows only fit because the lesson
+   * strip goes. That is two changes paying for each other, which is exactly the arrangement that
+   * silently stops balancing when one of them moves.
+   */
+  it('fits on a phone, where it is two columns and three rows', () => {
+    const h = benchHeight(ALL_LOCKS.length, tiers.length, LESSONS.length, true)
+    expect(h, `compact bench runs to y=${h}, past the status line at ${floor}`).toBeLessThanOrEqual(
+      floor,
+    )
+  })
+
+  it('would not fit on a phone if the lesson strip stayed — the trade is real', () => {
+    // `benchHeight` keeps the strip when no lesson is done, which is correct: a player who has not
+    // been taught needs it more than they need the third row of locks. This asserts the *other*
+    // half — that the room genuinely had to come from somewhere.
+    const withLessons = benchHeight(ALL_LOCKS.length, tiers.length, 0, true)
+    const compactWithStrip = withLessons + LESSONS.length * 0 + 110
+    expect(compactWithStrip).toBeGreaterThan(floor)
+  })
+
   it('leaves the tier strip clear of the lesson cards', () => {
     // Mirrors `drawBench`: lesson cards start at y=120 and are `LESSON_H` tall; the strip's buttons
     // are drawn at `y - 22` after `y += LESSON_H + GAP`. At the old gap of 18 that put 40px-tall

@@ -24,6 +24,8 @@ import {
   invertedSpringSpan,
   isRecessed,
   keyPinRect,
+  driverLengthPx,
+  driverOutline,
   mmToY,
   plugChamberX,
   shellChamberX,
@@ -32,7 +34,7 @@ import {
   type CutawayLayout,
 } from './layout'
 import { STATE_PATTERN, STROKE, TYPE, alpha, font, mix, stateColor, type Palette } from './palette'
-import { LOGICAL_WIDTH, snapX, snapY, type Viewport } from './viewport'
+import { LOGICAL_WIDTH, isCompact, snapX, snapY, type Viewport } from './viewport'
 
 const HATCH_SPACING = 6
 
@@ -313,21 +315,59 @@ function drawDriver(
   // `plain` is blind mode: draw the driver as an unshaped stack whatever it really is, so a
   // spool's waist and a serrated pin's steps have to be *deduced* rather than read (D-041).
   const rects = plain ? [driverPinRect(layout, c)] : bandRects(layout, c)
+  /**
+   * Filled and outlined as one **tapered** silhouette, not as a stack of rectangles (D-125).
+   *
+   * `bandRects` still supplies the rectangles the fill patterns are painted into — a hatch wants a
+   * rect, and the band boundaries are where a pattern should change. What it cannot supply is the
+   * *shape*: it knows `grooveDepth` and discards `taper`, so a mushroom's bevelled cone and a
+   * T-pin's square step came out as the same outline. The pin in the lock now matches the pin on
+   * the help page, and both match what the simulation is reading.
+   */
+  const body = plain
+    ? null
+    : driverOutline(
+        c.profile.bands,
+        shellChamberX(layout, c.index),
+        (rects[0]?.y ?? 0) + (rects[0]?.h ?? 0),
+        layout.driverWidth,
+        driverLengthPx(layout),
+      )
+  const tracePath = (): void => {
+    ctx.beginPath()
+    if (body) {
+      body.forEach((pt, i) => {
+        if (i === 0) ctx.moveTo(pt.x, pt.y)
+        else ctx.lineTo(pt.x, pt.y)
+      })
+      ctx.closePath()
+    } else {
+      for (const r of rects) ctx.rect(r.x, r.y, r.w, r.h)
+    }
+  }
+
   ctx.save()
-  ctx.beginPath()
-  for (const r of rects) ctx.rect(r.x, r.y, r.w, r.h)
+  tracePath()
   ctx.fillStyle = fill
   ctx.fill()
   ctx.restore()
 
+  // The patterns are clipped to the silhouette so a hatch cannot spill into a waist.
+  ctx.save()
+  tracePath()
+  ctx.clip()
   for (const r of rects) paintPattern(ctx, r, c, p, showBinding)
+  ctx.restore()
 
   ctx.save()
   ctx.lineWidth = recessed ? STROKE.hairline : STROKE.standard
   ctx.strokeStyle = recessed ? p.inkLight : p.ink
-  ctx.beginPath()
-  // Outline the silhouette rather than every band, so the waist reads as one shape.
-  outlineBands(ctx, rects)
+  if (body) tracePath()
+  else {
+    ctx.beginPath()
+    // Outline the silhouette rather than every band, so the waist reads as one shape.
+    outlineBands(ctx, rects)
+  }
   ctx.stroke()
   ctx.restore()
 }
@@ -682,7 +722,16 @@ export function drawCutaway(
     pickedButUnturned(state),
   )
   drawChamberLabels(vp, p, layout, state, opts.activeChamber)
-  drawAnatomy(vp, p, layout, state)
+  /**
+   * The anatomy key — SHELL, PLUG, KEYWAY, the shear line and the pin-stack legend — is a
+   * desktop luxury (D-122).
+   *
+   * It exists so a player who has never taken a cylinder apart can learn which brass block is
+   * which (D-050), and on a full page it costs nothing. On a phone it is six labels at a size
+   * nobody can read, drawn across the one thing they need to see. The lock itself is the tutorial
+   * on a small screen; the words are in Help.
+   */
+  if (!isCompact(vp)) drawAnatomy(vp, p, layout, state)
 }
 
 function drawChamberLabels(
