@@ -17,7 +17,7 @@ import { PROFILES, type PinTypeName } from '../sim'
 import { label, paragraph, text } from '../render/draw'
 import { STROKE, TYPE, font, readableAccents, type Palette } from '../render/palette'
 import { driverOutline } from '../render/layout'
-import { LOGICAL_HEIGHT, LOGICAL_WIDTH, type Viewport } from '../render/viewport'
+import { LOGICAL_HEIGHT, LOGICAL_WIDTH, isCompact, typeFor, type Viewport } from '../render/viewport'
 import { screenFrame, type ShellContext } from './shell'
 import { button, type Rect } from './widgets'
 
@@ -172,6 +172,18 @@ function stateColour(term: string, p: Palette): string {
  */
 const FOOTNOTE_Y = LOGICAL_HEIGHT - MARGIN - 104
 
+/**
+ * The per-page footnote is a nicety, and on a phone it is a nicety in the way (D-129).
+ *
+ * The grid grows a taller row-height at the compact scale, so five rows of pins now reach y=990 —
+ * past the footnote at 952. One of them has to go, and it is the one that adds a remark rather
+ * than the one that explains the nine pin types the page exists for.
+ */
+function footnote(c: ShellContext, line: string): void {
+  if (isCompact(c.vp)) return
+  text(c.vp.ctx, line, LEFT, FOOTNOTE_Y, { font: font(TYPE.body), color: c.p.inkLight })
+}
+
 const PAGES = ['the pins', 'the readouts', 'what a pin is doing'] as const
 
 /**
@@ -188,28 +200,43 @@ function grid(
 ): void {
   const { vp, p } = c
   const { ctx } = vp
+  /**
+   * The same two columns at every size, with the **type** scaled rather than the grid — D-129.
+   *
+   * Reported as *"help on mobile is barely visible — very small text"*, which it was: this page was
+   * still drawing at 26 and 21 logical px, which is nine and seven actual pixels on a phone. It is
+   * the one screen whose entire job is to be read.
+   *
+   * It gets away with keeping two columns because there are only nine entries on its longest page,
+   * so five rows of a taller row-height still land above the status line. The drawing beside each
+   * term grows with the text, or a 44px pin next to a 42px word reads as a smudge next to a title.
+   */
   const cols = 2
   const gap = 40
   const width = Math.floor((LOGICAL_WIDTH - LEFT * 2 - gap) / cols)
-  const rowH = 132
+  const termSize = typeFor(vp, TYPE.heading)
+  const bodySize = typeFor(vp, TYPE.body)
+  const glyphW = isCompact(vp) ? 70 : 44
+  const textPad = glyphW + 32
+  const rowH = isCompact(vp) ? 148 : 132
   entries.forEach((entry, i) => {
     const x = LEFT + (width + gap) * (i % cols)
     // 250: the page tabs end at y=190 and a pin drawing starts 18px above its own baseline, so at
     // 206 the first row was drawn behind the tab it belongs to (D-103).
     const y = 250 + Math.floor(i / cols) * rowH
-    const textX = draw ? x + 76 : x
-    if (draw) draw(entry.term, { x, y: y - 18, w: 44, h: 88 })
+    const textX = draw ? x + textPad : x
+    if (draw) draw(entry.term, { x, y: y - 18, w: glyphW, h: rowH - 44 })
     label(ctx, entry.term, textX, y + 6, {
-      font: font(TYPE.heading),
-      size: TYPE.heading,
+      font: font(termSize),
+      size: termSize,
       color: colour(entry.term),
     })
-    paragraph(ctx, entry.blurb, textX, y + 40, {
-      font: font(TYPE.body),
+    paragraph(ctx, entry.blurb, textX, y + termSize + 18, {
+      font: font(bodySize),
       color: p.inkLight,
-      maxWidth: width - (draw ? 76 : 0),
-      lineHeight: 28,
-      maxLines: 3,
+      maxWidth: width - (draw ? textPad : 0),
+      lineHeight: bodySize + 7,
+      maxLines: isCompact(vp) ? 2 : 3,
     })
   })
 }
@@ -264,30 +291,12 @@ export function drawHelp(c: ShellContext): void {
       (term) => (PROFILES[term as PinTypeName].grooveCount > 0 ? readableAccents(p).violet : p.ink),
       (term, rect) => drawDriver(vp, p, term as PinTypeName, rect),
     )
-    text(
-      ctx,
-      'a narrow band is a groove — somewhere for the plug to catch and lie to you',
-      LEFT,
-      FOOTNOTE_Y,
-      { font: font(TYPE.body), color: p.inkLight },
-    )
+    footnote(c, 'a narrow band is a groove — somewhere for the plug to catch and lie to you')
   } else if (page === 1) {
     grid(c, READOUTS, () => p.ink)
-    text(
-      ctx,
-      'the gap between force and resistance is the reading — that is how you find the binding pin',
-      LEFT,
-      FOOTNOTE_Y,
-      { font: font(TYPE.body), color: p.inkLight },
-    )
+    footnote(c, 'the gap between force and resistance is the reading — that is how you find the binding pin')
   } else {
     grid(c, STATES, (term) => stateColour(term, p))
-    text(
-      ctx,
-      'nothing here is random — every lock is the same lock every time you pick it',
-      LEFT,
-      FOOTNOTE_Y,
-      { font: font(TYPE.body), color: p.inkLight },
-    )
+    footnote(c, 'nothing here is random — every lock is the same lock every time you pick it')
   }
 }

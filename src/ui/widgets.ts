@@ -182,7 +182,17 @@ export function button(
    * the string is (D-102), and this is the fifth place in this codebase to need telling.
    */
   const room = rect.w - 16
-  let fitted = size
+  /**
+   * Capped by the button's **height** as well as its width — DECISIONS D-128.
+   *
+   * Width alone was not enough. The compact scale is chosen so the smallest face lands on eleven
+   * real pixels (D-122), and applying that to a caption inside a 40px nav button gives a 34px
+   * glyph in a 40px box: it fills the button top to bottom with no air at all, which was reported
+   * as *"the buttons text is too big — it just takes all the space from the top and bottom, looks
+   * badly"*. Half the height leaves the cap-height sitting inside the frame with room to breathe,
+   * which is what a button looks like.
+   */
+  let fitted = Math.min(size, Math.floor(rect.h * 0.5))
   ctx.save()
   const drawnWidth = (s: number): number => {
     ctx.font = font(s)

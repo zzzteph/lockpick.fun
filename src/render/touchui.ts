@@ -244,3 +244,43 @@ export function isPortrait(vp: Viewport): boolean {
 export function isCoarsePointer(): boolean {
   return typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
 }
+
+/** Tried once per session; a refusal is normal and must not be retried on every touch. */
+let rotationAsked = false
+
+/**
+ * Ask the device to turn itself landscape, rather than asking the player to — DECISIONS D-129.
+ *
+ * Reported as *"when you open the device the interface must be rotated by default without ask"*,
+ * and that is the right instinct: the game is 16:9 and a phone knows how to rotate. What it is not
+ * is reliably *allowed*. `screen.orientation.lock` needs a fullscreen element on Chrome and Android,
+ * and **Safari on iOS does not implement it at all** — so this is best-effort by nature, and the
+ * "turn the phone sideways" screen stays as the fallback for the browsers that refuse.
+ *
+ * Called from the first touch because both fullscreen and orientation lock require a user gesture:
+ * a page cannot rotate the phone of somebody who has not touched it yet, and no amount of wanting
+ * to changes that. Tried once — a browser that says no will say no every time, and asking again on
+ * every tap would mean an unhandled rejection per tap.
+ */
+export function tryRotateToLandscape(canvas: HTMLElement): void {
+  if (rotationAsked) return
+  rotationAsked = true
+  const orientation = screen.orientation as
+    | (ScreenOrientation & { lock?: (o: string) => Promise<void> })
+    | undefined
+  if (typeof orientation?.lock !== 'function') return
+
+  const lock = (): void => {
+    orientation.lock?.('landscape').catch(() => {
+      // Refused — no fullscreen, or the platform does not support it. The prompt handles it.
+    })
+  }
+  // Fullscreen first where it is available, because the lock is rejected outside it on the
+  // browsers that support the lock at all.
+  const el = canvas as HTMLElement & { requestFullscreen?: () => Promise<void> }
+  if (typeof el.requestFullscreen === 'function' && !document.fullscreenElement) {
+    el.requestFullscreen().then(lock, lock)
+  } else {
+    lock()
+  }
+}

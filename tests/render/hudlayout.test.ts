@@ -158,14 +158,19 @@ describe('the readout columns', () => {
   it('gives every row in the readout stack clear air above it', () => {
     // Mirrors `hud.ts`.
     const footerY = LOGICAL_HEIGHT - MARGIN - FOOTER_H
+    // Mirrors `hud.ts`, including its *derivation* rather than its results: the stack is spaced by
+    // the type's own height now, so that each row keeps its air when the compact scale changes it
+    // (D-129). At the desktop scale the sizes are the unscaled `TYPE` values.
     const colBottom = footerY - 56
     const colH = 270
+    const numY = colBottom - colH - 16
+    const wordY = numY - TYPE.heading - 10
     const rows: [string, number, number][] = [
       // name, baseline, type size
       ['caption line 1', 452, TYPE.dimension],
       ['caption line 2', 474, TYPE.dimension],
-      ['state word', 552, TYPE.body],
-      ['numbers', 586, TYPE.heading],
+      ['state word', wordY, TYPE.body],
+      ['numbers', numY, TYPE.heading],
     ]
     for (let i = 1; i < rows.length; i += 1) {
       const [name, y, size] = rows[i] as [string, number, number]
@@ -174,8 +179,8 @@ describe('the readout columns', () => {
       expect(y - size * 0.8, `"${name}" crowds "${prevName}"`).toBeGreaterThan(prevY)
     }
     // The last row's descenders must clear the top of the bars.
-    const [, numY, numSize] = rows[rows.length - 1] as [string, number, number]
-    expect(numY + numSize * 0.25, 'the numbers sit on the bars').toBeLessThan(colBottom - colH)
+    const [, lastY, lastSize] = rows[rows.length - 1] as [string, number, number]
+    expect(lastY + lastSize * 0.25, 'the numbers sit on the bars').toBeLessThan(colBottom - colH)
     // And the whole stack starts below the header band rather than inside it.
     expect(452 - TYPE.dimension * 0.8).toBeGreaterThan(MARGIN + HEADER_H)
 

@@ -108,6 +108,8 @@ export interface ShellActions {
   deleteCustomLock(index: number): void
   /** Step the codes screen through the player's own locks, six at a time. */
   codesPageBy(delta: number): void
+  /** Step the trophy case a page at a time — compact only, where it pages (D-129). */
+  trophyPageBy(delta: number): void
   /** Show a tier on the bench. The bench draws one at a time (D-102). */
   benchTier(tier: number): void
   /** Show one of the help screen's three pages (D-103). */
@@ -147,6 +149,8 @@ export interface ShellContext {
   codeFocus?: boolean
   /** Which page of the player's own locks is showing. */
   codesPage?: number
+  /** Which page of the trophy case is showing on a phone. */
+  trophyPage?: number
   /** Which tier the bench is showing. Undefined means "the deepest one they have reached". */
   benchTier?: number
   /** Which of the help screen's three pages is showing (D-103). */
@@ -297,11 +301,13 @@ export function drawMenu(c: ShellContext): void {
    * can take the width it needs and start higher up. See DECISIONS D-122.
    */
   const compact = isCompact(vp)
+  // 84 and 100, not 96 and 118: the Editor entry makes seven buttons, and seven at the old pitch
+  // put the last one through the status line (D-128).
   const w = compact ? 760 : 380
-  const h = compact ? 96 : 56
+  const h = compact ? 84 : 56
   const x = (LOGICAL_WIDTH - w) / 2
-  let y = compact ? 250 : 320
-  const gap = compact ? 118 : 74
+  let y = compact ? 236 : 320
+  const gap = compact ? 100 : 74
 
   // A brand-new player is sent to the first lesson, not to a wall of thirty-five locks. The
   // game is unusually unforgiving of not knowing what tension is for, and "Start picking"
@@ -336,6 +342,16 @@ export function drawMenu(c: ShellContext): void {
   y += gap
   // Between the trophies and the settings on purpose: it is a place to *go*, not a preference.
   if (button(vp, p, ui, { x, y, w, h }, 'Share codes')) actions.goto('codes')
+  y += gap
+  /**
+   * The editor, which had no way in from here (D-128).
+   *
+   * It was reachable only from the nav row on the bench and the codes page — fine on a desktop
+   * where those rows are always in view, and on a phone it meant a whole screen of the game was
+   * findable only by guessing which other screen linked to it. Reported as *"no editor at the
+   * menu"*. It sits after Share codes because the two belong together: build one, then send it.
+   */
+  if (button(vp, p, ui, { x, y, w, h }, 'Editor')) actions.goto('editor')
   y += gap
   if (button(vp, p, ui, { x, y, w, h }, 'Help')) actions.goto('help')
   y += gap
@@ -397,7 +413,16 @@ export function drawMenu(c: ShellContext): void {
       { font: font(TYPE.body), color: p.inkLight, maxWidth: 480, lineHeight: 30, maxLines: 3 },
     )
   }
-  if (earned.length > 0) {
+  /**
+   * The recent-trophy list is a side column too, and it was missed — DECISIONS D-128.
+   *
+   * D-122 guarded the "what this is" blurb with `if (compact) {}` and left this as a **separate**
+   * `if` below it, so on a phone it carried on drawing: right-aligned at x=1800, with conditions
+   * long enough to reach back across the 760px-wide button stack. Reported as *"in the menu, when
+   * you have the achievements, the text that explains the achievements overlaps the menu buttons"*
+   * — which is what an `else if` chain with an orphan `if` on the end does.
+   */
+  if (!compact && earned.length > 0) {
     const tx = LOGICAL_WIDTH - MARGIN - 96
     label(ctx, 'lately', tx, 320, {
       font: font(TYPE.dimension),
@@ -764,6 +789,7 @@ export function drawBench(c: ShellContext): void {
   let y = 120
   const taughtBasics = progress.data.tutorial.length > 0
   const grid = benchGrid(vp)
+  const compactBench = isCompact(vp)
   // A heading with nothing under it is an orphan: it goes with the strip it heads (D-123).
   const showLessons = !isCompact(vp) || !taughtBasics
   if (showLessons)
@@ -945,19 +971,50 @@ export function drawBench(c: ShellContext): void {
       const record = progress.record(def.slug)
       const readable = readableAccents(p)
 
-      paragraph(ctx, def.name, rect.x + 22, rect.y + 38, {
-        font: font(typeFor(vp, TYPE.heading)),
+      /**
+       * The lock's name, **fitted to the card** — DECISIONS D-128.
+       *
+       * `paragraph` wraps on spaces and lets a single over-long *word* run past `maxWidth` rather
+       * than chopping it, which is right for prose and wrong here: at the compact type scale
+       * "Halberd Tight-Tolerance 5" put "Tight-Tolerance" straight out through the side of its
+       * own card. Reported as *"in the bench the names of the locks are too big and they exit the
+       * boxes of the locks"*.
+       *
+       * Measured and shrunk to fit, the same rule `button` and the touch pads use. A name is a
+       * label on a box, so the box wins — the alternative is truncating it, and half a lock name
+       * is worse than a slightly smaller whole one.
+       */
+      const nameRoom = rect.w - (record.opens > 0 ? 110 : 44)
+      // …and capped by the card's *height* too. At the compact scale a heading is 42px in a
+      // 210px card, which crowds the glyph and the record line into each other even when it fits
+      // across (D-128).
+      let nameSize = Math.min(typeFor(vp, TYPE.heading), Math.floor(rect.h * 0.15))
+      ctx.save()
+      while (nameSize > 12) {
+        ctx.font = font(nameSize)
+        if (ctx.measureText(def.name).width <= nameRoom) break
+        nameSize -= 1
+      }
+      ctx.restore()
+      text(ctx, def.name, rect.x + 22, rect.y + 38, {
+        font: font(nameSize),
         color: unlocked ? p.ink : p.inkLight,
-        maxWidth: rect.w - (record.opens > 0 ? 110 : 44),
-        lineHeight: 28,
-        maxLines: 1,
       })
-      drawLockGlyph(vp, p, def, { x: rect.x + 22, y: rect.y + 62, w: 220, h: 118 }, !unlocked, 9)
+      const glyphH = compactBench ? 84 : 118
+      drawLockGlyph(
+        vp,
+        p,
+        def,
+        { x: rect.x + 22, y: rect.y + 58, w: compactBench ? 200 : 220, h: glyphH },
+        !unlocked,
+        9,
+      )
 
       const stats = [`${chambersOf(def)} chambers`, `par ${def.par}s`]
+      const statSize = typeFor(vp, TYPE.body)
       stats.forEach((s, k) => {
-        text(ctx, s, rect.x + 266, rect.y + 100 + k * 32, {
-          font: font(TYPE.body),
+        text(ctx, s, rect.x + (compactBench ? 250 : 266), rect.y + 92 + k * (statSize + 12), {
+          font: font(statSize),
           // `p.rule` is the hairline colour: as a *text* colour on a hatched card it was the same
           // grey as the hatch it sat on, which is no colour at all (D-099).
           color: p.inkLight,
@@ -970,7 +1027,7 @@ export function drawBench(c: ShellContext): void {
           `opened ${record.opens}x  ·  best ${record.bestTime?.toFixed(1) ?? '—'}s`,
           rect.x + 22,
           rect.y + rect.h - 20,
-          { font: font(TYPE.body), color: readable.teal },
+          { font: font(typeFor(vp, TYPE.body)), color: readable.teal },
         )
         /**
          * The best rank on this lock, in the card's corner, large.
@@ -1490,7 +1547,7 @@ const TROPHY_ROWS = 8
  * still dark, and "the lock it names has not been built yet" is the honest answer.
  */
 export function drawTrophies(c: ShellContext): void {
-  const { vp, p, progress, actions } = c
+  const { vp, p, ui, progress, actions } = c
   const { ctx } = vp
   const readable = readableAccents(p)
   const earned = new Set(progress.data.achievements)
@@ -1506,17 +1563,58 @@ export function drawTrophies(c: ShellContext): void {
   const left = MARGIN + 56
   // Below the nav bar, which the grid used to start level with (D-103).
   const top = 152
-  const w = 356
-  const h = 92
+  /**
+   * Two columns and a page turner on a phone — DECISIONS D-129.
+   *
+   * Reported as *"the achievements screen — the achievements are very small and not readable"*.
+   * They were: a plate is 356px wide carrying a condition like "Beat the par time on any lock", and
+   * at the compact type scale that sentence is nearly six hundred pixels of type. **Width is the
+   * binding constraint here, not height** — which is why this screen could not be fixed the way the
+   * bench was, by dropping a column and finding the rows elsewhere. Thirty-four plates wide enough
+   * to read is twelve rows, and the page does not scroll.
+   *
+   * So it pages. Ten plates to a page, four pages, with the same `<` `>` control the codes screen
+   * uses. A reference screen you turn is better than one you squint at, and much better than one
+   * whose bottom half is drawn past the edge of the phone.
+   */
+  const compactCase = isCompact(vp)
+  const cols = compactCase ? 2 : TROPHY_COLS
+  const rows = compactCase ? 5 : TROPHY_ROWS
+  const w = compactCase ? 908 : 356
+  const h = compactCase ? 116 : 92
   const gapX = 12
   const gapY = 10
+  const perPage = cols * rows
+  const pages = Math.max(1, Math.ceil(ACHIEVEMENTS.length / perPage))
+  const page = Math.min(Math.max(0, c.trophyPage ?? 0), pages - 1)
+  const from = compactCase ? page * perPage : 0
+  const nameSize = typeFor(vp, TYPE.body)
+  const condSize = typeFor(vp, TYPE.dimension)
 
-  for (let i = 0; i < ACHIEVEMENTS.length; i += 1) {
+  if (pages > 1) {
+    if (
+      button(vp, p, ui, { x: LOGICAL_WIDTH - MARGIN - 232, y: 96, w: 44, h: 40 }, '\u2039', {
+        enabled: page > 0,
+      })
+    ) {
+      actions.trophyPageBy(-1)
+    }
+    if (
+      button(vp, p, ui, { x: LOGICAL_WIDTH - MARGIN - 180, y: 96, w: 44, h: 40 }, '\u203a', {
+        enabled: page < pages - 1,
+      })
+    ) {
+      actions.trophyPageBy(1)
+    }
+  }
+
+  for (let n = 0; n < perPage; n += 1) {
+    const i = from + n
     const a = ACHIEVEMENTS[i]
     if (!a) continue
-    const col = i % TROPHY_COLS
-    const row = Math.floor(i / TROPHY_COLS)
-    if (row >= TROPHY_ROWS) break
+    const col = n % cols
+    const row = Math.floor(n / cols)
+    if (row >= rows) break
     const x = left + col * (w + gapX)
     const y = top + row * (h + gapY)
     const got = earned.has(a.id)
@@ -1540,20 +1638,20 @@ export function drawTrophies(c: ShellContext): void {
     ctx.strokeRect(snapX(vp, x + 14, STROKE.standard), snapY(vp, y + 16, STROKE.standard), 14, 14)
     ctx.restore()
 
-    text(ctx, a.name, x + 40, y + 28, {
-      font: font(TYPE.body),
+    text(ctx, a.name, x + 40, y + nameSize + 10, {
+      font: font(nameSize),
       color: got ? p.ink : locked ? p.rule : p.inkLight,
     })
     paragraph(
       ctx,
-      got ? a.condition : locked ? 'Needs a lock that is not in the game yet' : '— locked —',
+      got ? a.condition : locked ? 'Needs a lock that is not in the game yet' : '\u2014 locked \u2014',
       x + 40,
-      y + 50,
+      y + nameSize + condSize + 20,
       {
-        font: font(TYPE.dimension),
+        font: font(condSize),
         color: got ? p.inkLight : p.rule,
         maxWidth: w - 54,
-        lineHeight: 17,
+        lineHeight: condSize + 4,
         maxLines: 2,
       },
     )

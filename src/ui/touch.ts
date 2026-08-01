@@ -49,7 +49,20 @@ export function inRect(r: TouchRect, x: number, y: number): boolean {
  * phone renders this is roughly 90 logical px, so 132 is a comfortable target rather than a tight
  * one.
  */
-export const WRENCH_SLIDER: TouchRect = { x: 30, y: 178, w: 132, h: 660 }
+/**
+ * The slider starts at 260, not 178 — DECISIONS D-129.
+ *
+ * It carries a header: the pressure step as a big number at `y - 34` and the word `wrench` at
+ * `y - 12`. At `y = 178` both of those were drawn at 144 and 166 — **inside `PAUSE_PAD`**, which
+ * runs 96 to 170. So the wrench's own label has always been printed across the pause button, on
+ * every touch device, since the scheme was written. Nobody saw it because the touch controls only
+ * draw once a finger has landed and every screenshot in the suite was taken with a mouse; the
+ * compact type scale made it large enough to report — *"pause and wrench overlap"*.
+ *
+ * 260 leaves the header a clear 90px band of its own between the two controls. The bottom edge is
+ * unchanged at 838, so `WITHDRAW_PAD` and every hit test below it stay exactly where they were.
+ */
+export const WRENCH_SLIDER: TouchRect = { x: 30, y: 260, w: 132, h: 578 }
 
 /** The pads along the bottom of the gutter: withdraw the pick, and pause. */
 // Above the footer panel, which starts at 940 — a control drawn over the tension meter reads as

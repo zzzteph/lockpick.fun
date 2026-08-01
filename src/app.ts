@@ -96,7 +96,13 @@ import {
 } from './render/layout'
 import { THEMES, TYPE, font, type Palette } from './render/palette'
 import { drawPick, drawPickTarget, pickRender } from './render/pick'
-import { drawRotatePrompt, drawTouchControls, isCoarsePointer, isPortrait } from './render/touchui'
+import {
+  drawRotatePrompt,
+  drawTouchControls,
+  isCoarsePointer,
+  isPortrait,
+  tryRotateToLandscape,
+} from './render/touchui'
 import {
   LOGICAL_HEIGHT,
   LOGICAL_WIDTH,
@@ -254,6 +260,8 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
    * holds no state of its own — the same reason `editingName` is here.
    */
   let codesPage = 0
+  /** Which page of the trophy case is showing — compact only, where 34 plates do not fit (D-129). */
+  let trophyPage = 0
   let armedDelete: string | null = null
   /** Which tier the bench is showing, or undefined for "wherever they got to" (D-102). */
   let benchTier: number | undefined
@@ -577,6 +585,10 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       codesPage = Math.max(0, codesPage + delta)
       armedDelete = null
     },
+    trophyPageBy: (delta: number) => {
+      trophyPage = Math.max(0, trophyPage + delta)
+      audio.click()
+    },
     benchTier: (tier: number) => {
       benchTier = tier
       audio.click()
@@ -695,6 +707,10 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       tensionToggle: progress.data.settings.tensionToggle,
     },
     {
+      // A phone that can turn itself landscape should, rather than asking (D-129).
+      onFirstTouch: () => {
+        tryRotateToLandscape(canvas)
+      },
       onRestart: () => {
         if (screen === 'pick' && session) startLock(session.def)
       },
@@ -1009,6 +1025,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       codeEntry,
       codeFocus,
       codesPage,
+      trophyPage,
       armedDelete,
       helpPage,
       ...(benchTier !== undefined ? { benchTier } : {}),
@@ -1602,9 +1619,31 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     }
   }
 
-  window.addEventListener('resize', () => {
+  /**
+   * Re-fit the canvas whenever its box changes — DECISIONS D-129.
+   *
+   * A `resize` listener alone is not enough on a phone. Rotating fires `resize` and
+   * `orientationchange` *before* the browser has finished re-laying-out, so the handler measures
+   * the old box, and nothing fires again once the new one settles: the stage stays letterboxed to
+   * the previous orientation and the game sits in a strip of the screen. Reported as *"when you
+   * rotate the device the interface is not on the whole screen"*.
+   *
+   * A `ResizeObserver` on the canvas is the signal that actually means "your box changed", and it
+   * fires again when the layout settles. It also covers the two other mobile cases a resize event
+   * handles badly: the address bar sliding away mid-drag, and the on-screen keyboard.
+   *
+   * The window listener stays as a belt-and-braces fallback for `devicePixelRatio` changes, which
+   * do not change the element's box and so do not trip the observer — dragging a window between a
+   * retina and a non-retina monitor.
+   */
+  const refit = (): void => {
     syncViewport(vp)
-  })
+  }
+  const boxObserver =
+    typeof ResizeObserver === 'function' ? new ResizeObserver(refit) : null
+  boxObserver?.observe(canvas)
+  window.addEventListener('resize', refit)
+  window.addEventListener('orientationchange', refit)
 
   return {
     hook,
@@ -1614,6 +1653,9 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     destroy(): void {
       loop.stop()
       input.dispose()
+      boxObserver?.disconnect()
+      window.removeEventListener('resize', refit)
+      window.removeEventListener('orientationchange', refit)
       window.removeEventListener('pointerdown', unlockAudio)
       window.removeEventListener('keydown', unlockAudio)
       void audio.dispose()

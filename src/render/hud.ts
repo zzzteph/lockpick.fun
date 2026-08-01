@@ -46,6 +46,15 @@ const HEADER_H = 64
 const FOOTER_H = 124
 /** Height of the footer's horizontal bars. Was the literal 16 in six places (D-115). */
 const BAR_H = 30
+/**
+ * Air above the footer's first row of labels — DECISIONS D-129.
+ *
+ * The labels sat at `footerY + 30`. At the compact type scale that is a 28px face whose ascenders
+ * reach within eight pixels of the panel's own top edge, so the words looked stuck to the frame —
+ * reported as *"at the footer, where wrench and plug text, they are without margin on the top"*.
+ * 38 gives that row the same air the rest of the page has, and everything below it moves with it.
+ */
+const FOOTER_PAD = 38
 
 /**
  * Top of the band the rank letter lives in: below the header, above the lock.
@@ -596,7 +605,7 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
     ctx,
     compact ? `wrench ${opts.pressureStep} of 10` : `tension wrench — pressure ${opts.pressureStep} of 10`,
     leftX,
-    footerY + 30,
+    footerY + FOOTER_PAD,
     {
     font: font(ts(TYPE.dimension)),
     size: ts(TYPE.dimension),
@@ -606,18 +615,18 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
     vp,
     p,
     leftX,
-    footerY + 44,
+    footerY + FOOTER_PAD + 14,
     meterW,
     state.tension,
     state.tension >= T_MIN_HOLD ? p.amber : p.rule,
     { height: BAR_H },
   )
-  label(ctx, String(opts.pressureStep), leftX + meterW + 20, footerY + 68, {
+  label(ctx, String(opts.pressureStep), leftX + meterW + 20, footerY + FOOTER_PAD + 38, {
     font: font(ts(TYPE.heading), 'bold'),
     size: ts(TYPE.heading),
     color: p.ink,
   })
-  text(ctx, state.tension.toFixed(2), leftX + meterW + 58, footerY + 68, {
+  text(ctx, state.tension.toFixed(2), leftX + meterW + 58, footerY + FOOTER_PAD + 38, {
     font: font(TYPE.dimension),
     color: p.inkLight,
   })
@@ -637,8 +646,8 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
   ctx.strokeStyle = state.tension >= T_SET_HOLD * DISTURB_FACTOR ? p.ink : readableAccents(p).crimson
   ctx.lineWidth = STROKE.standard
   ctx.beginPath()
-  ctx.moveTo(snapX(vp, holdX, STROKE.standard), footerY + 36)
-  ctx.lineTo(snapX(vp, holdX, STROKE.standard), footerY + 44)
+  ctx.moveTo(snapX(vp, holdX, STROKE.standard), footerY + FOOTER_PAD + 6)
+  ctx.lineTo(snapX(vp, holdX, STROKE.standard), footerY + FOOTER_PAD + 14)
   ctx.stroke()
   ctx.restore()
   /**
@@ -664,7 +673,7 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
     ctx,
     wrenchOff ? opts.tensionHint : 'past the notch, set pins hold while you work',
     leftX,
-    footerY + 100,
+    footerY + FOOTER_PAD + 70,
     {
       font: font(TYPE.dimension),
       size: TYPE.dimension,
@@ -684,8 +693,9 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
     const named = opts.showStateWord ?? true
     const colX = LOGICAL_WIDTH - MARGIN - 110
     const colBottom = footerY - 56
-    // 270, sized to the gap between the numbers above and the labels below rather than picked.
-    const colH = 270
+    // 270 normally; 210 on a phone, where the readings above the bars are nearly twice the size
+    // and need the room (D-129).
+    const colH = compact ? 210 : 270
     /**
      * Two columns: what you are pushing **with**, and what pushes **back**.
      *
@@ -728,9 +738,23 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
      * every *reading* goes below it, so the heaviest line on the page divides the explanation from
      * the numbers instead of cutting one in half (D-115).
      */
+    /**
+     * Spaced by the **type's own height**, not by fixed gaps — DECISIONS D-129.
+     *
+     * `WORD_Y = 552` and `NUM_Y = 586` is 34px of separation, which is right for a 21px word above
+     * a 26px number and wrong the moment either grows. At the compact scale they are 38 and 42, so
+     * the word's descenders reached 561 and the number's ascenders 556: the state word and the
+     * reading it belongs to were drawn through each other on every phone. Reported as part of
+     * *"…resist numbers overlaps"*.
+     *
+     * Stacking upward from the bars, each row given its own measured height plus a gap, is the
+     * arrangement that cannot come apart when the scale moves — which it now does per device.
+     */
+    const wordSize = ts(TYPE.body)
+    const numSize = ts(TYPE.heading)
+    const NUM_Y = colBottom - colH - 16 // clear of the bars beneath it
+    const WORD_Y = NUM_Y - numSize - 10 // clear of the number beneath it
     const CAPTION_Y = 452 // two lines of gutter caption, above the rule
-    const WORD_Y = 552 // the state word — the headline reading of the pair
-    const NUM_Y = 586 // both numbers, in the heading face
     const LABEL_Y = colBottom + 26 // `force` / `resistance`, under their bars
     // The pair is a *comparison* (D-064) and a phone has room for one bar. Resistance is the one
     // that survives: it is the simulation's only continuous channel back to the player, and force
@@ -762,7 +786,7 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
     const readAlign = compact ? ('right' as const) : ('center' as const)
     column(vp, p, colX, colBottom, colH, state.resistance, named ? stateInk(state, p) : p.ink)
     text(ctx, state.resistance.toFixed(2), readX, NUM_Y, {
-      font: font(ts(TYPE.heading)),
+      font: font(numSize),
       color: named ? stateInk(state, p) : p.ink,
       align: readAlign,
     })
@@ -806,8 +830,8 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
     }
     if (named) {
       label(ctx, stateWord(state), readX, WORD_Y, {
-        font: font(ts(TYPE.body)),
-        size: ts(TYPE.body),
+        font: font(wordSize),
+        size: wordSize,
         color: stateInk(state, p),
         align: readAlign,
       })
@@ -829,13 +853,13 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
   const turningBack = state.thetaVelocity < -1e-3
   const plugX = LOGICAL_WIDTH / 2 + 40
   const plugW = 300
-  label(ctx, turningBack ? 'plug — turning back' : 'plug', plugX, footerY + 30, {
+  label(ctx, turningBack ? 'plug — turning back' : 'plug', plugX, footerY + FOOTER_PAD, {
     font: font(ts(TYPE.dimension)),
     size: ts(TYPE.dimension),
     color: turningBack ? readableAccents(p).crimson : p.inkLight,
   })
   const turned = clamp01(state.theta / THETA_OPEN)
-  meter(vp, p, plugX, footerY + 44, plugW, turned, turningBack ? readableAccents(p).crimson : p.ink, {
+  meter(vp, p, plugX, footerY + FOOTER_PAD + 14, plugW, turned, turningBack ? readableAccents(p).crimson : p.ink, {
     height: BAR_H,
   })
   // The opening threshold, drawn as a notch above the bar rather than a segment inside it: it is a
@@ -845,14 +869,14 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
   ctx.strokeStyle = p.ink
   ctx.lineWidth = STROKE.standard
   ctx.beginPath()
-  ctx.moveTo(snapX(vp, notchX, STROKE.standard), footerY + 36)
-  ctx.lineTo(snapX(vp, notchX, STROKE.standard), footerY + 44)
+  ctx.moveTo(snapX(vp, notchX, STROKE.standard), footerY + FOOTER_PAD + 6)
+  ctx.lineTo(snapX(vp, notchX, STROKE.standard), footerY + FOOTER_PAD + 14)
   ctx.stroke()
   ctx.restore()
   // The bar was unlabelled beyond the word "plug", so the notch read as decoration. It is the
   // finish line: fill past it and the lock is open (D-100).
   if (!compact)
-  label(ctx, 'how far it has turned — past the notch it opens', plugX, footerY + 100, {
+  label(ctx, 'how far it has turned — past the notch it opens', plugX, footerY + FOOTER_PAD + 70, {
     font: font(TYPE.dimension),
     size: TYPE.dimension,
     color: p.inkLight,
@@ -860,12 +884,12 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
 
   if (!compact && opts.depthMm !== null && opts.depthMm !== undefined) {
     const dx = LOGICAL_WIDTH / 2 - 150
-    label(ctx, 'pick depth', dx, footerY + 30, {
+    label(ctx, 'pick depth', dx, footerY + FOOTER_PAD, {
       font: font(TYPE.dimension),
       size: TYPE.dimension,
       color: p.inkLight,
     })
-    text(ctx, `${opts.depthMm.toFixed(2)} mm`, dx, footerY + 68, {
+    text(ctx, `${opts.depthMm.toFixed(2)} mm`, dx, footerY + FOOTER_PAD + 38, {
       font: font(TYPE.heading),
       color: p.ink,
     })
@@ -885,12 +909,12 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
     const sx = leftX + meterW + 230
     const word = strain.broken ? 'pick broken' : strain.bent ? 'pick bent' : 'pick strain'
     const ink = strain.broken ? p.crimson : strain.bent ? p.crimson : p.amber
-    label(ctx, word, sx, footerY + 30, {
+    label(ctx, word, sx, footerY + FOOTER_PAD, {
       font: font(TYPE.dimension),
       size: TYPE.dimension,
       color: p.inkLight,
     })
-    meter(vp, p, sx, footerY + 44, 180, strain.broken ? 1 : strain.amount, ink, {
+    meter(vp, p, sx, footerY + FOOTER_PAD + 14, 180, strain.broken ? 1 : strain.amount, ink, {
       segments: 6,
       height: BAR_H,
     })
@@ -905,7 +929,7 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
      * 466–909, and the plug's starts at 1000 (D-101).
      */
     if (strain.broken) {
-      text(ctx, opts.restartHint, sx, footerY + 100, {
+      text(ctx, opts.restartHint, sx, footerY + FOOTER_PAD + 70, {
         font: font(TYPE.body),
         color: readableAccents(p).crimson,
       })

@@ -105,6 +105,11 @@ export interface InputHooks {
    * rather than queued for the widget layer (D-103).
    */
   onLinkClick?: (x: number, y: number) => boolean
+  /**
+   * The first touch of the session — the only moment a page is allowed to ask for fullscreen or
+   * an orientation lock, both of which need a user gesture (D-129).
+   */
+  onFirstTouch?: () => void
 }
 
 /** mm of lift per second while Space is held — matched to the pick's own rate. */
@@ -361,6 +366,7 @@ export class InputController {
   private playing = false
 
   private touchDown(id: number, x: number, y: number): void {
+    if (!this.touch.active) this.hooks.onFirstTouch?.()
     this.touch.active = true
     // Menus are made of widgets and are driven by the ordinary pointer path; only the lock itself
     // has gestures.
