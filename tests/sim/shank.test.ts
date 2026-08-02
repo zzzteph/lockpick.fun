@@ -15,7 +15,14 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { HOOK_RISE, PERFECT_TOOLS, createSimState, type SimState } from '../../src/sim'
+import {
+  HOOK_RISE,
+  PERFECT_TOOLS,
+  SHAFT_HALF,
+  createSimState,
+  shankLift,
+  type SimState,
+} from '../../src/sim'
 import { FIVE_PIN, configWith, holdFor, pick } from './fixtures'
 
 /** Travel to a chamber with the hand down, then lift it and hold. Peak of every other chamber. */
@@ -40,15 +47,16 @@ describe('the shank reaches the pins in front of the hook', () => {
     expect(moved.length, `chambers the shank disturbed: [${moved.join(',')}]`).toBeGreaterThan(0)
   })
 
-  it('touches nothing at all below that, which is the whole of ordinary play', () => {
+  it('touches nothing at all below the shaft s own bearing height', () => {
     /*
-     * The deepest cut in the roster asks for 2.30mm of lift, and the hook stands `HOOK_RISE` above
-     * the shaft, so the knee is still down in the keyway for every lift a lock actually requires.
-     * This is a cost of *overlifting* and of nothing else — which is why the difficulty curve did
-     * not move when it was turned on.
+     * `HOOK_RISE - SHAFT_HALF` — 1.84mm, not 2.3.
+     *
+     * A pin rests on the **top edge** of the steel, and D-149 corrected the simulation to say so:
+     * contact begins half a thickness earlier than it did when this was measured to the shaft's
+     * centreline. That is the honest number, and it is the one that matches the drawing.
      */
     const rest = peaksAfterLifting(4, 0)
-    for (const lift of [0.8, 1.6, HOOK_RISE - 0.05]) {
+    for (const lift of [0.8, 1.5, HOOK_RISE - SHAFT_HALF - 0.05]) {
       const peak = peaksAfterLifting(4, lift)
       for (const i of [0, 1, 2, 3]) {
         expect(peak[i] ?? 0, `chamber ${i} moved at ${lift.toFixed(2)}mm`).toBeLessThanOrEqual(
@@ -56,6 +64,19 @@ describe('the shank reaches the pins in front of the hook', () => {
         )
       }
     }
+  })
+
+  it('and the deepest cut in the roster only ever grazes its neighbour', () => {
+    /*
+     * The balance claim, now that contact starts at 1.84mm rather than 2.3. Locks ask for at most
+     * 2.30mm of lift, which does reach the shaft — but by a fraction of a millimetre, at the one
+     * chamber next door, and nowhere near the capture window of anything. The measured difficulty
+     * curve is unchanged either side of this correction: 2.50 / 6.17 / 10.03 / 19.68.
+     */
+    for (let i = 0; i < 4; i += 1) {
+      expect(shankLift(2.3, 4, i), `chamber ${i} at the roster s deepest cut`).toBeLessThan(0.3)
+    }
+    expect(shankLift(2.3, 4, 3), 'the neighbour should be the one that feels it').toBeGreaterThan(0)
   })
 
   it('reaches the neighbour hardest and the far pins least, as a falling shaft must', () => {

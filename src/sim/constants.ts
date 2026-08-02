@@ -524,10 +524,13 @@ export const PLUG_MOVED_EPSILON = 1e-5
  * therefore which pins the shank can reach when a pin is lifted higher than the hook is tall: a long
  * lever means a shallow shaft and only the immediate neighbour is touched.
  *
- * 3.7 chambers is the renderer's own hand position converted out of pixels, so the picture and the
- * physics agree about where the tool is without the simulation knowing anything about the drawing.
+ * 4.88 chambers, measured back from **chamber 0** — a hand about 14mm outside the lock, plus the
+ * end pad and the half pitch that sit between the lock face and the first chamber. The renderer
+ * derives its pivot from this same number rather than keeping a pixel constant of its own, so the
+ * two cannot drift: measuring the hand from the face and the shank from chamber 0 is precisely the
+ * mismatch that left pins hanging off the steel (D-149).
  */
-export const SHANK_REACH = 3.7
+export const SHANK_REACH = 4.88
 
 /**
  * How far the hook's crest stands above the shaft — the shape every pick in the game is ground to.
@@ -543,3 +546,13 @@ export const SHANK_REACH = 3.7
  * past before the shaft behind the hook comes up into its neighbours at all.
  */
 export const HOOK_RISE = 2.3
+
+/**
+ * Half the shaft's thickness, in millimetres — DECISIONS D-149.
+ *
+ * A pin rests on the **top edge** of the steel, not on its centreline, and at 0.46mm against lifts
+ * of one or two millimetres that is not a rounding error. Shared with the renderer, which draws the
+ * shaft to this half-thickness, so the height the simulation holds a pin at and the height the
+ * picture puts the steel at are one number.
+ */
+export const SHAFT_HALF = 0.46

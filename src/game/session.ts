@@ -123,6 +123,17 @@ export class Session {
     // Copied deliberately, and the reason is D-060: this list is hand-written, so a field added to
     // `SimState` and forgotten here is silently frozen at its cloned value forever.
     v.pickForce = s.pickForce
+    /**
+     * **The third time this list has lost a field** — DECISIONS D-150.
+     *
+     * `pickContact` was missing, and `hud.ts` gates the coloured state word on it: below
+     * `WORD_NEEDS_FORCE` the readout says `push to feel` and stops there. Frozen at the zero it was
+     * cloned with, that gate was true on every frame of every attempt, so the word never once said
+     * `binding`, `false set`, `set` or `overset` — for any player, at any assist level, since the
+     * word was introduced. Found by an agent capturing store screenshots, which is to say: by
+     * somebody looking at the picture, not by any of the 821 assertions.
+     */
+    v.pickContact = s.pickContact
     v.pickStrain = s.pickStrain
     v.pickBent = s.pickBent
     v.pickBroken = s.pickBroken
@@ -131,6 +142,16 @@ export class Session {
     // Not interpolated: the simulation already slides it at 120Hz (D-045), and it is what the
     // pick is *drawn* from (D-059), so a stale value means no pick on screen at all.
     v.pickPosition = s.pickPosition
+    /**
+     * Copied although nothing draws it yet — DECISIONS D-150.
+     *
+     * `engaged` was the *fourth* field this list had lost, found by the sweep in `syncview.test.ts`
+     * on its first run. Only `step.ts` reads it today, so it was stale without consequence. It is
+     * copied rather than excused because "no consequence yet" is exactly what `pickContact` was
+     * until the HUD grew a readout that gated on it, and an invariant with exceptions in it is not
+     * one anybody can rely on.
+     */
+    v.engaged = s.engaged
     v.plugFreeAnnounced = s.plugFreeAnnounced
     v.sidebarDropped = s.sidebarDropped
     v.opened = s.opened

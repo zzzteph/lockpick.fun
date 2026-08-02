@@ -8,7 +8,7 @@
  */
 
 import type { SimState } from '../sim'
-import { KEYWAY_FLOOR } from '../sim'
+import { HOOK_RISE, KEYWAY_FLOOR, SHAFT_HALF, SHANK_REACH } from '../sim'
 import { STROKE, alpha, mix, type Palette } from './palette'
 import { mmToPxX, mmToY, plugChamberX, type CutawayLayout } from './layout'
 import { type Viewport } from './viewport'
@@ -192,7 +192,8 @@ export const HOOK_REACH_MM = 2.2
  * through the throat where it has to fit a keyway, and ground almost to nothing at the point.
  */
 export const STEEL_HANDLE_MM = 0.52
-export const STEEL_KNEE_MM = 0.46
+/** Shared with the simulation, which rests pins on the top of this bar (D-149). */
+export const STEEL_KNEE_MM = SHAFT_HALF
 export const STEEL_NECK_MM = 0.28
 export const STEEL_FLAT_MM = 0.22
 export const STEEL_POINT_MM = 0.035
@@ -210,7 +211,7 @@ export const STEEL_POINT_MM = 0.035
  * *including its own steel*, which is what pulled this back from 2.6mm when the pick was given a
  * real thickness — `hook.test.ts` measures the bottom edge, not the centreline.
  */
-export const HOOK_RISE_MM = 2.3
+export const HOOK_RISE_MM = HOOK_RISE
 
 /**
  * The hook hangs off the **tip**, and it keeps its shape — DECISIONS D-140.
@@ -239,8 +240,17 @@ export const HOOK_RISE_MM = 2.3
  * degrees instead of swinging. Pivoting at the lock face here would need **36° to 52°** to reach the
  * front chamber at full lift, which is not a lock being picked, it is a lever being thrown. At this
  * reach the same movement is 3° to 11°.
+ *
+ * **Measured in chamber pitches from chamber 0, and shared with the simulation** — DECISIONS D-149.
+ * It was 620 logical px measured from the lock *face*, while `shankLift` measured the same lever
+ * from chamber 0: two origins differing by the end pad and half a pitch, so the line the tool was
+ * drawn along and the line pins were held on were never quite the same one. A pixel reach was wrong
+ * on its own terms too — a squeezed 12-pin lock draws at 0.46 scale, so a fixed 620px is twice the
+ * lever there that it is on a 5-pin lock.
  */
-const HAND_REACH_PX = 620
+function handPivotX(layout: CutawayLayout): number {
+  return plugChamberX(layout, 0) - SHANK_REACH * layout.pitch * (layout.mirrored ? -1 : 1)
+}
 
 /**
  * The pick is a **rigid body**. It changes angle; it never changes shape — DECISIONS D-141.
@@ -262,8 +272,7 @@ const HAND_REACH_PX = 620
  */
 export function pickAngle(layout: CutawayLayout, tipX: number, tipY: number): number {
   const restY = mmToY(layout, KEYWAY_FLOOR)
-  const entry = layout.mirrored ? layout.right : layout.left
-  return Math.atan2(restY - tipY, Math.abs(tipX - entry) + HAND_REACH_PX)
+  return Math.atan2(restY - tipY, Math.abs(tipX - handPivotX(layout)))
 }
 
 /**

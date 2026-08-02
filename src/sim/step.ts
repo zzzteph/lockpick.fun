@@ -70,6 +70,7 @@ import {
   SIDEBAR_HELD_FRACTION,
   SPOOL_CAM_BITE,
   HOOK_RISE,
+  SHAFT_HALF,
   SHANK_REACH,
   SPRING_RETURN_RATE,
   STRAIN_BENT,
@@ -340,6 +341,31 @@ function constraintFor(c: Chamber): number {
  * then waits out its own timeout looking for a binding chamber that no longer exists. The
  * simulation was right and the picture was silent. See DECISIONS D-048.
  */
+/**
+ * How high the pick's **shaft** holds a pin in front of the hook — DECISIONS D-149.
+ *
+ * The tool is a rigid straight strip turning about the hand. Its angle is set by the *crest*, which
+ * rises `liftTarget` above rest at the chamber being worked; the shaft runs parallel to that line
+ * and `HOOK_RISE` below it, and a pin rests on the shaft's **top edge**, a further `SHAFT_HALF` up.
+ * So the bearing height at chamber `index` is that line, taken at the chamber's distance from the
+ * hand — measured in chamber pitches, `SHANK_REACH` of them outside the lock.
+ *
+ * **Written twice, differently, and the two did not agree.** D-145 had this as
+ * `(lift - HOOK_RISE) × xᵢ/x_pick`, which decays the *already reduced* value and so runs higher than
+ * the drawn shaft everywhere except the chamber being worked. The renderer places a rigid tool, and
+ * the simulation held pins on a line that was not the one being drawn: the further a chamber was
+ * from the hook, the wider the gap. Reported as *"it correctly lifts the nearest pin, but for the
+ * rest there is air between the lockpick and the pin."*
+ *
+ * Exported so the picture can be held against it — `tests/render/shank.test.ts` measures the shaft
+ * the renderer actually draws and asserts it lands here, at every chamber and every lift.
+ */
+export function shankLift(liftTarget: number, pick: number, index: number): number {
+  if (pick <= 0 || index >= pick) return 0
+  const alongTool = (index + SHANK_REACH) / (pick + SHANK_REACH)
+  return Math.max(0, liftTarget * alongTool - HOOK_RISE + SHAFT_HALF)
+}
+
 export function pickedButUnturned(state: SimState): boolean {
   if (state.opened || !state.sidebarDropped) return false
   if (!state.chambers.every((c) => c.state === 'SET')) return false
@@ -844,12 +870,10 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
      * chambers outside the lock providing the lever. Same geometry the renderer places the tool
      * with, expressed in chambers rather than pixels so the simulation stays free of the drawing.
      */
-    const shank = ((): number => {
-      if (pick < 0 || state.pickBroken || !settled || c.index >= pick) return 0
-      const knee = input.liftTarget - HOOK_RISE
-      if (knee <= 0) return 0
-      return knee * ((c.index + SHANK_REACH) / (pick + SHANK_REACH))
-    })()
+    const shank =
+      pick < 0 || state.pickBroken || !settled || c.index >= pick
+        ? 0
+        : shankLift(input.liftTarget, pick, c.index)
 
     const support = !(c.index === pick) || state.pickBroken
       ? Math.min(shank, topStop)
