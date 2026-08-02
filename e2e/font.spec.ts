@@ -35,25 +35,31 @@ test('the bundled typeface is loaded and is the one being measured', async ({ pa
     const ctx = c.getContext('2d')!
     ctx.font = `600 40px ${stack}`
     const asDrawn = ctx.measureText('MMMMMMMMMM').width
-    // A family that certainly is not installed, so this is whatever the machine falls back to.
-    ctx.font = '600 40px "definitely-not-installed-9137", monospace'
-    const fallback = ctx.measureText('MMMMMMMMMM').width
-    return { ok: document.fonts.check(`600 40px ${stack}`), stack, asDrawn, fallback }
+    /*
+     * The face is registered *and loaded*, by name, in the document's own font set.
+     *
+     * This is the assertion that cannot pass by accident. An earlier version compared the stack's
+     * width against the machine's fallback and demanded they differ — which failed on the Linux
+     * runner for a reason that had nothing to do with the bug: its fallback is DejaVu Sans Mono at
+     * a 0.602em advance and the shipped face is 0.600em, so ten characters at 40px are 0.8px apart.
+     * Two fonts being coincidentally the same width says nothing about which one is in use.
+     */
+    const loaded = [...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family.replace(/^"|"$/g, ''))
+    return { ok: document.fonts.check(`600 40px ${stack}`), stack, asDrawn, loaded }
   })
 
   expect(check.ok, 'the game s font stack never resolved to a loaded face').toBe(true)
+  // The family the game asks for first, taken from its own stack rather than repeated here.
+  const family = check.stack.split(",")[0]!.trim().replace(/^"|"$/g, "")
+  expect(
+    check.loaded,
+    `no loaded FontFace is named "${family}" — the bundled face never registered`,
+  ).toContain(family)
   // 10 characters at 40px: 240px at JetBrains Mono's 0.6em advance.
   expect(check.asDrawn, `the game draws in "${check.stack}", which is not the shipped face`).toBeCloseTo(
     40 * 10 * JBM_ADVANCE,
     0,
   )
-  /*
-   * And it is genuinely different from what this machine would otherwise have used — otherwise the
-   * assertion above would pass on a runner that happened to fall back to something 0.6em wide, and
-   * go on passing after the font stopped being bundled at all.
-   */
-  expect(
-    Math.abs(check.asDrawn - check.fallback),
-    'the shipped face is indistinguishable from the fallback here, so this proves nothing',
-  ).toBeGreaterThan(1)
+  // ...and the stack has to *name* it, or a loaded face proves nothing about what is drawn with.
+  expect(family, 'the game asks for a generic family first, not a face it ships').not.toMatch(/^(ui-|monospace|serif|sans)/)
 })

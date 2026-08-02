@@ -99,3 +99,32 @@ describe('colour helpers', () => {
     expect(THEMES.blueprint).toBe(BLUEPRINT)
   })
 })
+
+/**
+ * Text drawn over the lock is read against **hatching**, not paper — DECISIONS D-148.
+ *
+ * The bodies in the cutaway are hatched: 45° rules at 6px spacing in `p.rule`. A word placed over
+ * one of them has a line of that colour behind it, so `p.paper` is the wrong thing to have measured
+ * it against. The anatomy key was drawn in `inkLight` and came out at 3.92:1 against the hatching,
+ * where AA asks for 4.5 — found by the layout audit, and only at desktop-1920, because `sampleGround`
+ * reads real pixels and below full scale the hatching antialiases into its background and the run
+ * passes. The contrast is the same at every size; the *detection* was not.
+ *
+ * So it is a number here rather than a sampled pixel, and it holds for every theme.
+ */
+describe('anything drawn over a hatched body', () => {
+  for (const [name, p] of Object.entries(THEMES)) {
+    it(`full ink clears AA against the hatching — ${name}`, () => {
+      expect(contrastRatio(p.ink, p.rule)).toBeGreaterThanOrEqual(4.5)
+    })
+
+    it(`and inkLight does not, which is why the anatomy key uses ink — ${name}`, () => {
+      /*
+       * Pinned deliberately. If `inkLight` is ever darkened enough to pass here this test fails, and
+       * whoever does it gets to decide whether the key should go back to it — rather than the pair
+       * quietly drifting until something over a body is unreadable again.
+       */
+      expect(contrastRatio(p.inkLight, p.rule)).toBeLessThan(4.5)
+    })
+  }
+})

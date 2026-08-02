@@ -187,11 +187,25 @@ export function drawAnatomyKey(vp: Viewport, p: Palette, layout: CutawayLayout):
   const tx = sign > 0 ? x + swatchW + 10 : x - swatchW - 10
   let y = mmToY(layout, SHELL_TOP_MM) + 4
 
+  /**
+   * Full ink, not `inkLight` — DECISIONS D-148.
+   *
+   * These three sit in the margin beside the shell, and the shell is **hatched**: 45° rules at 6px
+   * spacing, drawn in `p.rule`. So the ground under a word here is not paper, it is a line the same
+   * weight as the word, and `inkLight` against it is **3.92:1** where AA asks for 4.5. Full ink is
+   * 9.81 in drafting and 7.24 in blueprint, and it matches this key's own `PIN STACK` heading, which
+   * was already drawn that way.
+   *
+   * The audit found it only at desktop-1920. `sampleGround` reads real pixels, and below full scale
+   * the hatching is antialiased into its background, so the median comes back lighter and the run
+   * passes. That is a sampling artefact of the check, not of the problem: the contrast is what it is
+   * at every size, which is why `palette.test.ts` now asserts it as a number.
+   */
   const row = (name: string, paint: () => void): void => {
     paint()
     text(ctx, name, tx, y + swatchH - 4, {
       font: font(typeFor(vp, TYPE.dimension)),
-      color: p.inkLight,
+      color: p.ink,
       align,
     })
     y += swatchH + 14
