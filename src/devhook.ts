@@ -303,6 +303,14 @@ export interface DevHook {
    */
   getWrench(): { step: number; tension: number; printedStep: number }
   /**
+   * The exact font string every draw call is made with — DECISIONS D-146.
+   *
+   * Exposed because a test that sets its own `ctx.font` to the family it hopes for proves only that
+   * the family exists on the machine. What has to be true is that the **game's own stack** resolves
+   * to the shipped face, and the only way to assert that is to measure the string the game uses.
+   */
+  fontStack(): string
+  /**
    * Draw one frame with the layout probe on, and return what the rules make of it.
    *
    * Every mobile layout bug so far has been found by a person studying a screenshot, which does not

@@ -155,7 +155,15 @@ export const TYPE = {
   payout: 64,
 } as const
 
-export const FONT_STACK = `ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace`
+/**
+ * The game's own typeface first — DECISIONS D-146.
+ *
+ * What follows it is a fallback for the seconds before the face loads and for a machine where it
+ * fails to, and nothing more. It used to be the whole answer, which meant the layout was measured
+ * against whichever monospace the machine happened to own: Consolas here, DejaVu Sans Mono on a
+ * Linux runner at 9% wider per character. See `fontface.ts`.
+ */
+export const FONT_STACK = `"Shear Mono", ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace`
 
 export function font(sizePx: number, weight: 'normal' | 'bold' = 'normal'): string {
   return `${weight === 'bold' ? '600 ' : ''}${sizePx}px ${FONT_STACK}`

@@ -44,6 +44,18 @@ export default defineConfig({
   build: {
     assetsDir: 'assets',
     target: 'es2022',
+    /**
+     * High enough to inline the two font weights as data URIs — DECISIONS D-146.
+     *
+     * Same reason as the IIFE below, and the same decision: `dist/` has to run from `file://`, and a
+     * font requested from an opaque origin is blocked by CORS exactly like a module script is. A
+     * separate `.woff2` would leave the game rendering in a fallback face for anyone who opened it
+     * by double-clicking — which is precisely the machine-dependent layout D-146 exists to end.
+     *
+     * The subset weights are 5.7KB each. 12KB clears them with room and inlines nothing else the
+     * game has.
+     */
+    assetsInlineLimit: 12288,
     rollupOptions: {
       // The game, and only the game. `dev/audio-debug.html` is a bench instrument — the dev
       // server serves it from `dev/`, and it has no business in a shipped bundle. It also

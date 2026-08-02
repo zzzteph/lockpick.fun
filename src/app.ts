@@ -94,7 +94,7 @@ import {
   shellChamberX,
   type CutawayLayout,
 } from './render/layout'
-import { THEMES, TYPE, font, type Palette } from './render/palette'
+import { FONT_STACK, THEMES, TYPE, font, type Palette } from './render/palette'
 import { drawPick, drawPickTarget, pickRender } from './render/pick'
 import {
   drawRotatePrompt,
@@ -170,6 +170,7 @@ import {
   drawSettings,
   drawTrophies,
   codesPageCount,
+  codesRoster,
   trophyPageCount,
   type ScreenName,
   type ShellActions,
@@ -277,6 +278,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
    * holds no state of its own — the same reason `editingName` is here.
    */
   let codesPage = 0
+  let rosterPage = 0
   /** Which page of the trophy case is showing — compact only, where 34 plates do not fit (D-129). */
   let trophyPage = 0
   let armedDelete: string | null = null
@@ -612,6 +614,10 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       const last = codesPageCount(vp, progress.data.customLocks.length) - 1
       codesPage = Math.min(last, Math.max(0, codesPage + delta))
       armedDelete = null
+    },
+    rosterPageBy: (delta: number) => {
+      const last = codesRoster(progress.data.customLocks.length).pages - 1
+      rosterPage = Math.min(last, Math.max(0, rosterPage + delta))
     },
     trophyPageBy: (delta: number) => {
       trophyPage = Math.min(trophyPageCount(vp) - 1, Math.max(0, trophyPage + delta))
@@ -1095,6 +1101,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       codeEntry,
       codeFocus,
       codesPage,
+      rosterPage,
       trophyPage,
       armedDelete,
       helpPage,
@@ -1488,6 +1495,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   hook.getTouch = (): boolean => input.touch.active
   // The wrench, as the game actually has it and as the footer prints it — the two disagreed on
   // every phone until D-131, and nothing could see it because nothing exposed either one.
+  hook.fontStack = (): string => FONT_STACK
   hook.getWrench = (): { step: number; tension: number; printedStep: number } => ({
     step: input.touch.step,
     tension: input.effectiveTension,

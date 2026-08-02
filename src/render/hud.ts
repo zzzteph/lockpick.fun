@@ -318,13 +318,25 @@ function meter(
  */
 const WORD_NEEDS_FORCE = 0.15
 
-function stateWord(state: SimState): string {
+function stateWord(state: SimState, compact = false): string {
   const c = state.pickChamber >= 0 ? state.chambers[state.pickChamber] : undefined
   if (!c) return 'no contact'
   // Gated on **contact**, not on force. Force is now the overreach (D-083), and a free pin that
   // rides up with you never builds any — so gating the word on it would mean a loose chamber could
   // never be named, which is the opposite of what D-076 was for.
-  if (state.pickContact < WORD_NEEDS_FORCE) return 'push to feel'
+  /**
+   * One word on a phone — DECISIONS D-146.
+   *
+   * This readout is right-aligned to the margin in the strip beside the lock, and on a phone
+   * `typeFor` scales it up to stay legible (D-135). `push to feel` is the longest thing it can say
+   * by some way, and at that size it reached back **into the assembly** — the same collision D-106
+   * fixed for the captions above it, arriving through the one line that is not a caption. Shrinking
+   * it to fit lands under the 11px floor, so what gives is the wording.
+   *
+   * `push` says the same thing next to a resistance bar reading zero, and every other state word is
+   * short enough to have never been near the lock.
+   */
+  if (state.pickContact < WORD_NEEDS_FORCE) return compact ? 'push' : 'push to feel'
   switch (c.state) {
     case 'BINDING':
       return 'binding'
@@ -909,7 +921,7 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
       }
     }
     if (named) {
-      label(ctx, stateWord(state), readX, WORD_Y, {
+      label(ctx, stateWord(state, compact), readX, WORD_Y, {
         font: font(wordSize),
         size: wordSize,
         color: stateInk(state, p),

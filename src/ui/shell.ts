@@ -120,6 +120,8 @@ export interface ShellActions {
   deleteCustomLock(index: number): void
   /** Step the codes screen through the player's own locks, six at a time. */
   codesPageBy(delta: number): void
+  /** Page the shareable roster on the desktop codes screen — DECISIONS D-147. */
+  rosterPageBy(delta: number): void
   /** Step the trophy case a page at a time — compact only, where it pages (D-129). */
   trophyPageBy(delta: number): void
   /** Show a tier on the bench. The bench draws one at a time (D-102). */
@@ -163,6 +165,8 @@ export interface ShellContext {
   hapticsSupported?: boolean
   /** Which page of the player's own locks is showing. */
   codesPage?: number
+  /** Which page of the roster the desktop codes screen is showing. */
+  rosterPage?: number
   /** Which page of the trophy case is showing on a phone. */
   trophyPage?: number
   /** Which tier the bench is showing. Undefined means "the deepest one they have reached". */
@@ -365,9 +369,18 @@ export function drawMenu(c: ShellContext): void {
   screenFrame(c, 'Shear line', c.status ?? creditLine(progress))
   const { ctx } = vp
 
-  label(ctx, 'a lockpicking simulator', MARGIN + 28, MARGIN + 84, {
-    font: font(typeFor(vp, TYPE.body)),
-    size: typeFor(vp, TYPE.body),
+  /**
+   * The subtitle clears the title by its **own ascent**, not by a literal 32px — DECISIONS D-146.
+   *
+   * `MARGIN + 84` was 32px under the title's baseline, which is fine at the desktop face and 3px
+   * short on the smallest phone: `typeFor` scales this line up to stay legible (D-135), and a
+   * scaled-up line has a taller ascent to fit in the same gap. It was under by exactly the amount
+   * the shipped typeface is taller than the one this was spaced against.
+   */
+  const subtitle = typeFor(vp, TYPE.body)
+  label(ctx, 'a lockpicking simulator', MARGIN + 28, MARGIN + 52 + Math.max(32, subtitle + 8), {
+    font: font(subtitle),
+    size: subtitle,
     color: p.inkLight,
   })
 
@@ -1508,9 +1521,18 @@ export function drawResults(c: ShellContext): void {
   if (!outcome) return
 
   const readable = readableAccents(p)
-  label(ctx, outcome.lock.name, MARGIN + 28, MARGIN + 92, {
-    font: font(typeFor(vp, TYPE.heading)),
-    size: typeFor(vp, TYPE.heading),
+  /**
+   * The lock's name clears `OPEN` by its **own ascent** — DECISIONS D-146, and the same fix the
+   * menu's subtitle needed.
+   *
+   * `MARGIN + 92` is 40px under the title's baseline. That holds for the desktop heading face and
+   * not for the compact one, which `typeFor` scales up to stay legible: a taller line in a fixed
+   * gap runs into the word above it. Reported by the audit as `"OPEN" over "HALBERD ANTI-BUMP 6"`.
+   */
+  const nameSize = typeFor(vp, TYPE.heading)
+  label(ctx, outcome.lock.name, MARGIN + 28, MARGIN + 52 + Math.max(40, nameSize + 8), {
+    font: font(nameSize),
+    size: nameSize,
     color: p.inkLight,
   })
 
@@ -1971,11 +1993,27 @@ export function drawSettings(c: ShellContext): void {
   // Save import/export sits below the nav bar rather than level with it: it is this screen's own
   // business, and the row along the top is now navigation and nothing else (D-103).
   // On a phone the top-right is the switch column, so they go under it.
-  const bx = compact ? col2 : LOGICAL_WIDTH - MARGIN - 308
+  /**
+   * Sized from their captions, like the switches above them — DECISIONS D-146.
+   *
+   * A literal 280 was wide enough for `EXPORT SAVE` in the typeface the game used to borrow from
+   * the machine. In the one it ships, the caption no longer fits, and `button` does the only thing
+   * it can with a box it was handed: shrink the type to fit — down to 10.4 CSS px on the smallest
+   * phone, under the 11px floor the whole compact pass exists to hold (D-135). The button grows
+   * instead. There is a clear half-screen to its right and nothing to be gained by keeping it thin.
+   */
+  const saveSize = typeFor(vp, TYPE.body)
+  const saveW = Math.max(
+    280,
+    ...(['Export save', 'Import save'] as const).map(
+      (cap) => Math.ceil(captionWidth(vp, cap, saveSize)) + 56,
+    ),
+  )
+  const bx = compact ? col2 : LOGICAL_WIDTH - MARGIN - 28 - saveW
   const by = compact ? ty + 54 : 200
   const bh = compact ? 72 : 46
-  if (button(vp, p, ui, { x: bx, y: by, w: 280, h: bh }, 'Export save')) actions.exportSave()
-  if (button(vp, p, ui, { x: bx, y: by + bh + 14, w: 280, h: bh }, 'Import save'))
+  if (button(vp, p, ui, { x: bx, y: by, w: saveW, h: bh }, 'Export save')) actions.exportSave()
+  if (button(vp, p, ui, { x: bx, y: by + bh + 14, w: saveW, h: bh }, 'Import save'))
     actions.importSave()
 }
 
@@ -2108,6 +2146,40 @@ export function codesPageCount(vp: Viewport, saved: number): number {
 
 /** Two columns of two, on a phone. Shared so the drawing and the page count cannot disagree. */
 export const CODES_COMPACT_PER_PAGE = 4
+
+/**
+ * Where the roster starts on the desktop codes page, and how much of it fits — DECISIONS D-147.
+ *
+ * The roster was drawn in full: twenty cards, five to a row, four rows of 162px. That fits under
+ * the status line **only while you have no designs of your own**. Save one and the page grows a
+ * heading, a row of cards and its gaps — 136px — and the last row of the roster is drawn through
+ * the footer. Reported as *"the codes screen is very overwhelmed — there are 20 locks, and they
+ * overlap with the footer."*
+ *
+ * It survived the layout audit because the audit's save fixture has `customLocks: []`, so the sweep
+ * only ever saw the one state that fits. The screen is now audited with designs as well.
+ *
+ * Returned from **one** function because the page directly above this one is the pager whose count
+ * disagreed with its own drawing and made sixteen locks unreachable. The rows are measured against
+ * the page rather than chosen, so the roster pages itself exactly when it has to and not before:
+ * with no designs it is still one page of twenty, unchanged.
+ */
+export function codesRoster(saved: number): {
+  top: number
+  rows: number
+  perPage: number
+  pages: number
+  total: number
+} {
+  // Mirrors `drawCodes`: the heading at 206, then either the empty line or a row of your designs.
+  const afterDesigns = saved === 0 ? 206 + 18 + 44 : 206 + 18 + CODE_CARD_H + 30
+  const top = afterDesigns + 18
+  const room = LOGICAL_HEIGHT - MARGIN - 40 - top
+  const rows = Math.max(1, Math.floor((room + CARD_GAP) / (CODE_CARD_H + CARD_GAP)))
+  const total = ALL_LOCKS.filter((def) => shareableCode(def) !== null).length
+  const perPage = rows * CODE_COLS
+  return { top, rows, perPage, pages: Math.max(1, Math.ceil(total / perPage)), total }
+}
 
 /**
  * The trophy case.
@@ -2917,9 +2989,54 @@ export function drawCodes(c: ShellContext): void {
       },
     )
   }
+  /**
+   * Paged to whatever the page has left for it — DECISIONS D-147.
+   *
+   * `codesRoster` measures the room under the heading rather than assuming four rows will do, so
+   * this is one page of twenty for a player with no designs of their own — unchanged — and pages
+   * itself the moment their own row pushes it down. The count comes from the same call the pager's
+   * action uses, which is the property the pager above this one lacked (D-136).
+   */
+  const rs = codesRoster(custom.length)
+  const rosterPage = Math.min(Math.max(0, c.rosterPage ?? 0), rs.pages - 1)
+  const rosterFrom = rosterPage * rs.perPage
+  const rosterShown = roster.slice(rosterFrom, rosterFrom + rs.perPage)
+  if (rs.pages > 1) {
+    /*
+     * Anchored to the **right** of the frame, not to a gap after the heading.
+     *
+     * The heading's line already carries a sentence of unknown length — `20 of 22 — the rest cannot
+     * be written as a code` — and the first version of this put the arrows at a literal offset that
+     * landed 11px inside it. The right edge is the one fixed thing on the row.
+     */
+    const pagerRight = LOGICAL_WIDTH - MARGIN - 28
+    if (
+      button(vp, p, ui, { x: pagerRight - 88, y: y - 22, w: 40, h: 28 }, '‹', {
+        size: TYPE.body,
+        enabled: rosterPage > 0,
+      })
+    ) {
+      actions.rosterPageBy(-1)
+    }
+    if (
+      button(vp, p, ui, { x: pagerRight - 40, y: y - 22, w: 40, h: 28 }, '›', {
+        size: TYPE.body,
+        enabled: rosterPage < rs.pages - 1,
+      })
+    ) {
+      actions.rosterPageBy(1)
+    }
+    text(
+      ctx,
+      `${rosterFrom + 1}–${rosterFrom + rosterShown.length} of ${roster.length}`,
+      pagerRight - 104,
+      y,
+      { font: font(typeFor(vp, TYPE.dimension)), color: p.inkLight, align: 'right' },
+    )
+  }
   y += 18
   const rosterGrid = codeGrid(vp)
-  roster.forEach((def, i) => {
+  rosterShown.forEach((def, i) => {
     const col = i % rosterGrid.cols
     const row = Math.floor(i / rosterGrid.cols)
     codeCard(
@@ -2934,8 +3051,7 @@ export function drawCodes(c: ShellContext): void {
       taught && progress.isTierUnlocked(def.tier),
     )
   })
-  const rows = Math.ceil(roster.length / CODE_COLS)
-  y += rows * (CODE_CARD_H + CARD_GAP)
+  y += Math.ceil(rosterShown.length / CODE_COLS) * (CODE_CARD_H + CARD_GAP)
 
   // Same rule as the bench: this page does not scroll, so if it ever outgrows the stage, say so
   // rather than quietly dropping the last row off the bottom.
@@ -3261,8 +3377,21 @@ export function drawEditor(c: ShellContext): void {
   label(ctx, 'driver', left + COL.driver, top - 8, dim)
   label(ctx, 'spring', left + COL.spring, top - 8, dim)
   if (!editorCompact) {
-    label(ctx, 'sets at', left + 800, top - 8, dim)
-    label(ctx, 'false sets', left + 890, top - 8, dim)
+    /**
+     * Both headings are wider than the numbers under them, so they are placed by **measurement**
+     * back from the table's right edge — DECISIONS D-146.
+     *
+     * At `left + 890` a literal, `false sets` ran 8px into the preview panel's own title once the
+     * game stopped borrowing whichever monospace the machine owned: the shipped face is wider than
+     * the Consolas this column was spaced against. The values below stay on their columns; it is
+     * only the headings that were ever near the edge.
+     */
+    const tableRight = left + 980
+    const falseW = Math.ceil(captionWidth(vp, 'false sets', dim.size))
+    const setsW = Math.ceil(captionWidth(vp, 'sets at', dim.size))
+    const falseX = Math.min(left + 890, tableRight - 24 - falseW)
+    label(ctx, 'sets at', Math.min(left + 800, falseX - 20 - setsW), top - 8, dim)
+    label(ctx, 'false sets', falseX, top - 8, dim)
   }
 
   for (let i = 0; i < draft.chambers.length; i += 1) {

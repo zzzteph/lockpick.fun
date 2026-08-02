@@ -77,6 +77,42 @@ const SCREENS: { name: string; arrange: (page: Page) => Promise<void> }[] = [
   { name: 'bench', arrange: async (p) => goto(p, 'bench') },
   { name: 'trophies', arrange: async (p) => goto(p, 'trophies') },
   { name: 'codes', arrange: async (p) => goto(p, 'codes') },
+  {
+    /**
+     * The codes screen **with a design of your own** — DECISIONS D-147.
+     *
+     * The fixture every case here shares has `customLocks: []`, and that is the one state the codes
+     * page fits in: save a design and it grows a heading, a row of cards and their gaps, and the
+     * roster's last row is drawn through the status line. Reported from play, invisible to a sweep
+     * that had only ever seen an empty save.
+     */
+    name: 'codes-with-designs',
+    arrange: async (p) => {
+      await p.evaluate(() => {
+        const h = globalThis.__shearline!
+        const save = h.getSave()
+        h.setSave({
+          ...save,
+          customLocks: [
+            {
+              id: 900,
+              slug: 'my-first-lock-900',
+              name: 'My First Lock',
+              tier: 1,
+              family: 'pin-tumbler',
+              bitting: [3.4, 3.1, 2.8, 2.5, 3.4],
+              pins: ['standard', 'spool', 'standard', 'serrated', 'standard'],
+              springs: [1, 1, 1.22, 1, 0.8],
+              toleranceQuality: 1,
+              keyway: 'standard',
+              par: 90,
+            },
+          ],
+        })
+      })
+      await goto(p, 'codes')
+    },
+  },
   { name: 'editor', arrange: async (p) => goto(p, 'editor') },
   { name: 'settings', arrange: async (p) => goto(p, 'settings') },
   { name: 'help', arrange: async (p) => goto(p, 'help') },
