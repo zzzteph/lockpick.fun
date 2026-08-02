@@ -6,6 +6,7 @@ import {
   getState,
   loadLock,
   renderOnce,
+  scriptPin,
   setInput,
   setManual,
   setTools,
@@ -47,7 +48,7 @@ async function parkEveryGroove(page: Page, tension: number): Promise<StateSnapsh
     if (!c) break
     // A standard pin has no groove to park in; set it and move on.
     const target = c.falseSetLifts[0] ?? c.setLift + c.captureWindow * 0.5
-    await setInput(page, { chamber: b, liftTarget: target, tensionHeld: true, tensionLevel: tension })
+    await scriptPin(page, b, target, tension, 0)
     state = await stepUntil(
       page,
       (s) => s.chambers[b]?.state === 'FALSE_SET' || s.chambers[b]?.state === 'SET',
@@ -233,13 +234,7 @@ test('heavy tension walls a spool that a light hand walks through', async ({ pag
         await stepTicks(page, 60)
         continue
       }
-      await setInput(page, {
-        chamber: target.index,
-        liftTarget: target.setLift + target.captureWindow * 0.5,
-        tensionHeld: true,
-        tensionLevel: tension,
-      })
-      await stepTicks(page, 240)
+      await scriptPin(page, target.index, target.setLift + target.captureWindow * 0.5, tension, 240)
     }
     return getState(page)
   }

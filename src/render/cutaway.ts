@@ -13,6 +13,7 @@ import { drawAnatomy, faceCentreX } from './anatomy'
 import { dotRect, hatchPath, hatchRect, text } from './draw'
 import { chamberOffsetY, falseSetPulse, flashAmount, type Fx } from './fx'
 import {
+  KEYWAY_TOP_MM,
   KEYWAY_BOTTOM_MM,
   PLUG_BOTTOM_MM,
   SHELL_CHAMBER_TOP_MM,
@@ -96,11 +97,26 @@ function plugPath(ctx: CanvasRenderingContext2D, layout: CutawayLayout): void {
   ctx.beginPath()
   ctx.rect(layout.left, top, layout.right - layout.left, bottom - top)
   const bw = boreWidth(layout)
-  const boreBottom = mmToY(layout, KEYWAY_FLOOR)
+  /**
+   * The bore stops **above** the keyway, so the key pins hang out into it — DECISIONS D-141.
+   *
+   * They used to end on exactly the same line, which made every pin sit flush in its hole with a
+   * perfectly flat floor beneath the whole lock. That is not what a cylinder looks like and it is
+   * not how one works: the bore is a drilled hole into the keyway, and the springs push each stack
+   * down until the key pin **protrudes into the slot**. That protrusion is the entire mechanism — it
+   * is the only part of the lock a key ever touches, and the only part a pick can reach.
+   *
+   * Reported as *"make the key pins a bit out of their shafts"*. Drawing-only: the pins have not
+   * moved, the hole around them has, so the pick still meets a key pin exactly where the simulation
+   * says it is.
+   */
+  const boreBottom = mmToY(layout, KEYWAY_TOP_MM)
   for (let i = 0; i < layout.chamberCount; i += 1) {
     ctx.rect(plugChamberX(layout, i) - bw / 2, top, bw, boreBottom - top)
   }
-  const keyTop = mmToY(layout, KEYWAY_FLOOR)
+  // The slot's ceiling is the same line, so bore and keyway are one continuous void and the pins
+  // hang into open space rather than into a lip of brass that could not be there.
+  const keyTop = mmToY(layout, KEYWAY_TOP_MM)
   const keyBottom = mmToY(layout, KEYWAY_BOTTOM_MM)
   ctx.rect(layout.left, keyTop, layout.right - layout.left, keyBottom - keyTop)
 }

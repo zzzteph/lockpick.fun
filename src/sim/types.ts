@@ -116,6 +116,18 @@ export interface ToolStats {
   /** Top-of-keyway wrenches leave more room for the pick; bottom-of-keyway block it. */
   readonly keywayPosition: 'top' | 'bottom'
   /**
+   * How high the hook's crest stands above the shaft, in millimetres — DECISIONS D-138.
+   *
+   * The part of the tool that reaches up under a key pin. A short hook clears the pins it passes
+   * on the way in; a tall one fouls them, which is the trade a real picker makes when they choose
+   * a deep hook to reach a high cut and then have to get it past everything in front.
+   *
+   * It is only felt while the tip is **travelling with the hand raised**: a pick lying in the
+   * keyway is below every pin and touches nothing, which is why this is a stat about carriage
+   * rather than about reach.
+   */
+  readonly hookHeight: number
+  /**
    * How much load this pick takes before it bends, as a multiplier on the strain threshold.
    *
    * The starter hook is 1.0. A heavy rigid pick shrugs off more; a fine needle bends sooner, which

@@ -545,13 +545,46 @@ export async function openCurrentLock(page: Page, tension = 0.45): Promise<HookS
       await stepTicks(page, 120)
       continue
     }
-    await setInput(page, {
-      chamber: target.index,
-      liftTarget: target.setLift + target.captureWindow * 0.5,
-      tensionHeld: true,
-      tensionLevel: tension,
-    })
-    await stepTicks(page, 240)
+    await scriptPin(
+      page,
+      target.index,
+      target.setLift + target.captureWindow * 0.5,
+      tension,
+      240,
+    )
   }
   return getState(page)
+}
+
+/**
+ * Travel to a chamber and then lift it — the only sequence a player can actually perform.
+ *
+ * `setInput` is a raw scripted-input setter: it can express things no control scheme offers, and
+ * for most of its uses that is the point. Setting a chamber and a lift **in one call** is one of
+ * those things. The input layer zeroes the lift on every chamber change (D-051, D-059), so a human
+ * always arrives with the hand down; a script that sets both at once drags the tip across the lock
+ * at working height instead.
+ *
+ * That made no difference while the simulation ignored every chamber but the selected one. Since
+ * D-138 the hook fouls what it passes, and since D-139 a player *can* choose to travel high — so
+ * the two are now genuinely different inputs with genuinely different outcomes, and a test that
+ * wants "work this pin" has to say which one it means. This is the careful one.
+ *
+ * See DECISIONS D-139.
+ */
+export async function scriptPin(
+  page: Page,
+  chamber: number,
+  liftTarget: number,
+  tension: number,
+  ticks: number,
+): Promise<void> {
+  await setInput(page, { chamber, liftTarget: 0, tensionHeld: true, tensionLevel: tension })
+  for (let i = 0; i < 12; i += 1) {
+    const at = await page.evaluate(() => globalThis.__shearline!.getState().pickChamber)
+    if (at === chamber) break
+    await stepTicks(page, 20)
+  }
+  await setInput(page, { chamber, liftTarget, tensionHeld: true, tensionLevel: tension })
+  await stepTicks(page, ticks)
 }

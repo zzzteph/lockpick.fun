@@ -1216,15 +1216,25 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       pinDots:
         assist === 'training' ? 'full' : assist === 'easy' ? 'progress' : 'none',
       depthMm: assist === 'hard' ? pickDepthMm(view) : null,
+      /**
+       * Carrying the hook high is a real control now, so the legend has to say so — D-139.
+       *
+       * The arrows drop the pick, which is the safe default and has been since D-051. Holding the
+       * lift *while* moving drags the hook along the keyway at working height, and it shoves aside
+       * whatever it passes (D-138). A control the player cannot discover is the same as no control,
+       * and this one is invisible: it is the absence of a thing the game has always done for you.
+       */
       keys: input.touch.active
         ? ([
             ['tap', 'a pin'],
             ['drag up', 'to lift'],
+            ['drag ↔', 'carry it'],
             ['slider', 'tension'],
           ] as const)
         : ([
             ['← →', 'move'],
             ['space', 'lift'],
+            ['space+← →', 'carry it'],
             /**
              * The trim is Training only (D-111), so the legend only claims it on Training.
              *

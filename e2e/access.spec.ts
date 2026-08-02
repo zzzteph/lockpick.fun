@@ -9,6 +9,7 @@ import {
   loadLock,
   luminanceProfile,
   renderOnce,
+  scriptPin,
   setInput,
   setManual,
   stepTicks,
@@ -62,13 +63,7 @@ async function openIt(page: Page, tension = 0.45, rounds = 40): Promise<void> {
       await stepTicks(page, 120)
       continue
     }
-    await setInput(page, {
-      chamber: c.index,
-      liftTarget: c.setLift + c.captureWindow * 0.5,
-      tensionHeld: true,
-      tensionLevel: tension,
-    })
-    await stepTicks(page, 240)
+    await scriptPin(page, c.index, c.setLift + c.captureWindow * 0.5, tension, 240)
   }
 }
 

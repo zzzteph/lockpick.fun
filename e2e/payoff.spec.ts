@@ -9,6 +9,7 @@ import {
   loadLock,
   openSequence,
   renderOnce,
+  scriptPin,
   setInput,
   setManual,
   setReducedMotion,
@@ -44,13 +45,13 @@ async function openIt(page: Page, tension = 0.45): Promise<void> {
       await stepTicks(page, 120)
       continue
     }
-    await setInput(page, {
-      chamber: c.index,
-      liftTarget: c.profile === 'wafer' ? c.setLift : c.setLift + c.captureWindow * 0.5,
-      tensionHeld: true,
-      tensionLevel: tension,
-    })
-    await stepTicks(page, 240)
+    await scriptPin(
+      page,
+      c.index,
+      c.profile === 'wafer' ? c.setLift : c.setLift + c.captureWindow * 0.5,
+      tension,
+      240,
+    )
   }
 }
 

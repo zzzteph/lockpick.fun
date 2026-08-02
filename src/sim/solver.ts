@@ -119,12 +119,33 @@ function sameInput(a: SimInput, b: SimInput): boolean {
  * travels slowly. A solver that read the meter three ticks after asking for a chamber would be
  * reading whichever chamber it happened to be passing — so it waits, exactly as a player does.
  */
+/**
+ * Travel with the hand **down**, the way the controls make a player travel — DECISIONS D-138.
+ *
+ * This used to carry `lift` across the whole journey, which no human can do: `stepChamber` in the
+ * input layer zeroes the lift on every chamber change and the touch scheme does the same, because
+ * carrying a tip high past a set pin is how you lose it (D-051, D-059). It did not matter while
+ * the simulation ignored every chamber but the selected one.
+ *
+ * It matters now. With the hook fouling what it passes, a solver that crosses the lock with its
+ * hand up sweeps every pin between here and there — and the measured cost was enormous: tier 1
+ * went from 2.50 to 36.61 and tier 2 from 6.16 to 104.08, with two locks dropping to 36/50 and
+ * 41/50 on **resets**, the whole lock lost and restarted a dozen times an attempt.
+ *
+ * That is not the mechanic being too strong. It is the solver modelling an input the game does not
+ * offer. The lift is dropped for the crossing and restored on arrival, which is what the arrow keys
+ * and the touch scheme both do for you.
+ */
 function travelTo(rec: Recorder, chamber: number, lift: number, tension: number): boolean {
   const s = rec.state
   // Generous: the slowest crossing in the game is a 16-chamber lock at maximum tension.
   for (let i = 0; i < 900; i += 1) {
-    if (s.pickChamber === chamber) return true
-    rec.run(input(chamber, lift, tension), 1)
+    if (s.pickChamber === chamber) {
+      // Arrived: put the hand back where the caller wanted it.
+      rec.run(input(chamber, lift, tension), 1)
+      return true
+    }
+    rec.run(input(chamber, 0, tension), 1)
   }
   return s.pickChamber === chamber
 }

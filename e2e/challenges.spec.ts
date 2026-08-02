@@ -14,6 +14,7 @@ import {
   getFx,
   getState,
   loadLock,
+  scriptPin,
   setInput,
   setManual,
   stepTicks,
@@ -65,13 +66,7 @@ test('challenge modifiers apply and stack multiplicatively', async ({ page }) =>
       await stepTicks(page, 120)
       continue
     }
-    await setInput(page, {
-      chamber: b,
-      liftTarget: c.setLift + c.captureWindow * 0.5,
-      tensionHeld: true,
-      tensionLevel: 0.5,
-    })
-    await stepTicks(page, 240)
+    await scriptPin(page, b, c.setLift + c.captureWindow * 0.5, 0.5, 240)
   }
 
   const state = await getState(page)
@@ -115,13 +110,7 @@ test('a challenge opted into but not met pays nothing extra', async ({ page }) =
       await stepTicks(page, 120)
       continue
     }
-    await setInput(page, {
-      chamber: b,
-      liftTarget: c.setLift + c.captureWindow * 0.5,
-      tensionHeld: true,
-      tensionLevel: 0.5,
-    })
-    await stepTicks(page, 240)
+    await scriptPin(page, b, c.setLift + c.captureWindow * 0.5, 0.5, 240)
     // Drop the wrench once, early, which dumps every set pin and costs the challenge.
     if (round === 0) {
       await setInput(page, { chamber: -1, tensionHeld: false, tensionLevel: 0 })

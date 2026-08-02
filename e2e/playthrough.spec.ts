@@ -8,6 +8,7 @@ import {
   earnedThisAttempt,
   getState,
   loadLock,
+  scriptPin,
   setInput,
   setManual,
   stepTicks,
@@ -110,13 +111,13 @@ async function openIt(page: Page, startTension = 0.45, rounds = 90): Promise<boo
       continue
     }
     const gate = c.profile === 'wafer'
-    await setInput(page, {
-      chamber: c.index,
-      liftTarget: gate ? c.setLift : c.setLift + c.captureWindow * 0.5,
-      tensionHeld: true,
-      tensionLevel: tension,
-    })
-    await stepTicks(page, 240)
+    await scriptPin(
+      page,
+      c.index,
+      gate ? c.setLift : c.setLift + c.captureWindow * 0.5,
+      tension,
+      240,
+    )
   }
   return (await getState(page)).opened
 }

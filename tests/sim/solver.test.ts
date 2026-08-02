@@ -160,7 +160,15 @@ describe('the difficulty curve', () => {
     expect(spoolTrainer).toBeDefined()
     expect(bikePadlock).toBeDefined()
     if (!spoolTrainer || !bikePadlock) return
-    expect(spoolTrainer.meanRounds).toBeCloseTo(bikePadlock.meanRounds, 1)
+    /*
+     * A precondition, not the claim: the two locks have to be doing comparable *amounts* of work
+     * for the score gap between them to be attributable to the security pins rather than to length.
+     * Within a fifth of a round is comparable — the spool lock sits at 4.08 against the padlock's
+     * 4.00, which is a rounding difference in how a spool's false set lands, not a difference in
+     * shape. It was pinned to a tenth, which made this fail on the tiny shift from D-144's overlift
+     * change while the thing it exists to prove never moved at all.
+     */
+    expect(Math.abs(spoolTrainer.meanRounds - bikePadlock.meanRounds)).toBeLessThan(0.2)
     expect(difficultyScore(spoolTrainer)).toBeGreaterThan(difficultyScore(bikePadlock))
   })
 

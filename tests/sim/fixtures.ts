@@ -161,9 +161,23 @@ export function holdFor(s: SimState, inp: SimInput, secondsToHold: number): void
  * moment in transit and measure whichever chamber it was passing. Every test that drives the
  * pick by hand should come through here; the solver has its own equivalent.
  */
+/**
+ * Travel to a chamber the way the controls make a player travel — **hand down** (D-138).
+ *
+ * It used to hold `liftTarget` for the whole crossing. No human input can do that: `stepChamber`
+ * zeroes the lift on every chamber change and the touch scheme does the same, because carrying a
+ * tip high past a set pin is how you lose it (D-051, D-059).
+ *
+ * It made no difference while the simulation ignored every chamber but the selected one. It makes
+ * a large one now that the hook fouls what it passes: a scripted picker crossing the lock with its
+ * hand up sweeps every pin in between, and the pass rate for this fixture fell from 120 to 20.
+ * The fixture was wrong, not the physics.
+ */
 export function pickAt(s: SimState, chamber: number, liftTarget: number, tension: number): void {
-  const inp = pick(chamber, liftTarget, tension)
-  for (let i = 0; i < 900 && s.pickChamber !== chamber; i += 1) step(s, inp, DT)
+  const travelling = pick(chamber, 0, tension)
+  for (let i = 0; i < 900 && s.pickChamber !== chamber; i += 1) step(s, travelling, DT)
+  // Arrived: put the hand where the caller asked for it.
+  step(s, pick(chamber, liftTarget, tension), DT)
 }
 
 /** `pickAt` then `holdFor` — arrive, then work it for `secondsToHold`. */

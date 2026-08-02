@@ -12,6 +12,7 @@ import {
   pressureStep,
   renderOnce,
   setAssist,
+  scriptPin,
   setInput,
   setManual,
   stepTicks,
@@ -128,13 +129,7 @@ test('scripted input opens the practice lock end to end', async ({ page }) => {
     }
     const c = state.chambers[b]
     if (!c) break
-    await setInput(page, {
-      chamber: b,
-      liftTarget: c.setLift + c.captureWindow / 2,
-      tensionHeld: true,
-      tensionLevel: 0.5,
-    })
-    await stepTicks(page, 180)
+    await scriptPin(page, b, c.setLift + c.captureWindow / 2, 0.5, 180)
   }
 
   const final = await getState(page)

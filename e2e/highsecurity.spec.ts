@@ -5,6 +5,7 @@ import {
   getState,
   loadLock,
   renderOnce,
+  scriptPin,
   setInput,
   setManual,
   stepTicks,
@@ -91,7 +92,7 @@ test('a sidebar holds the plug back with every pin set, and says so', async ({ p
         : Math.abs(high - gate) > Math.abs(low - gate)
           ? high
           : low
-    await setInput(page, { chamber: b, liftTarget: target, tensionHeld: true, tensionLevel: 0.4 })
+    await scriptPin(page, b, target, 0.4, 0)
     await stepTicks(page, 60)
     state = await getState(page)
   }
@@ -156,7 +157,7 @@ test('@screenshot phase-10 sidebar held', async ({ page }) => {
     const high = c.setLift + c.captureWindow
     const target = gate === null ? c.setLift + c.captureWindow * 0.5
       : Math.abs(high - gate) > Math.abs(c.setLift - gate) ? high - 1e-3 : c.setLift + 1e-3
-    await setInput(page, { chamber: b, liftTarget: target, tensionHeld: true, tensionLevel: 0.4 })
+    await scriptPin(page, b, target, 0.4, 0)
     await stepTicks(page, 60)
     state = await getState(page)
   }

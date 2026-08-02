@@ -69,6 +69,8 @@ import {
   SET_SLIP_GRACE,
   SIDEBAR_HELD_FRACTION,
   SPOOL_CAM_BITE,
+  HOOK_RISE,
+  SHANK_REACH,
   SPRING_RETURN_RATE,
   STRAIN_BENT,
   STRAIN_BROKEN,
@@ -523,6 +525,30 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
   if (pick !== prevPick) {
     state.events.push({ type: 'PICK_MOVED', from: prevPick, to: pick, time: state.time })
   }
+
+  /**
+   * ── 2b. The hook fouls what it passes, if you carry it high ──────────────────────────
+   *
+   * Chambers in a real lock are not separate rooms. The bores are walled — 0.9mm of brass at a
+   * 3.81mm pitch — but the **keyway underneath them is one continuous slot**, and a hook carried
+   * along it passes directly beneath every key pin between the mouth and the tip. Reported as
+   * *"they are not separated by any kind of walls, so it could be the case that when you
+   * incorrectly insert the lockpick you press on other pins"*, which is exactly right and was
+   * exactly not modelled: every lift in this file is gated on `c.index === pick`, so only the
+   * selected chamber could ever move.
+   *
+   * **Only while travelling, and only while raised.** D-045 says a sliding hook rides over the
+   * pins between here and there, and that stays true — for a hook riding *low*. It is the case
+   * that comment assumes away: a pick lying in the keyway is beneath everything and touches
+   * nothing, and it is lifting the hand *while* moving that drags the crest through them. So the
+   * condition is travel (`!settled`) plus a commanded lift above the hook's own height.
+   *
+   * The pins are pressed to the crest, not to the commanded lift. The hook is a wedge going past,
+   * not a jack: it carries them at its own height and lets them fall behind it. That is the
+   * difference between disturbing a lock and demolishing it, and it is why this can be a real
+   * mechanic rather than a punishment. See DECISIONS D-138.
+   */
+  const carried = Math.max(0, Math.min(input.liftTarget, tools.hookHeight))
   // A bent shaft no longer goes where you point it (D-068).
   const jitter = tools.liftJitter * (state.pickBent ? BENT_JITTER_FACTOR : 1)
   if (jitter > 0) {
@@ -780,13 +806,56 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
     const engaged = clamp01((state.theta - c.delta) / LEDGE_FULL_ENGAGE)
     const topStop =
       c.state === 'SET' ? c.setLift + (c.maxLift - c.setLift) * (1 - engaged) : ceiling
-    // The pin rests on the one tool that can be under it: the pick, and only where it has
-    // arrived. `ceiling` still exists for the disc and inverted-wafer paths above, which hold a
-    // set chamber at `setLift` outright rather than letting it be pushed off (D-051).
-    const support =
-      c.index === pick && settled && !state.pickBroken
+    /**
+     * What is actually under this pin — DECISIONS D-138.
+     *
+     * This used to read *"the one tool that can be under it: the pick, and only where it has
+     * arrived"*, and everything else got a support of **zero**. That is the assumption the whole
+     * lock was built on and it is not true of a real one: the bores are walled, but the keyway
+     * beneath them is one continuous slot, so the hook is under whichever pin it is passing
+     * whether it has arrived there or not.
+     *
+     * Two supports, then. Arrived, the pin rests on the tip at the height the hand is holding —
+     * the original rule, unchanged. **Travelling**, it rests on the hook's *crest*: the tool is
+     * going past, not stopping, so it carries the pin at its own height and leaves it behind. A
+     * hook carried low has a crest of nothing and disturbs nothing, which is why a careful
+     * insertion still costs you nothing at all.
+     *
+     * `ceiling` still exists for the disc and inverted-wafer paths above, which hold a set
+     * chamber at `setLift` outright rather than letting it be pushed off (D-051).
+     */
+    /**
+     * ...and the **shank** is under the pins between the hook and the mouth — DECISIONS D-145.
+     *
+     * D-138 gave the hook its crest while travelling. This is the other half, and it applies while
+     * the pick is standing still: a pick is a straight tool pivoting about the hand, so lifting a
+     * pin higher than the hook is tall raises the shaft behind it, and the shaft is under every pin
+     * between there and the keyway mouth. Reported from play — *"when you press the deepest pin, the
+     * handle can overlap with the first pins"* — and the drawing was right. The simulation was
+     * holding those pins at rest while a rigid tool was drawn straight through them.
+     *
+     * **Only above the hook's own rise.** Below that the knee is still down in the keyway and the
+     * shaft touches nothing, which is the whole of ordinary play: the deepest cut in the roster asks
+     * for 2.30mm and the hook stands `hookHeight` above the shaft. So this is a cost of *overlifting*
+     * specifically, and the measured difficulty curve is unchanged by it.
+     *
+     * The shaft falls away toward the mouth, so the pin that suffers is the **neighbour**, not the
+     * front of the lock — `(i + reach) / (pick + reach)` is that slope, with the hand `SHANK_REACH`
+     * chambers outside the lock providing the lever. Same geometry the renderer places the tool
+     * with, expressed in chambers rather than pixels so the simulation stays free of the drawing.
+     */
+    const shank = ((): number => {
+      if (pick < 0 || state.pickBroken || !settled || c.index >= pick) return 0
+      const knee = input.liftTarget - HOOK_RISE
+      if (knee <= 0) return 0
+      return knee * ((c.index + SHANK_REACH) / (pick + SHANK_REACH))
+    })()
+
+    const support = !(c.index === pick) || state.pickBroken
+      ? Math.min(shank, topStop)
+      : settled
         ? clamp(input.liftTarget + state.pickWobble, 0, topStop)
-        : 0
+        : Math.min(carried, topStop)
 
     // A false-set chamber is held: the plug's ledge is sitting in its groove and the
     // full-diameter body above the groove cannot pass back down through it. Nothing but
@@ -805,11 +874,20 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
     if (!driverHeld && c.lift > driverSupport) {
       c.lift = Math.max(driverSupport, c.lift - springRate(c) * dt)
     }
-    if (
-      !driverHeld &&
-      c.lift < driverSupport &&
-      c.index === pick
-    ) {
+    /**
+     * Something under a pin can push it **up** — and the shank is something (D-145).
+     *
+     * This was gated on `c.index === pick` alone, which is the same assumption D-138 found in the
+     * support expression: only the chamber the tip has arrived at can be driven upward. That is
+     * fine for the hook, and it is why D-138's travelling foul works at all — the rounded pick
+     * index passes through each chamber in turn, so every pin it crosses is briefly `pick`.
+     *
+     * The shank is the case that assumption cannot express. It bears on pins that are by definition
+     * *not* the one the tip is on, for as long as the hand is held high, without the pick going
+     * anywhere. So `shank > 0` is its own reason to move: it is already zero for the pick's own
+     * chamber, for anything behind the hook, and for any lift below the hook's rise.
+     */
+    if (!driverHeld && c.lift < driverSupport && (c.index === pick || shank > 0)) {
       c.lift = Math.min(driverSupport, c.lift + toolRate * dt)
     }
     /**
@@ -911,7 +989,9 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
        * already knows about magnets, discs and this chamber's own spring and bore.
        */
       if (c.keyLift > want) c.keyLift = Math.max(want, c.keyLift - springRate(c) * dt)
-      else if (c.keyLift < want && c.index === pick) {
+      else if (c.keyLift < want && (c.index === pick || shank > 0)) {
+        // The shank is under this key pin too, and for the same reason (D-145): a tool held high
+        // bears on the pins between its hook and the mouth without being *at* any of them.
         c.keyLift = Math.min(want, c.keyLift + toolRate * dt)
       }
       c.keyLift = clamp(c.keyLift, 0, roof)

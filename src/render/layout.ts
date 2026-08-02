@@ -9,7 +9,15 @@
  * from the sim, where `y = 0` is the shear line and positive `y` is up.
  */
 
-import { DRIVER_LENGTH, KEYWAY_FLOOR, THETA_OPEN, clamp, clamp01, type Chamber } from '../sim'
+import {
+  DRIVER_LENGTH,
+  KEYWAY_FLOOR,
+  MAX_OVERLIFT,
+  THETA_OPEN,
+  clamp,
+  clamp01,
+  type Chamber,
+} from '../sim'
 import { LOGICAL_WIDTH } from './viewport'
 
 /** The shear line sits a little above centre, leaving the HUD its band along the bottom. */
@@ -64,8 +72,31 @@ export const PITCH_TO_DIAMETER = CHAMBER_PITCH_MM / PIN_DIAMETER_MM
  */
 export const BODY_END_MM = 2.6
 
-export const SHELL_TOP_MM = 6.4
-export const SHELL_CHAMBER_TOP_MM = 5.9
+/**
+ * How much spring is left when a spring is fully compressed — its solid height.
+ *
+ * A coil spring stops being a spring when its coils touch. Nothing can occupy that last third of a
+ * millimetre of chamber, which makes it part of the chamber's depth rather than a detail.
+ */
+export const SPRING_SOLID_MM = 0.3
+
+/**
+ * The shell chamber is **as deep as the things that have to fit inside it** — DECISIONS D-144.
+ *
+ * A driver pushed to full overlift stands `MAX_OVERLIFT + DRIVER_LENGTH` above the shear line, and
+ * its spring still needs its solid height above that. This was a flat 5.9mm against a requirement of
+ * 7.0mm, so **every** chamber in the game drew its driver 0.6mm out through the top of its own bore
+ * once a pin was pushed that far — and the spring above it inverted, its span having gone negative.
+ *
+ * Reported as *"the pin will jump out of the shell for a second"*, with an exact recipe: hold the
+ * wrench, overset the pin, keep pushing, then release both at once. Nothing transient about it — the
+ * geometry never had room, and that recipe is simply the way to reach the top of the range.
+ *
+ * Derived rather than chosen, so it cannot fall behind the constants it depends on again.
+ */
+export const SHELL_CHAMBER_TOP_MM = MAX_OVERLIFT + DRIVER_LENGTH + SPRING_SOLID_MM
+/** Enough brass above the deepest bore to read as a shell rather than a rim. */
+export const SHELL_TOP_MM = SHELL_CHAMBER_TOP_MM + 0.3
 /**
  * How deep the plug is drawn, in mm below the shear line.
  *
@@ -77,8 +108,43 @@ export const SHELL_CHAMBER_TOP_MM = 5.9
  * assembly. Going further means giving up the footer or the rank. See DECISIONS D-096.
  */
 export const PLUG_BOTTOM_MM = -9.4
-export const KEYWAY_TOP_MM = KEYWAY_FLOOR
-export const KEYWAY_BOTTOM_MM = -6.9
+/**
+ * How far a key pin at rest hangs out of its bore into the keyway.
+ *
+ * 0.6mm — enough to read as a pin standing proud of its hole at a glance, small enough that the
+ * bore still visibly holds it.
+ */
+export const BORE_LIP_MM = 0.6
+/**
+ * The keyway's ceiling, which is **above** the pins' resting bottoms — DECISIONS D-141.
+ *
+ * It used to be `KEYWAY_FLOOR` exactly, so every pin sat flush in its hole above a perfectly flat
+ * floor running the length of the lock. That is not what a cylinder looks like and it is not how one
+ * works: the springs push each stack down until the key pin **protrudes into the slot**, and that
+ * protrusion is the whole mechanism — it is the only part of the lock a key ever touches, and the
+ * only part a pick can reach. A pin sitting flush would jam a key rather than be lifted by it.
+ *
+ * Raising the ceiling rather than lowering the pins is deliberate. `KEYWAY_FLOOR` is the datum every
+ * height in the simulation is measured from — `setLift`, the capture window, where the shear line
+ * falls across a stack — so moving the pins would move the one relationship the whole game is
+ * about. The void around them moves instead, and nothing the player is reading changes.
+ *
+ * Reported as *"make the key pins a bit out of their shafts"*.
+ */
+export const KEYWAY_TOP_MM = KEYWAY_FLOOR + BORE_LIP_MM
+/**
+ * How deep the keyway slot is drawn — 3.0mm below the pins, not 1.9mm.
+ *
+ * A keyway is not a letterbox. On a 12.7mm plug it is a deep slot running most of the way to the
+ * plug's axis, and it has to be, because the thing that goes in it is a key: a 1.9mm slot could not
+ * physically admit one whose cuts lift a pin 4mm.
+ *
+ * That shallowness only became visible once the pick was drawn as a rigid body (D-141). A straight
+ * tool angled up to a raised hook has to *fit* somewhere on its way to the mouth, and with 1.9mm of
+ * slot against lifts of up to 4mm it had nowhere to go but through the plug. Deepening it is the
+ * honest fix and an improvement on its own; the plug still keeps 1.4mm of brass beneath.
+ */
+export const KEYWAY_BOTTOM_MM = -8.0
 
 /**
  * How far the plug's bore slides sideways, as a fraction of the driver width, at full
@@ -203,6 +269,23 @@ export function isRecessed(layout: CutawayLayout, i: number): boolean {
 /** Millimetres above the shear line -> logical y. Positive mm is up, so y decreases. */
 export function mmToY(layout: CutawayLayout, mm: number): number {
   return layout.shearY - mm * layout.mmToPx
+}
+
+/**
+ * Logical px per millimetre **along** the lock — which is not `mmToPx` once a lock is squeezed.
+ *
+ * `computeLayout` fits long locks to the frame by shrinking the pitch: a 12-pin cylinder draws at
+ * 76.9px per 3.81mm against a true 167.6px, so everything horizontal — bores, pins, the gutters
+ * between them — is at 0.46 scale while heights stay true. Anything else drawn along the keyway has
+ * to agree with that or it is simply drawn at a different scale from the lock it sits in.
+ *
+ * The pick did exactly that: its hook was fixed in millimetres at the *vertical* scale, so it came
+ * out 0.87× the pin width on a 5-pin lock and 1.9× on a 12-pin one. Reported as *"for every lock,
+ * the hooks should be the same"* — and they were the same absolute size, which is precisely the bug.
+ * The tool has to be the same size **as the lock around it**. See DECISIONS D-141.
+ */
+export function mmToPxX(layout: CutawayLayout): number {
+  return layout.pitch / CHAMBER_PITCH_MM
 }
 
 /** Logical y -> millimetres above the shear line. */

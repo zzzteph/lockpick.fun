@@ -203,8 +203,20 @@ export const PICK_BASE_RATE = 26.0
 export const FREE_LIFT_MULTIPLIER = 2.2
 /** How fast a chamber the pick has left returns to rest. Spec silent; see DECISIONS D-012. */
 export const SPRING_RETURN_RATE = 34.0
-/** The spring bottoms out this far above `setLift`; bounds the overset region. */
-export const MAX_OVERLIFT = 2.0
+/**
+ * The spring bottoms out this far above `setLift`; bounds the overset region.
+ *
+ * **1.3mm, down from 2.0 — because a driver cannot be pushed out through the top of its own
+ * chamber** (DECISIONS D-144). A stack shoved this far stands `MAX_OVERLIFT + DRIVER_LENGTH` above
+ * the shear line, and its spring still needs its solid height above that; at 2.0 the total came to
+ * more chamber than any lock in the drawing has, so every driver in the game left its bore once a
+ * pin reached the top of the range. Reported as *"the pin will jump out of the shell for a second"*.
+ *
+ * This is a travel limit, not a threshold: an overset is `lift > setLift + captureWindow`, which
+ * this number has never had any say in. All it decides is how far past that a stack can be shoved
+ * before the spring stops it — and the measured difficulty curve is unchanged by the reduction.
+ */
+export const MAX_OVERLIFT = 1.3
 /**
  * The same, for a dimple lock.
  *
@@ -504,3 +516,30 @@ export const RESIST_FLOOR = 0.02
 export const CONTINUOUS_EVENT_STRIDE = 4
 /** Plug movement below this per tick is not worth an event. */
 export const PLUG_MOVED_EPSILON = 1e-5
+
+/**
+ * How far outside the lock the hand holds the pick, measured in chamber pitches — DECISIONS D-145.
+ *
+ * The lever the tool pivots about. It decides how steeply the shaft falls away behind the hook, and
+ * therefore which pins the shank can reach when a pin is lifted higher than the hook is tall: a long
+ * lever means a shallow shaft and only the immediate neighbour is touched.
+ *
+ * 3.7 chambers is the renderer's own hand position converted out of pixels, so the picture and the
+ * physics agree about where the tool is without the simulation knowing anything about the drawing.
+ */
+export const SHANK_REACH = 3.7
+
+/**
+ * How far the hook's crest stands above the shaft — the shape every pick in the game is ground to.
+ *
+ * Deliberately **not** `tools.hookHeight`. That stat is how high a tool *carries* a pin it is
+ * dragged past (D-138), and `PERFECT_TOOLS` sets it to zero precisely so the reference tool
+ * measures the lock rather than the tool. Reusing it here would have given that reference tool no
+ * hook at all — a flat bar whose shank is under every pin at every lift — which is a different
+ * claim about geometry than the one the drawing makes, and the drawing draws the same 2.3mm hook
+ * whatever is equipped.
+ *
+ * So this is the tool's *shape*, shared by every pick, and it is the height a pin has to be lifted
+ * past before the shaft behind the hook comes up into its neighbours at all.
+ */
+export const HOOK_RISE = 2.3

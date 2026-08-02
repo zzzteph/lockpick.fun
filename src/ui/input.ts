@@ -509,7 +509,7 @@ export class InputController {
     if (this.touch.wrenchPointer !== null) this.usedBothThumbs = true
   }
 
-  private touchMove(id: number, _x: number, y: number): void {
+  private touchMove(id: number, x: number, y: number): void {
     if (id === this.touch.wrenchPointer) {
       if (Math.abs(y - this.touch.wrenchOriginY) > TAP_SLOP) this.wrenchDragged = true
       const next = stepForDrag(this.touch, y)
@@ -518,8 +518,24 @@ export class InputController {
       return
     }
     if (id !== this.touch.liftPointer) return
-    // Vertical only. The finger wandering sideways during a lift is the diagonal drag that made
-    // the mouse scheme unplayable, so the x is simply not read here.
+    /**
+     * A lift drag reads `y` for height and now `x` for **carry** — DECISIONS D-139.
+     *
+     * The x used to be discarded outright: a finger wandering sideways during a lift was the
+     * diagonal drag that made the mouse scheme unplayable (D-051, D-059), so the safest thing was
+     * to ignore it. That is still the right instinct for *wandering*, which is why this needs a
+     * deliberate amount of travel before it counts — a whole chamber's pitch, not a wobble.
+     *
+     * Deliberately crossing into the next chamber while still holding the pin up is the touch
+     * equivalent of arrowing with Space held: it drags the hook along the keyway with the hand
+     * raised, and the pins it passes get shoved aside (D-138). The lift is **kept**, which is the
+     * entire point — letting go of it is what the safe version of this gesture already does.
+     */
+    const layout = this.layout
+    if (layout) {
+      const over = chamberAtX(layout, x)
+      if (over >= 0 && over !== this.touchChamber) this.touchChamber = over
+    }
     this.touchLift = liftForDrag(this.touch, y, this.liftCeiling)
   }
 
@@ -586,10 +602,24 @@ export class InputController {
     }
     const next = Math.max(0, Math.min(this.chamberLimit, this.keyChamber + delta))
     if (next !== this.keyChamber) {
-      this.keyLift = 0
-      // The trim is a property of the chamber you are working, not of the hand. Carrying it along
-      // the keyway would be carrying the tip high past a set pin, which is the exact thing this
-      // key drops the pick to avoid (D-051).
+      /**
+       * Moving drops the pick — **unless you are holding it up on purpose** (D-139).
+       *
+       * Dropping on every chamber change has been the rule since D-051, and it is the right
+       * default: carrying a tip high past a set pin is how you lose it. But it was also absolute,
+       * and that made a whole piece of real lock behaviour unreachable — the hook fouling the pins
+       * it passes (D-138) could not be triggered by any input the game offered, because the game
+       * would not let you travel with your hand up.
+       *
+       * Holding Space *is* holding the pick up. Pressing an arrow while it is held now means
+       * exactly what it looks like: drag the hook along the keyway without setting it down, and
+       * take whatever it does to the pins on the way. Let go of Space and the arrows behave as
+       * they always have.
+       *
+       * The **trim** always resets, held or not: it is a property of the chamber you are working,
+       * and there is no sense in which it survives leaving that chamber.
+       */
+      if (!this.spaceDown) this.keyLift = 0
       this.keyTrim = 0
     }
     this.keyChamber = next

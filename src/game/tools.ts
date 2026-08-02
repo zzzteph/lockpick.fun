@@ -38,6 +38,9 @@ export const KIT: ToolStats = {
   tensionMax: 1.0,
   tensionSlew: TENSION_SLEW,
   tensionPrecision: 0.03,
+  // A competent hook: taller than the starter, so it reaches further under a pin and fouls more
+  // of what it passes. That is the trade a real picker makes choosing a deep hook (D-138).
+  hookHeight: 2.0,
   // Longer than the longest lock in the roster. Reach is no longer a wall (D-088).
   reach: 99,
   liftJitter: 0.035,
