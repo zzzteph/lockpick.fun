@@ -52,6 +52,15 @@ export const CREDIT_COUNT_SECONDS = 0.55
 export const CARD_STAGGER_SECONDS = 0.12
 export const CARD_SLIDE_SECONDS = 0.28
 export const CARD_SLIDE_PX = 420
+/**
+ * How long the last card holds the screen before the results panel takes it — D-157.
+ *
+ * Cards used to land at 2.08s into a sequence that settled at 2.5: the thing you just earned
+ * was readable for four tenths of a second. Reported as *"you will be navigated to the next
+ * screen too fast and you will not see it."* The sequence is still skippable from 0.5s, so the
+ * hold costs an impatient player one tap and gives everyone else time to read their trophy.
+ */
+export const CARD_HOLD_SECONDS = 1.2
 
 export interface OpenSequence {
   /** Seconds since the lock opened. */
@@ -100,14 +109,14 @@ export function startOpenSequence(seq: OpenSequence, rank: number, cardCount: nu
  * `ART_DIRECTION.md §6` settles at 2.5s and staggers the cards 120ms apart, and those two
  * numbers only fit together up to four cards: the fifth starts at 2.28s and would still be
  * sliding when the results panel took the screen. Finishing a tier routinely fires more than
- * four at once, so the sequence waits for the last card rather than cutting it off. Nothing
- * else moves — every beat keeps its stated time, and an open with no cards is 2.5s exactly.
- * See DECISIONS D-030.
+ * four at once, so the sequence waits for the last card rather than cutting it off — and then
+ * holds it long enough to be read (D-157). Every beat keeps its stated time, and an open with
+ * no cards is 2.5s exactly. See DECISIONS D-030.
  */
 export function sequenceSeconds(seq: OpenSequence): number {
   if (seq.cardCount <= 0) return SEQUENCE_SECONDS
   const lastCardLands = BEATS.cards + (seq.cardCount - 1) * CARD_STAGGER_SECONDS + CARD_SLIDE_SECONDS
-  return Math.max(SEQUENCE_SECONDS, lastCardLands)
+  return Math.max(SEQUENCE_SECONDS, lastCardLands + CARD_HOLD_SECONDS)
 }
 
 /** True once enough of the sequence has played that skipping is allowed. */

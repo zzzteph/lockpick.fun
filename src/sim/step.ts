@@ -27,6 +27,7 @@ import {
   CAPTURE_TIME,
   CONTINUOUS_EVENT_STRIDE,
   COUNTER_ROTATION_FORCE,
+  SERRATION_GRIP,
   DISC_SPRING_RETURN,
   DT,
   LEDGE_CLEAR_MM,
@@ -168,8 +169,42 @@ function resistanceFor(
   tension: number,
   time: number,
   pressure: number,
+  /** Commanded tip height in mm — where the hand is asking the tip to be (D-045's measure). */
+  tipMm = 0,
 ): number {
   if (!c) return 0
+  /**
+   * An overset chamber's jam is felt on **contact**, not at a distance — D-158.
+   *
+   * The key pin is pinched across the shear line with the bore below it empty (D-094), so until
+   * the tip reaches its underside there is nothing under the hand but air — and the reading said
+   * `RESIST_OVERSET` anyway, plus the full spring-compression term for a spring the tip was not
+   * touching. Reported from play: *"when you press on a key pin which was not lifted yet to the
+   * driver pin — it still shows the resistance. Which should not."* The same closing ramp a
+   * captured driver already uses (D-051, D-061), against the same field `pickForce` reads for
+   * the pin's underside. Discs and inverted wafers keep the flat read: neither has an empty
+   * bore below a jam.
+   */
+  const oversetClosing =
+    c.state === 'OVERSET' && c.kind !== 'disc' && !c.inverted
+      ? clamp01(1 - Math.max(0, c.keyLift - tipMm) / SET_CONTACT_MM)
+      : 1
+  /**
+   * How much of the split stack the key pin has closed, 0..1 — the general rule D-158's
+   * overset case was one instance of.
+   *
+   * Whenever the driver is parked above a gap — captured on the plug's ledge (SET) or trapped
+   * in its own groove (FALSE_SET) — the key pin below it is loose, and lifting it is nearly
+   * free until its top meets the driver's bottom. Reported from play as *"general physics —
+   * the pressure should be super easy if only touching the key pin and the key pin does not
+   * touch the driver pin."* The SET base already ramped on this gap (D-051); FALSE_SET read
+   * its full formula flat, and the spring term was charged in both, for a spring sitting
+   * untouched on the far side of the gap.
+   */
+  const stackClosing =
+    (c.state === 'SET' || c.state === 'FALSE_SET') && c.kind !== 'disc' && !c.inverted
+      ? clamp01(1 - Math.max(0, c.lift - c.keyLift) / SET_CONTACT_MM)
+      : 1
   /**
    * This chamber's own character, applied in every state because it is a property of the hardware
    * rather than of what the pin is currently doing.
@@ -177,8 +212,15 @@ function resistanceFor(
    * Two terms standing for two different things: `resistanceBias` is the bore and the pin's fit
    * (D-052), `springStrength` is the spring sitting on top of it (D-062). Separate because only
    * one of them also changes how fast the pin *falls*.
+   *
+   * The spring term closes with the stack: it lives above the driver, and a loose key pin is
+   * not loading it. The bias stays — the key pin still rubs its own bore. Both are scaled by
+   * the overset closing (1 everywhere else): a tip in the empty bore below a jam touches
+   * neither (D-158).
    */
-  const character = c.resistanceBias + (c.springStrength - 1) * RESIST_PER_SPRING
+  const character =
+    (c.resistanceBias + (c.springStrength - 1) * RESIST_PER_SPRING * stackClosing) *
+    oversetClosing
   /**
    * Hooke: the spring stiffens as it compresses, so a pin held high pushes back harder (D-070).
    *
@@ -199,9 +241,10 @@ function resistanceFor(
   // spring is *below* it and pushes up, so the wafer rests at the top of its travel and is
   // compressed by being pushed **down**.
   const squash = c.inverted ? c.maxLift - c.lift : c.lift
-  const compression = connected ? squash * RESIST_PER_MM_LIFT : 0
+  // The jammed stack's spring is genuinely compressed, but the tip only feels it on contact.
+  const compression = connected ? squash * RESIST_PER_MM_LIFT * oversetClosing : 0
   const full = clamp(
-    baseResistance(c, tension, time) + character + compression,
+    baseResistance(c, tension, time, oversetClosing, stackClosing) + character + compression,
     RESIST_FLOOR,
     1,
   )
@@ -244,21 +287,45 @@ function resistanceFor(
 function feltPressure(c: Chamber | undefined, input: SimInput, settled: boolean): number {
   if (!c || !settled) return 0
   if (c.sidebarGate !== null || c.kind === 'disc') return 1
+  /**
+   * An overset chamber is loaded from **contact**, not from the keyway floor — D-158.
+   *
+   * Commanded height works as a load proxy everywhere else because the pin is resting on the
+   * tip: ask for height and you are pushing the pin by that much. Here the key pin is jammed
+   * high (D-094) with an empty bore under it, so the first `RESIST_PRESSURE_MM` of commanded
+   * height is not force against anything — and this gate is what the state word and the
+   * resistance colour hang off, so measuring it from zero made the HUD shout `overset` the
+   * moment the tip entered the bore. Reported from play, twice, which is what it took.
+   */
+  if (c.state === 'OVERSET' && !c.inverted) {
+    return clamp01((input.liftTarget - (c.keyLift - RESIST_PRESSURE_MM)) / RESIST_PRESSURE_MM)
+  }
   // An inverted wafer rests at the *top* of its travel, so loading it means pressing down.
   const load = c.inverted ? c.maxLift - input.liftTarget : input.liftTarget
   return clamp01(load / RESIST_PRESSURE_MM)
 }
 
-function baseResistance(c: Chamber, tension: number, time: number): number {
+function baseResistance(
+  c: Chamber,
+  tension: number,
+  time: number,
+  /** How much of the gap to an overset stack the tip has closed, 0..1 (D-158). */
+  oversetClosing = 1,
+  /** How much of a split SET/FALSE_SET stack the key pin has closed, 0..1 (D-158). */
+  stackClosing = 1,
+): number {
   switch (c.state) {
     case 'BINDING':
       return RESIST_BINDING_BASE + RESIST_BINDING_TENSION * tension
-    case 'FALSE_SET':
-      return (
+    case 'FALSE_SET': {
+      // The trapped driver's read arrives when the key pin reaches it — until then the hand
+      // is carrying a loose pin up an empty bore, which is the SET case's light read (D-158).
+      const full =
         RESIST_FALSE_BASE +
         RESIST_FALSE_TENSION * tension +
         RESIST_FALSE_WOBBLE * Math.sin(2 * Math.PI * RESIST_FALSE_HZ * time)
-      )
+      return RESIST_SET + (full - RESIST_SET) * stackClosing
+    }
     case 'SET': {
       /**
        * Light while the key pin climbs the empty bore under a captured driver, rising to firm as
@@ -270,7 +337,9 @@ function baseResistance(c: Chamber, tension: number, time: number): number {
       return RESIST_SET + (RESIST_SET_CONTACT - RESIST_SET) * closing
     }
     case 'OVERSET':
-      return RESIST_OVERSET
+      // Light across the empty bore, the full jammed read on contact — the same shape the SET
+      // case above gives a key pin climbing toward its captured driver (D-158).
+      return RESIST_SET + (RESIST_OVERSET - RESIST_SET) * oversetClosing
     case 'FREE':
       return (
         RESIST_FREE_BASE +
@@ -911,8 +980,19 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
      * anywhere. So `shank > 0` is its own reason to move: it is already zero for the pick's own
      * chamber, for anything behind the hook, and for any lift below the hook's rise.
      */
+    /**
+     * The serrated grind — D-157. While a many-toothed driver is pinched, every serration
+     * drags on the plug edge and the climb slows by `1 + grip × T × teeth`. The lies were
+     * already here (each groove false-sets — the four fake clicks); this is the grind that
+     * makes the profile *feel* like anything on the way up. Light tension frees it, which is
+     * the same lesson every security pin in the game teaches.
+     */
+    const grind =
+      pinched && c.profile.grooveCount >= 3
+        ? 1 / (1 + SERRATION_GRIP * T * c.profile.grooveCount)
+        : 1
     if (!driverHeld && c.lift < driverSupport && (c.index === pick || shank > 0)) {
-      c.lift = Math.min(driverSupport, c.lift + toolRate * dt)
+      c.lift = Math.min(driverSupport, c.lift + toolRate * grind * dt)
     }
     /**
      * A false-set driver is **trapped between its own shoulders** while the ledge is in its waist.
@@ -1212,7 +1292,7 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
   const felt = pick >= 0 ? chambers[pick] : undefined
   const contact = feltPressure(felt, input, settled)
   state.pickContact = contact
-  state.resistance = resistanceFor(felt, T, state.time, contact)
+  state.resistance = resistanceFor(felt, T, state.time, contact, settled ? input.liftTarget : 0)
   if (state.resistance > state.stats.maxResistance) state.stats.maxResistance = state.resistance
 
   /**

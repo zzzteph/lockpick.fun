@@ -26,7 +26,7 @@ import {
 test.describe.configure({ mode: 'serial' })
 
 /**
- * This test plays the entire game — four lessons and twenty-two locks, every pin worked one at
+ * This test plays the entire game — six lessons and twenty-two locks, every pin worked one at
  * a time through the same input API a human uses. It takes about twenty-five seconds alone and
  * longer when six workers are sharing six cores, so the 60s default is a measure of contention
  * rather than of the game. Raised here only, so a genuine hang elsewhere still trips it.
@@ -144,13 +144,27 @@ test('a whole playthrough: new save, tutorial, one lock a tier, everything banke
   expect(start.tutorial).toEqual([])
 
   // ── The tutorial ──────────────────────────────────────────────────────────────────────
-  for (const id of ['lesson-rotate', 'lesson-1', 'lesson-2', 'lesson-3']) {
+  for (const id of [
+    'lesson-rotate',
+    'lesson-1',
+    'lesson-2',
+    'lesson-pressure',
+    'lesson-3',
+    'lesson-serrated',
+  ]) {
     await page.evaluate((l) => globalThis.__shearline?.startLesson(l), id)
     expect(await openIt(page, 0.45), `${id} could not be finished`).toBe(true)
     await advanceSeconds(page, 3.2)
   }
   const taught = await save(page)
-  expect(taught.tutorial.sort()).toEqual(['lesson-1', 'lesson-2', 'lesson-3', 'lesson-rotate'])
+  expect(taught.tutorial.sort()).toEqual([
+    'lesson-1',
+    'lesson-2',
+    'lesson-3',
+    'lesson-pressure',
+    'lesson-rotate',
+    'lesson-serrated',
+  ])
   expect(Object.keys(taught.records), 'lessons must not leave records').toEqual([])
 
   /**

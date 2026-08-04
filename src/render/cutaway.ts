@@ -562,11 +562,23 @@ function drawRotationGauge(
   demand: number,
   max: number,
   free: boolean,
+  /**
+   * Dial only, no caption stack — the phone's version (D-157). The captions are what D-135
+   * measured as the cost; the dial itself is the reading a hand wants mid-pick.
+   */
+  bare = false,
 ): void {
   const { ctx } = vp
-  const cx = faceCentreX(layout)
-  const cy = (mmToY(layout, 0) + mmToY(layout, PLUG_BOTTOM_MM)) / 2
   const r = 56
+  // On a phone the wrench slider owns a 162px gutter on the dial's own side (they mirror with
+  // handedness together), so the dial is pushed clear of it rather than drawn underneath.
+  const cx = bare
+    ? Math.min(
+        Math.max(faceCentreX(layout), 178 + r + 27),
+        LOGICAL_WIDTH - 178 - r - 27,
+      )
+    : faceCentreX(layout)
+  const cy = (mmToY(layout, 0) + mmToY(layout, PLUG_BOTTOM_MM)) / 2
 
   ctx.save()
   ctx.beginPath()
@@ -629,6 +641,9 @@ function drawRotationGauge(
   arc(r + 27, max, alpha(p.teal, 0.75), STROKE.standard)
   arc(r + 20, demand, alpha(p.ink, 0.35), STROKE.hairline)
   arc(r + 13, theta, p.amber, STROKE.heavy)
+
+  // The phone stops here: the dial and its arcs, no caption stack (D-157).
+  if (bare) return
 
   /**
    * The dial's caption stack, spaced by its own type — DECISIONS D-132.
@@ -759,29 +774,24 @@ export function drawCutaway(
   ctx.restore()
 
   /**
-   * The rotation gauge is a desktop reading — DECISIONS D-135.
+   * The rotation gauge: full on a desktop, dial-only on a phone.
    *
-   * It is a dial plus three lines of type in the lower-left corner, and the **plug's angle is
-   * already a meter in the footer**. What the dial adds over that meter is `asking / allowed` —
-   * whose fault the stall is — which is a genuinely good reading and a study one: you look at it
-   * when you are working out *why*, not while you are picking. On a phone it is one of the largest
-   * blocks on the screen, and the screen it is on is the one the whole game happens on.
-   *
-   * The one thing in it that is not a reading but an **instruction** survives the cut: `plug free,
-   * turn harder` means every driver is above the line and only your wrench is short, which is a
-   * state a player can sit in indefinitely without knowing why. It moves to the caption row where
-   * the other prompts live.
+   * D-135 dropped it from the phone entirely — the dial plus three lines of type was one of the
+   * largest blocks on the busiest screen, and the plug's angle is already a meter in the footer.
+   * Asked back directly: *"why round plug missing in mobile?????"* — and the player is right
+   * that the **dial** is not the part D-135 measured as the cost. The caption stack stays gone;
+   * the plug's face, turning by the real angle with the three arcs to compare, returns (D-157).
    */
-  if (!isCompact(vp))
-    drawRotationGauge(
-      vp,
-      p,
-      layout,
-      state.theta,
-      state.thetaDemand,
-      state.thetaMax,
-      pickedButUnturned(state),
-    )
+  drawRotationGauge(
+    vp,
+    p,
+    layout,
+    state.theta,
+    state.thetaDemand,
+    state.thetaMax,
+    pickedButUnturned(state),
+    isCompact(vp),
+  )
   drawChamberLabels(vp, p, layout, state, opts.activeChamber)
   /**
    * The anatomy key — SHELL, PLUG, KEYWAY, the shear line and the pin-stack legend — is a
@@ -803,15 +813,27 @@ function drawChamberLabels(
   active: number,
 ): void {
   const { ctx } = vp
-  const labelY = mmToY(layout, PLUG_BOTTOM_MM) + 30
-  for (const c of state.chambers) {
-    const cx = shellChamberX(layout, c.index)
-    const isActive = c.index === active
-    text(ctx, String(c.index + 1), cx, labelY, {
-      font: font(typeFor(vp, TYPE.dimension)),
-      color: isActive ? p.ink : p.inkLight,
-      align: 'center',
-    })
+  const size = typeFor(vp, TYPE.dimension)
+  /*
+   * No numbers on a phone — D-157. At the compact face they printed into the footer band
+   * (reported as *"the numbers of the pins are overlapped with the footer section"*), and the
+   * band between the assembly's bottom and the footer cannot hold a 30px digit at all: clamped
+   * up, they landed inside the lock, which D-137 forbids. On touch you tap the pin itself, so
+   * the number was labelling a control the finger already has; the focus rectangle below stays.
+   */
+  if (!isCompact(vp)) {
+    // The desktop face fits where it always sat — clamping it upward was tried and put the
+    // digits on the pick's own shaft.
+    const labelY = mmToY(layout, PLUG_BOTTOM_MM) + 30
+    for (const c of state.chambers) {
+      const cx = shellChamberX(layout, c.index)
+      const isActive = c.index === active
+      text(ctx, String(c.index + 1), cx, labelY, {
+        font: font(size),
+        color: isActive ? p.ink : p.inkLight,
+        align: 'center',
+      })
+    }
   }
 
   if (active < 0) return

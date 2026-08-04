@@ -10,9 +10,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   BEATS,
+  CARD_SLIDE_SECONDS,
   CARD_STAGGER_SECONDS,
   CREDIT_COUNT_SECONDS,
   DILATION_SCALE,
+  CARD_HOLD_SECONDS,
   SEQUENCE_SECONDS,
   SKIPPABLE_AFTER,
   burst,
@@ -259,11 +261,16 @@ describe('beat 7 — achievement cards', () => {
     }
   })
 
-  it('runs exactly the spec length when four or fewer cards fire', () => {
-    for (const n of [0, 1, 2, 3, 4]) {
-      expect(sequenceSeconds(run(100, n)), `${n} cards`).toBe(SEQUENCE_SECONDS)
+  it('runs exactly the spec length with no cards, and holds the last card when any fire', () => {
+    // D-157: a card that lands at 2.08s into a 2.5s sequence is readable for four tenths of a
+    // second. Any card extends the sequence by the hold; no cards keeps the spec length exactly.
+    expect(sequenceSeconds(run(100, 0))).toBe(SEQUENCE_SECONDS)
+    for (const n of [1, 2, 4, 6]) {
+      const seq = run(100, n)
+      const lastLands = BEATS.cards + (n - 1) * CARD_STAGGER_SECONDS + CARD_SLIDE_SECONDS
+      expect(sequenceSeconds(seq), `${n} cards`).toBeCloseTo(lastLands + CARD_HOLD_SECONDS, 5)
+      expect(sequenceSeconds(seq), `${n} cards`).toBeGreaterThan(SEQUENCE_SECONDS)
     }
-    expect(sequenceSeconds(run(100, 6))).toBeGreaterThan(SEQUENCE_SECONDS)
   })
 
   it('shows them without sliding under reduced motion', () => {
@@ -319,13 +326,13 @@ describe('skipping', () => {
     skipOpenSequence(seq)
     updateOpenSequence(seq, FRAME)
     expect(seq.running).toBe(false)
-    expect(seq.elapsed).toBe(SEQUENCE_SECONDS)
+    expect(seq.elapsed).toBe(sequenceSeconds(seq))
   })
 })
 
 describe('running to completion', () => {
-  it('settles at 2.5s and stops', () => {
-    const seq = run(320, 2)
+  it('settles at 2.5s and stops, when there is no card to hold for', () => {
+    const seq = run(320, 0)
     advanceTo(seq, SEQUENCE_SECONDS)
     expect(isSettled(seq)).toBe(true)
     expect(seq.running).toBe(false)
@@ -335,7 +342,7 @@ describe('running to completion', () => {
   it('never runs past its end, however coarse the frame', () => {
     const seq = run(320, 2)
     updateOpenSequence(seq, 10)
-    expect(seq.elapsed).toBe(SEQUENCE_SECONDS)
+    expect(seq.elapsed).toBe(sequenceSeconds(seq))
     expect(rankReveal(seq)).toBe(1)
   })
 

@@ -74,6 +74,23 @@ export const COUNTER_ROTATION_FORCE = 42.8
 export const ENGAGE_RAMP = 0.003
 
 /**
+ * How hard a serrated pin's teeth grip the plug edge while it is binding — D-157.
+ *
+ * A serrated pin's whole character is that every tooth bites: under tension the plug's edge
+ * drags across each serration on the way up, and the climb *grinds*. The simulation had the
+ * lies (each groove false-sets, which is the four fake clicks) but not the grind — lifting a
+ * serrated pin cost exactly what lifting a standard pin cost, reported from play as *"I do
+ * feel that they have no real difference to the general pin."*
+ *
+ * The binding lift rate divides by `1 + grip × T × grooveCount`, so at working tension a
+ * four-serration pin climbs at roughly a third of a plain pin's rate, and feathering the
+ * wrench — the same instinct every security pin teaches — is what frees it. Applied only to
+ * profiles with three or more grooves, which is the serrated family and nothing else: a
+ * spool's one waist is a wall, not a grind, and it already has its own mechanics.
+ */
+export const SERRATION_GRIP = 0.8
+
+/**
  * How hard pushing a trapped driver rotates the plug **backwards**, in radians per second per
  * millimetre of over-push, before tension is accounted for.
  *

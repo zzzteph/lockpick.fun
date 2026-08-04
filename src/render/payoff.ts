@@ -134,6 +134,12 @@ const CARD_GAP = 12
  *
  * They stack downward from a fixed top rather than growing from the bottom, so the first one
  * earned is always in the same place whether one fired or six did.
+ *
+ * Sized from the type they carry — D-157. The 420x76 literal held a 17px tag over a 26px name;
+ * at the compact face those are 30 and 47, so the name printed out through the card's bottom
+ * border on every phone. Reported as *"in mobile achievements (when appeared) are not fitted
+ * in the box."* The card grows to its content, and the widest name on screen sets the width so
+ * a stack still reads as a stack rather than a ragged pile.
  */
 export function drawAchievementCards(
   vp: Viewport,
@@ -146,29 +152,39 @@ export function drawAchievementCards(
   const readable = readableAccents(p)
   const right = LOGICAL_WIDTH - 48
   const top = 420
+  const tag = typeFor(vp, TYPE.dimension)
+  const name = typeFor(vp, TYPE.heading)
+  const cardH = Math.max(CARD_H, 14 + tag + 10 + name + 16)
+  ctx.save()
+  ctx.font = font(name)
+  const cardW = Math.max(
+    CARD_W,
+    ...earned.map((a) => Math.ceil(ctx.measureText(a.name).width) + 44),
+  )
+  ctx.restore()
 
   for (let i = 0; i < earned.length; i += 1) {
     const a = earned[i]
     if (!a || !cardVisible(seq, i)) continue
-    const x = right - CARD_W + cardOffsetX(seq, i)
-    const y = top + i * (CARD_H + CARD_GAP)
+    const x = right - cardW + cardOffsetX(seq, i)
+    const y = top + i * (cardH + CARD_GAP)
 
     ctx.save()
     ctx.fillStyle = p.paperShade
-    ctx.fillRect(x, y, CARD_W, CARD_H)
+    ctx.fillRect(x, y, cardW, cardH)
     ctx.lineWidth = STROKE.standard
     ctx.strokeStyle = p.ink
-    ctx.strokeRect(x + 0.5, y + 0.5, CARD_W - 1, CARD_H - 1)
+    ctx.strokeRect(x + 0.5, y + 0.5, cardW - 1, cardH - 1)
     // A teal bar down the leading edge: the same "captured" colour a set pin gets.
     ctx.fillStyle = readable.teal
-    ctx.fillRect(x, y, 7, CARD_H)
+    ctx.fillRect(x, y, 7, cardH)
     ctx.restore()
 
-    text(ctx, 'ACHIEVEMENT', x + 22, y + 26, {
-      font: font(typeFor(vp, TYPE.dimension)),
+    text(ctx, 'ACHIEVEMENT', x + 22, y + 14 + tag, {
+      font: font(tag),
       color: p.inkLight,
     })
-    text(ctx, a.name, x + 22, y + 54, { font: font(typeFor(vp, TYPE.heading)), color: p.ink })
+    text(ctx, a.name, x + 22, y + 14 + tag + 10 + name, { font: font(name), color: p.ink })
   }
 }
 

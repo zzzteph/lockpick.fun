@@ -14,7 +14,7 @@
 import type { SimEvent, SimEventType } from '../sim'
 import { text } from './draw'
 import { STROKE, TYPE, alpha, font, readableAccents, type Palette } from './palette'
-import { LOGICAL_HEIGHT, LOGICAL_WIDTH, typeFor, type Viewport } from './viewport'
+import { LOGICAL_HEIGHT, LOGICAL_WIDTH, isCompact, typeFor, type Viewport } from './viewport'
 
 /** How long a caption stays up. Long enough to read, short enough not to stack up. */
 export const CAPTION_SECONDS = 2.2
@@ -165,7 +165,15 @@ export function drawLessonLine(
    * only when even the full stage width cannot hold the line, which no desktop line reaches.
    */
   const pipRoom = lesson.total * 14 + 36
-  const maxText = LOGICAL_WIDTH - 2 * (pipRoom + 40)
+  /*
+   * On a phone the top corners belong to the withdraw and pause pads (132px wide at x=30 and
+   * x=1758, the same band this panel sits in), so the box budgets around them — it printed
+   * straight across both, reported as *"the text overlaps with pickout and pause buttons"*
+   * (D-157). The pads exist only on touch, but a compact pointer screen loses nothing to the
+   * narrower box.
+   */
+  const sideClear = isCompact(vp) ? 200 : 40
+  const maxText = LOGICAL_WIDTH - 2 * (pipRoom + sideClear)
   let size = typeFor(vp, TYPE.body)
   ctx.save()
   ctx.font = font(size)

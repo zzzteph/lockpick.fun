@@ -112,6 +112,7 @@ import {
   isCompact,
   syncViewport,
   touchFloorFor,
+  typeFor,
 } from './render/viewport'
 import {
   KEYWAY_FLOOR,
@@ -1122,6 +1123,9 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       hapticsSupported: haptics.isSupported,
       // With reduced motion the stamp is simply already down — a large age reads as settled.
       resultsAge: fx.reducedMotion ? 9 : resultsAge,
+      // Mid-attempt only: an opened lock's session lingers for the results screen, and "back to
+      // the lock" on a lock that is already open would be a door to a finished room.
+      pickActive: session !== null && !session.state.opened,
       ...(benchTier !== undefined ? { benchTier } : {}),
     }
 
@@ -1223,6 +1227,8 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       elapsed: view.time,
       inspecting,
       lesson: lesson !== null,
+      // The face locks draw a dial, not the side cutaway, and their gutter is never crowded.
+      ...(face ? {} : { assemblyLeft: assemblyBounds(layout).x }),
       // The payoff owns the rank band from the moment the lock opens (D-100).
       payoff: sequence.running,
       // The meter is on at every level: it is the substitute for touch, and the higher levels
@@ -1334,10 +1340,12 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         ? { x: face.cx, y: face.cy }
         : { x: LOGICAL_WIDTH / 2, y: mmToY(layout, 0) }
       drawOpenSequence(vp, palette, sequence, earnedThisAttempt, centre)
-      if (canSkip(sequence) && !sequence.skipped) {
+      // Not on touch: a tap skips and needs no advertisement, and at the compact face the hint
+      // printed across the header's own furniture (D-157).
+      if (canSkip(sequence) && !sequence.skipped && !input.touch.active && !isCompact(vp)) {
         // Tucked under the header, where the drawing never reaches — a hint, not an element.
         text(vp.ctx, 'any key to skip', LOGICAL_WIDTH - 60, 116, {
-          font: font(TYPE.dimension),
+          font: font(typeFor(vp, TYPE.dimension)),
           color: palette.inkLight,
           align: 'right',
         })

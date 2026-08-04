@@ -53,8 +53,9 @@ test('menu to bench to pick to results to bench', async ({ page }) => {
   expect(opened.opened, `states: ${opened.chambers.map((c) => c.state).join(',')}`).toBe(true)
 
   // Opening the lock plays the payoff sequence and *then* lands on results, with the payout
-  // banked. From Phase 11 the results page is 2.5s behind the open rather than one frame.
-  await advanceSeconds(page, 2.6)
+  // banked. From Phase 11 the results page is 2.5s behind the open rather than one frame — and
+  // a first open fires achievement cards, which hold the sequence longer still (D-157).
+  await advanceSeconds(page, 4.2)
   expect(await screen(page)).toBe('results')
   const save = await getSave(page)
   expect(save.records['clear-practice-cutaway']?.bestRank).not.toBeNull()
@@ -261,9 +262,9 @@ test('@screenshot phase-07 results', async ({ page }) => {
   await loadLock(page, 3, 11)
   const opened = await openCurrentLock(page)
   expect(opened.opened).toBe(true)
-  // Past the open sequence's 2.5s settle *and* the rank stamp's 0.45s landing (D-154), so the
-  // record shows the screen at rest rather than a letter mid-flight.
-  await advanceSeconds(page, 3.4)
+  // Past the open sequence's settle — held longer by achievement cards (D-157) — *and* the rank
+  // stamp's 0.45s landing (D-154), so the record shows the screen at rest.
+  await advanceSeconds(page, 4.6)
   await renderOnce(page)
   expect(await screen(page)).toBe('results')
   await captureStage(page, 'phase-07-results')
@@ -287,7 +288,7 @@ test('the results screen offers the next lock, and taking it never visits the be
 
   const opened = await openCurrentLock(page)
   expect(opened.opened, `states: ${opened.chambers.map((c) => c.state).join(',')}`).toBe(true)
-  await advanceSeconds(page, 2.6)
+  await advanceSeconds(page, 4.2)
   expect(await screen(page)).toBe('results')
 
   // Mirrors `drawResults`: three 240px buttons, 24px apart, centred, 130px off the bottom.

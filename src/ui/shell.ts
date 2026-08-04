@@ -152,6 +152,12 @@ export interface ShellContext {
    * Absent or large means "settled": the app passes a large value under reduced motion.
    */
   resultsAge?: number
+  /**
+   * True while a lock is mid-attempt — settings and help reached from the pause panel offer the
+   * way back to it (D-157). Without this, pausing to flip a setting stranded the attempt: the
+   * session survived the trip, but no button led back.
+   */
+  pickActive?: boolean
   /** Message shown along the bottom of whichever screen is up. */
   status?: string
   /** Challenge modifiers the player has opted into for the next attempt. */
@@ -1392,8 +1398,8 @@ export function drawTutorial(c: ShellContext): void {
   text(
     ctx,
     isCompact(vp)
-      ? 'Four short lessons, in order.'
-      : 'Four short lessons, in order. Everything on the bench comes down to these.',
+      ? `${LESSONS.length} short lessons, in order.`
+      : `${LESSONS.length} short lessons, in order. Everything on the bench comes down to these.`,
     BENCH_LEFT,
     170,
     { font: font(typeFor(vp, TYPE.body)), color: p.inkLight },
@@ -1409,11 +1415,23 @@ export function drawTutorial(c: ShellContext): void {
   const tagSize = typeFor(vp, TYPE.dimension)
   const titleSize = typeFor(vp, TYPE.heading)
   const blurbSize = typeFor(vp, TYPE.body)
-  // Three blurb lines on a phone, where the larger face wraps a `teaches` sentence past two —
-  // this is the screen whose whole job is being read, so the sentence must not truncate.
-  const blurbLines = isCompact(vp) ? 3 : 2
-  const cardH = Math.max(150, tagSize + titleSize + blurbSize * (blurbLines + 0.4) + 70)
+  /*
+   * Measured against the page, not asserted — D-157. Six lessons is three rows, and on the
+   * smallest phones three rows of two-blurb-line cards ran through the status line: the sweep
+   * failed it before anyone saw it. The card wants two blurb lines (every `teaches` sentence is
+   * under 60 characters, two compact lines exactly); where the page cannot pay for two, the
+   * card shrinks and the blurb gives a line rather than the grid giving the footer.
+   */
   const top = 210
+  const rowsWanted = Math.ceil(LESSONS.length / cols)
+  const floorY = LOGICAL_HEIGHT - MARGIN - 60
+  const fitH = Math.floor((floorY - top - BENCH_GAP * (rowsWanted - 1)) / rowsWanted)
+  const wantH = Math.max(150, tagSize + titleSize + blurbSize * 2.4 + 70)
+  const cardH = Math.min(wantH, fitH)
+  const blurbLines = Math.max(
+    1,
+    Math.min(2, Math.floor((cardH - tagSize - titleSize - 70) / (blurbSize + 6))),
+  )
   const nextIdx = LESSONS.findIndex((l) => !progress.data.tutorial.includes(l.id))
   LESSONS.forEach((lesson, i) => {
     const rect: Rect = {
@@ -1678,12 +1696,16 @@ export function drawResults(c: ShellContext): void {
   const count = next ? 3 : 2
   const rowW = bw * count + gap * (count - 1)
   let bx2 = LOGICAL_WIDTH / 2 - rowW / 2
-  const by = LOGICAL_HEIGHT - MARGIN - 130
+  // Declared at the height `fitBox` would grow it to anyway, and moved up by the growth — so the
+  // caption above the row is spaced from the buttons' real top edge, not the pre-growth one it
+  // was 1px from on the smallest phones (D-156).
+  const rowBtnH = Math.max(52, minControlH(vp, typeFor(vp, TYPE.body)))
+  const by = LOGICAL_HEIGHT - MARGIN - 130 - (rowBtnH - 52)
 
-  if (button(vp, p, ui, { x: bx2, y: by, w: bw, h: 52 }, 'Bench')) actions.goto('bench')
+  if (button(vp, p, ui, { x: bx2, y: by, w: bw, h: rowBtnH }, 'Bench')) actions.goto('bench')
   bx2 += bw + gap
   if (
-    button(vp, p, ui, { x: bx2, y: by, w: bw, h: 52 }, 'Again', {
+    button(vp, p, ui, { x: bx2, y: by, w: bw, h: rowBtnH }, 'Again', {
       primary: !next,
     })
   ) {
@@ -1692,7 +1714,7 @@ export function drawResults(c: ShellContext): void {
   if (next) {
     bx2 += bw + gap
     if (
-      button(vp, p, ui, { x: bx2, y: by, w: bw, h: 52 }, 'Next lock', {
+      button(vp, p, ui, { x: bx2, y: by, w: bw, h: rowBtnH }, 'Next lock', {
         primary: true,
       })
     ) {
@@ -1716,7 +1738,17 @@ export function drawSettings(c: ShellContext): void {
   const { ctx } = vp
   const s = progress.data.settings
   screenFrame(c, 'Settings', c.status ?? 'changes save immediately')
-  navBar(c, [['Menu', () => actions.goto('menu')]])
+  // The way back to a paused attempt, when there is one to go back to (D-157). The pause panel
+  // links here; without this, the session survived the trip and no button led back to it.
+  navBar(
+    c,
+    c.pickActive
+      ? [
+          ['Back to the lock', () => actions.goto('pause')],
+          ['Menu', () => actions.goto('menu')],
+        ]
+      : [['Menu', () => actions.goto('menu')]],
+  )
 
   /**
    * Two columns on a phone, and every row given room for a thumb — DECISIONS D-131.
@@ -1736,6 +1768,14 @@ export function drawSettings(c: ShellContext): void {
   const col2 = left + 880
   /** Row heights that a fingertip can land on, and the gap between one row and the next. */
   const ctlH = compact ? 64 : 40
+  /**
+   * What a segmented control will actually be, once `fitBox` has had its say — declared, so the
+   * rows below can be spaced from the real bottom edge. Declaring 64 and letting `fitBox` grow it
+   * to 84 about its centre put the control's true edge ten pixels below where every `y +=` in
+   * this function thought it was, which is how the next row's label ended up 4px from it on the
+   * smallest phones (D-156).
+   */
+  const segH = Math.max(ctlH, minControlH(vp, typeFor(vp, TYPE.body)))
   const rowGap = compact ? 100 : 62
   let y = 150
 
@@ -1751,9 +1791,11 @@ export function drawSettings(c: ShellContext): void {
     // Four cells holding TRAINING/EASY/MEDIUM/HARD. 580 gives each 145, and TRAINING at the
     // compact face is 208 — so `segmented` shrank it to seven CSS px. Sized from the longest
     // word instead, and it still clears the switch column at left + 880 (D-132).
+    // 18 under the label on a phone, not 10: the compact face's descenders reached within 5px
+    // of the control's top edge, under the crowding rule's six (D-156).
     {
       x: left,
-      y: y + 10,
+      y: y + (compact ? 18 : 10),
       w: compact
         ? Math.min(
             860,
@@ -1764,7 +1806,7 @@ export function drawSettings(c: ShellContext): void {
             ) * ASSIST_MODES.length,
           )
         : w + 160,
-      h: ctlH,
+      h: segH,
     },
     ASSIST_MODES,
     ASSIST_MODES.indexOf(s.assist),
@@ -1780,8 +1822,10 @@ export function drawSettings(c: ShellContext): void {
   // underneath (D-103).
   // The blurb goes on a phone: it is two lines of prose across 1100px, and the right-hand 880 of
   // that is now the switch column. The four mode names are the choice; the prose explains it.
+  // 76, not 70: at 70 the blurb's ascenders came within 3px of the control's bottom edge, which
+  // is a graze, not a gap — the crowding rule (D-156) asks for six.
   if (!compact)
-    paragraph(ctx, ASSIST_BLURB[s.assist], left, y + 70, {
+    paragraph(ctx, ASSIST_BLURB[s.assist], left, y + 76, {
       font: font(typeFor(vp, TYPE.body)),
       color: p.ink,
       maxWidth: 1100,
@@ -1800,9 +1844,10 @@ export function drawSettings(c: ShellContext): void {
       y + 36,
       { font: font(typeFor(vp, TYPE.body)), color: readableAccents(p).amber },
     )
-  // 116, not 108: Training and Hard both run the blurb to two lines, which ended 12px above the
-  // next label's baseline — not a gap at 15px, and one word away from touching (D-099).
-  y += compact ? ctlH + 60 : 116
+  // 122, not 108: Training and Hard both run the blurb to two lines, which ended 12px above the
+  // next label's baseline — not a gap at 15px, and one word away from touching (D-099). The last
+  // six arrived with the blurb itself moving down six for the crowding rule (D-156).
+  y += compact ? 18 + segH + 42 : 122
 
   label(ctx, 'which hand holds the pick', left, y, {
     font: font(typeFor(vp, TYPE.dimension)),
@@ -1813,7 +1858,8 @@ export function drawSettings(c: ShellContext): void {
     vp,
     p,
     ui,
-    { x: left, y: y + 10, w: compact ? 460 : 320, h: ctlH },
+    // Same 18-on-a-phone offset as the assist row: the label's descenders need the air (D-156).
+    { x: left, y: y + (compact ? 18 : 10), w: compact ? 460 : 320, h: segH },
     ['left', 'right'],
     s.handedness === 'right' ? 1 : 0,
   )
@@ -1825,7 +1871,7 @@ export function drawSettings(c: ShellContext): void {
       font: font(typeFor(vp, TYPE.dimension)),
       color: p.inkLight,
     })
-  y += compact ? ctlH + 60 : 84
+  y += compact ? 18 + segH + 42 : 84
 
   const sliderH = compact ? 62 : 44
   /*
@@ -1994,9 +2040,8 @@ export function drawPause(c: ShellContext): void {
 
 // ── Trophies ────────────────────────────────────────────────────────────────────────────
 
-/** `ART_DIRECTION.md §7`: a 5x8 grid of plates. Forty achievements, forty plates. */
-const TROPHY_COLS = 5
-const TROPHY_ROWS = 8
+// `ART_DIRECTION.md §7` asked for a 5x8 wall of plates; the wall went with D-157 — every size
+// derives its grid from `trophyGrid` and pages, the way the codes roster does.
 const TROPHY_COMPACT_COLS = 2
 const TROPHY_COMPACT_ROWS = 5
 
@@ -2026,9 +2071,16 @@ export function trophyGrid(vp: Viewport): {
   gapX: number
   gapY: number
 } {
-  const cols = TROPHY_COMPACT_COLS
+  /**
+   * The desktop case pages too now — D-157. It was the one grid left in the game drawn as a
+   * wall: thirty-four 356x92 plates in five columns, and the report on it was *"let's make
+   * trophies also paginated and not so tight."* Three columns of twelve to a page reads like
+   * the bench; the compact grid keeps its own shape (D-129).
+   */
+  const compact = isCompact(vp)
+  const cols = compact ? TROPHY_COMPACT_COLS : 3
   const gapX = 20
-  const gapY = 14
+  const gapY = compact ? 14 : 18
   const size = typeFor(vp, TYPE.body)
   const pagerH = Math.max(40, minControlH(vp, size))
   const pagerY = MARGIN + 24 + boxForCaption(vp, 'Menu', size, { w: 150, h: 40 }).h + 16
@@ -2038,16 +2090,18 @@ export function trophyGrid(vp: Viewport): {
   // What a plate needs: a name, then up to two lines of condition, then air.
   const need = size + typeFor(vp, TYPE.dimension) * 2.4 + 30
   const available = reportLink(vp).y - 16 - top
-  const rows = Math.max(
-    1,
-    Math.min(TROPHY_COMPACT_ROWS, Math.floor((available + gapY) / (need + gapY))),
+  const maxRows = compact ? TROPHY_COMPACT_ROWS : 5
+  const rows = Math.max(1, Math.min(maxRows, Math.floor((available + gapY) / (need + gapY))))
+  // Tall enough for the content and the air around it, and no taller than looks deliberate —
+  // a 200px plate holding one name and one sentence reads as a mistake, not as spaciousness.
+  const h = Math.min(
+    Math.ceil(need) + 56,
+    Math.max(need, Math.floor((available - gapY * (rows - 1)) / rows)),
   )
-  const h = Math.max(need, Math.floor((available - gapY * (rows - 1)) / rows))
   return { cols, rows, w, h, top, gapX, gapY }
 }
 
 export function trophyPageCount(vp: Viewport): number {
-  if (!isCompact(vp)) return 1
   const g = trophyGrid(vp)
   return Math.max(1, Math.ceil(ACHIEVEMENTS.length / (g.cols * g.rows)))
 }
@@ -2099,8 +2153,8 @@ export function codesRoster(saved: number): {
   pages: number
   total: number
 } {
-  // Mirrors `drawCodes`: the heading at 206, then either the empty line or a row of your designs.
-  const afterDesigns = saved === 0 ? 206 + 18 + 44 : 206 + 18 + CODE_CARD_H + 30
+  // Mirrors `drawCodes`: the heading at 236, then either the empty line or a row of your designs.
+  const afterDesigns = saved === 0 ? 236 + 18 + 44 : 236 + 18 + CODE_CARD_H + 30
   const top = afterDesigns + 18
   const room = LOGICAL_HEIGHT - MARGIN - 40 - top
   const rows = Math.max(1, Math.floor((room + CARD_GAP) / (CODE_CARD_H + CARD_GAP)))
@@ -2146,9 +2200,8 @@ export function drawTrophies(c: ShellContext): void {
   const left = MARGIN + 56
   // Below the nav bar AND below the pager, which is drawn first and would otherwise be painted
   // over by the first row of plates — invisible, and still stealing the taps meant for them (D-132).
-  // On a phone it comes from `trophyGrid`, so the page count cannot disagree with the drawing.
-  const compactTop = isCompact(vp) ? trophyGrid(vp).top : 152
-  const top = compactTop
+  // From `trophyGrid` at every size now, so the page count cannot disagree with the drawing.
+  const top = trophyGrid(vp).top
   /**
    * Two columns and a page turner on a phone — DECISIONS D-129.
    *
@@ -2163,10 +2216,9 @@ export function drawTrophies(c: ShellContext): void {
    * uses. A reference screen you turn is better than one you squint at, and much better than one
    * whose bottom half is drawn past the edge of the phone.
    */
-  const compactCase = isCompact(vp)
-  const g = compactCase ? trophyGrid(vp) : null
-  const cols = g?.cols ?? TROPHY_COLS
-  const rows = g?.rows ?? TROPHY_ROWS
+  const g = trophyGrid(vp)
+  const cols = g.cols
+  const rows = g.rows
   /**
    * The grid is derived from the page's content box, not from a pair of literals — D-132.
    *
@@ -2176,14 +2228,14 @@ export function drawTrophies(c: ShellContext): void {
    * page with that space left unused. Width from the box, and the leftover height spent on the rows
    * that are actually drawn.
    */
-  const gapX = g?.gapX ?? 12
-  const gapY = g?.gapY ?? 10
-  const w = g?.w ?? 356
-  const h = g?.h ?? 92
+  const gapX = g.gapX
+  const gapY = g.gapY
+  const w = g.w
+  const h = g.h
   const perPage = cols * rows
-  const pages = compactCase ? trophyPageCount(vp) : 1
+  const pages = trophyPageCount(vp)
   const page = Math.min(Math.max(0, c.trophyPage ?? 0), pages - 1)
-  const from = compactCase ? page * perPage : 0
+  const from = page * perPage
   const nameSize = typeFor(vp, TYPE.body)
   const condSize = typeFor(vp, TYPE.dimension)
 
@@ -2743,36 +2795,57 @@ export function drawCodes(c: ShellContext): void {
   // The whole group is 620 wide and the frame's inner edge is at `LOGICAL_WIDTH - MARGIN`, so 640
   // leaves the Add button 20px clear of it instead of drawn against it.
   const boxX = LOGICAL_WIDTH - MARGIN - 640
-  label(ctx, 'have a code?', boxX, 104, {
+  /*
+   * The group starts under the nav row, not beside it — D-157. `have a code?` sat at y=104 and
+   * the nav's buttons, grown to their captions since D-132, reach y=103: the label printed
+   * straight under EDITOR. Reported as *"HAVE A CODE? text overlaps with EDITOR."*
+   */
+  label(ctx, 'have a code?', boxX, 126, {
     font: font(typeFor(vp, TYPE.dimension)),
     size: typeFor(vp, TYPE.dimension),
-    color: p.inkLight,
+    // Full ink: at this position the label sits across a grid line, and `inkLight` on `rule`
+    // is 3.92:1 against AA's 4.5 — the ground D-148 measured.
+    color: p.ink,
   })
-  const boxRect: Rect = { x: boxX, y: 114, w: 360, h: 44 }
+  const boxRect: Rect = { x: boxX, y: 140, w: 360, h: 44 }
   const boxState = ui.widget(boxRect)
   cardFrame(vp, p, boxRect, boxState, false)
-  label(
-    ctx,
-    entry === ''
-      ? c.codeFocus
-        ? '_'
-        : 'type or paste a code'
-      : `${entry}${c.codeFocus ? '_' : ''}`,
-    boxRect.x + 12,
-    boxRect.y + 29,
-    {
-      font: font(typeFor(vp, TYPE.heading)),
-      size: typeFor(vp, TYPE.heading),
+  /*
+   * Fitted to the field — D-157. The placeholder at the heading face is 363px of tracked caps in
+   * a 360px box, so its tail hung out through the border; a long typed code did the same. The
+   * face shrinks until the string fits, and a string no face can hold keeps its **tail**, because
+   * the tail is where the caret is.
+   */
+  {
+    const shown =
+      entry === ''
+        ? c.codeFocus
+          ? '_'
+          : 'type or paste a code'
+        : `${entry}${c.codeFocus ? '_' : ''}`
+    const room = boxRect.w - 24
+    let fieldSize = typeFor(vp, TYPE.heading)
+    let visible = shown
+    ctx.save()
+    while (fieldSize > 14 && captionWidth(vp, visible, fieldSize) > room) fieldSize -= 1
+    while (visible.length > 4 && captionWidth(vp, `…${visible.slice(1)}`, fieldSize) > room) {
+      visible = visible.slice(1)
+    }
+    if (visible !== shown) visible = `…${visible.slice(1)}`
+    ctx.restore()
+    label(ctx, visible, boxRect.x + 12, boxRect.y + 22 + fieldSize * 0.36, {
+      font: font(fieldSize),
+      size: fieldSize,
       // Same as the compact field: a placeholder is de-emphasised, not invisible (D-135).
       color: entry === '' && !c.codeFocus ? p.inkLight : c.codeFocus ? readable.amber : p.ink,
-    },
-  )
+    })
+  }
   if (boxState.activated) actions.codeFocus(!c.codeFocus)
 
   const decoded = entry.trim() === '' ? null : decodeLock(entry, progress.data.customLocks.length)
-  if (button(vp, p, ui, { x: boxX + 372, y: 114, w: 108, h: 44 }, 'Paste')) actions.codePaste()
+  if (button(vp, p, ui, { x: boxX + 372, y: 140, w: 108, h: 44 }, 'Paste')) actions.codePaste()
   if (
-    button(vp, p, ui, { x: boxX + 490, y: 114, w: 130, h: 44 }, 'Add', {
+    button(vp, p, ui, { x: boxX + 490, y: 140, w: 130, h: 44 }, 'Add', {
       primary: true,
       enabled: decoded !== null && decoded.problem === null,
     })
@@ -2781,7 +2854,7 @@ export function drawCodes(c: ShellContext): void {
   }
   if (
     entry !== '' &&
-    button(vp, p, ui, { x: boxX + 372, y: 166, w: 108, h: 26 }, 'clear', {
+    button(vp, p, ui, { x: boxX + 372, y: 192, w: 108, h: 26 }, 'clear', {
       size: TYPE.dimension,
     })
   ) {
@@ -2795,8 +2868,8 @@ export function drawCodes(c: ShellContext): void {
         ? decoded.problem
         : `${decoded.def.bitting.length} chambers · ready to add`,
     boxX,
-    // Below the `clear` button, not level with it: at 184 the sentence ran underneath it.
-    204,
+    // Below the `clear` button, not level with it: level, the sentence ran underneath it.
+    232,
     {
       font: font(typeFor(vp, TYPE.dimension)),
       color:
@@ -2817,7 +2890,9 @@ export function drawCodes(c: ShellContext): void {
    * printed *through* the status line, which the overflow warning then dutifully reported, on top
    * of the status line, in red.
    */
-  let y = 206
+  // 236, not 206 — the have-a-code group moved down from under the nav row (D-157), and a third
+  // design card's top corner was already within a graze of the group's own hint line.
+  let y = 236
   // Same gate as the bench: the first lesson unlocks the game, and this page is not a way past it.
   const taught = progress.data.tutorial.length > 0
   const custom = progress.data.customLocks
@@ -3236,7 +3311,11 @@ export function drawEditor(c: ShellContext): void {
 
   // ── Per-chamber rows ──────────────────────────────────────────────────────────────────
   // Below the header, wherever it ended — the header is one row on a full page and two on a phone.
-  const top = Math.max(262, row2Y + headRowH + 30)
+  // `+ 38`, not `+ 30` — and 50 at the compact face: the column headings live in this band, and
+  // at 30 their ink could not clear both the header row above and the first `-` button below by
+  // the crowding rule's six (D-156). The band has to hold the heading's whole ink height plus a
+  // gap each side, and the compact face is half again as tall.
+  const top = Math.max(262, row2Y + headRowH + (editorCompact2 ? 56 : 38))
   /**
    * On a phone the rows take whatever height the draft leaves spare — DECISIONS D-131.
    *
@@ -3302,12 +3381,16 @@ export function drawEditor(c: ShellContext): void {
         spring: 600,
         springW: 160,
       }
-  label(ctx, '#', left + 8, top - 8, dim)
+  // `top - 12`, not `- 8` (and -18 at the compact face): on a 1280 laptop the scaled face's
+  // descenders came within 5px of the first row's `-` button, and the crowding rule (D-156)
+  // asks for six. The compact face is taller and needs the deeper lift the wider band pays for.
+  const headBase = top - (editorCompact ? 22 : 12)
+  label(ctx, '#', left + 8, headBase, dim)
   // The unit moves into the heading on a phone: `3.40 mm` is 160px of type at the compact face and
   // the gap between the two nudges is 120, and a unit repeated down every row is the part to cut.
-  label(ctx, editorCompact ? 'key pin mm' : 'key pin', left + COL.minus, top - 8, dim)
-  label(ctx, 'driver', left + COL.driver, top - 8, dim)
-  label(ctx, 'spring', left + COL.spring, top - 8, dim)
+  label(ctx, editorCompact ? 'key pin mm' : 'key pin', left + COL.minus, headBase, dim)
+  label(ctx, 'driver', left + COL.driver, headBase, dim)
+  label(ctx, 'spring', left + COL.spring, headBase, dim)
   if (!editorCompact) {
     /**
      * Both headings are wider than the numbers under them, so they are placed by **measurement**
@@ -3322,8 +3405,8 @@ export function drawEditor(c: ShellContext): void {
     const falseW = Math.ceil(captionWidth(vp, 'false sets', dim.size))
     const setsW = Math.ceil(captionWidth(vp, 'sets at', dim.size))
     const falseX = Math.min(left + 890, tableRight - 24 - falseW)
-    label(ctx, 'sets at', Math.min(left + 800, falseX - 20 - setsW), top - 8, dim)
-    label(ctx, 'false sets', falseX, top - 8, dim)
+    label(ctx, 'sets at', Math.min(left + 800, falseX - 20 - setsW), headBase, dim)
+    label(ctx, 'false sets', falseX, headBase, dim)
   }
 
   for (let i = 0; i < draft.chambers.length; i += 1) {

@@ -113,6 +113,25 @@ export const LESSON_OVERSET_LOCK: LockDef = {
 }
 
 /**
+ * The wrench-pressure lock: three honest pins, nothing to fight — because the subject is the
+ * other hand. Every security pin in the game is beaten by riding the pressure, and the course
+ * taught that only in asides ("press 2 or 3") until D-157 gave the skill its own lesson.
+ */
+export const LESSON_PRESSURE_LOCK: LockDef = {
+  id: 905,
+  slug: 'lesson-wrench-pressure',
+  name: 'Lesson 4 — Wrench Pressure',
+  tier: 1,
+  family: 'pin-tumbler',
+  bitting: [3.3, 2.9, 3.1],
+  pins: ['standard', 'standard', 'standard'],
+  toleranceQuality: 1.3,
+  keyway: 'standard',
+  par: 90,
+  note: 'Plain pins, on purpose. The lesson is in your other hand.',
+}
+
+/**
  * The spool lock: three pins, one spool, dead centre.
  *
  * A single spool in the middle so the false set cannot be confused with anything else, and a
@@ -121,7 +140,7 @@ export const LESSON_OVERSET_LOCK: LockDef = {
 export const LESSON_SPOOL_LOCK: LockDef = {
   id: 903,
   slug: 'lesson-the-spool',
-  name: 'Lesson 4 — The Spool',
+  name: 'Lesson 5 — The Spool',
   tier: 1,
   family: 'pin-tumbler',
   bitting: [3.2, 3.0, 2.8],
@@ -132,11 +151,32 @@ export const LESSON_SPOOL_LOCK: LockDef = {
   note: 'One spool, in the middle. Everything else is out of the way.',
 }
 
+/**
+ * The serrated lock: one serrated pin between two plain ones — the same shape as the spool
+ * lesson, because it teaches the same way: one liar, nothing else to confuse it with. Exists
+ * because the grind (D-157) made the profile worth a lesson of its own.
+ */
+export const LESSON_SERRATED_LOCK: LockDef = {
+  id: 906,
+  slug: 'lesson-the-serrated',
+  name: 'Lesson 6 — The Serrated Pin',
+  tier: 1,
+  family: 'pin-tumbler',
+  bitting: [3.1, 2.9, 3.0],
+  pins: ['standard', 'serrated', 'standard'],
+  toleranceQuality: 1.2,
+  keyway: 'standard',
+  par: 150,
+  note: 'One serrated pin, in the middle. Count the lies.',
+}
+
 export const TUTORIAL_LOCKS: readonly LockDef[] = [
   LESSON_TURN_LOCK,
   LESSON_TENSION_LOCK,
   LESSON_OVERSET_LOCK,
+  LESSON_PRESSURE_LOCK,
   LESSON_SPOOL_LOCK,
+  LESSON_SERRATED_LOCK,
 ]
 
 // ── Predicates ──────────────────────────────────────────────────────────────────────────
@@ -159,7 +199,7 @@ export const LESSONS: readonly Lesson[] = [
      */
     id: 'lesson-rotate',
     title: 'The turn',
-    teaches: 'Why a lock opens at all: the plug must rotate, and one pin is all that stops it.',
+    teaches: 'Why a lock opens: the plug turns, and one pin stops it.',
     lock: LESSON_TURN_LOCK,
     steps: [
       {
@@ -193,7 +233,7 @@ export const LESSONS: readonly Lesson[] = [
   {
     id: 'lesson-1',
     title: 'Tension and lift',
-    teaches: 'Apply tension, find the pin the lock is leaning on, lift it until it clicks.',
+    teaches: 'Tension on, find the binding pin, lift until it clicks.',
     lock: LESSON_TENSION_LOCK,
     steps: [
       {
@@ -258,7 +298,7 @@ export const LESSONS: readonly Lesson[] = [
   {
     id: 'lesson-2',
     title: 'Overset and reset',
-    teaches: 'Lifting too far jams a pin. Letting the tension go is how you start again.',
+    teaches: 'Lifting too far jams the pin; dropping tension starts over.',
     lock: LESSON_OVERSET_LOCK,
     steps: [
       {
@@ -307,9 +347,51 @@ export const LESSONS: readonly Lesson[] = [
     ],
   },
   {
+    /**
+     * The skill the security-pin lessons lean on, taught before either needs it — D-157.
+     *
+     * The spool lesson's own hint says "press 2 or 3", which was the only place the game ever
+     * said the pressure keys are a *technique* rather than a setting. Plain pins on purpose:
+     * with nothing fighting back, the whole of the player's attention is on what the wrench
+     * hand changes.
+     */
+    id: 'lesson-pressure',
+    title: 'Wrench pressure',
+    teaches: 'How hard to turn: heavy holds pins, light frees them.',
+    lock: LESSON_PRESSURE_LOCK,
+    steps: [
+      {
+        id: 'grip',
+        line: 'The wrench has ten pressures — keys 1 to 0. Hold Q at 5 and set a pin.',
+        done: anySet,
+        hint: 'Middle pressure is the all-rounder: firm enough to hold, light enough to lift.',
+        hintAfter: 10,
+      },
+      {
+        id: 'heavy',
+        line: 'Now lean on it: press 8. Feel the binding pin pinch harder under the same lift.',
+        done: (s) => s.tension >= 0.75,
+        hint: 'The number keys change pressure while you hold Q. Press 8, then lift and compare.',
+        hintAfter: 8,
+      },
+      {
+        id: 'feather',
+        line: 'Ease back to 3. Set pins hold at 3 — and a fighting pin loosens its grip.',
+        done: (s) => anySet(s) && s.tension >= T_MIN_HOLD && s.tension <= 0.42,
+        hint: '1 and 2 drop everything; 3 is the lightest hold. Feathering lives between 3 and 5.',
+        hintAfter: 8,
+      },
+      {
+        id: 'open',
+        line: 'Open it however you like — pressure is a dial you ride, not a setting you pick.',
+        done: (s) => s.opened,
+      },
+    ],
+  },
+  {
     id: 'lesson-3',
     title: 'The spool',
-    teaches: 'A security pin lies to you. Recognising the lie, and pushing through it.',
+    teaches: 'A spool lies. Recognise the false set, push through it.',
     lock: LESSON_SPOOL_LOCK,
     steps: [
       {
@@ -332,6 +414,42 @@ export const LESSONS: readonly Lesson[] = [
       {
         id: 'open',
         line: 'Every real lock past here has pins like that one. Turn it.',
+        done: (s) => s.opened,
+      },
+    ],
+  },
+  {
+    /**
+     * The other liar, now that it fights back — D-157 gave serrations a grind, and a profile
+     * that finally feels like something earns the lesson that says what it is feeling like.
+     */
+    id: 'lesson-serrated',
+    title: 'The serrated pin',
+    teaches: 'Every tooth clicks like a set, and grips the climb.',
+    lock: LESSON_SERRATED_LOCK,
+    steps: [
+      {
+        id: 'start',
+        line: 'The middle pin is serrated. Work the lock and listen for clicks that lie.',
+        done: (s) => s.stats.falseSetsEntered > 0,
+      },
+      {
+        id: 'lie',
+        line: 'That catch is a serration on the plug edge, not the shear line. Keep going.',
+        done: (s) => s.stats.falseSetsEntered >= 2,
+        hint: 'Keep lifting the same pin, gently. Each tooth catches once on the way up.',
+        hintAfter: 10,
+      },
+      {
+        id: 'grind',
+        line: 'Feel it drag — every tooth grips. Ease the wrench and the climb frees up.',
+        done: (s) => s.chambers.some((c) => c.profile.grooveCount >= 3 && c.state === 'SET'),
+        hint: 'Drop to pressure 3 while you lift. The grip scales with how hard you turn.',
+        hintAfter: 10,
+      },
+      {
+        id: 'open',
+        line: 'Four lies, one truth: the real set is the one where the plug moves. Turn it.',
         done: (s) => s.opened,
       },
     ],

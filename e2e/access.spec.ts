@@ -69,7 +69,7 @@ async function openIt(page: Page, tension = 0.45, rounds = 40): Promise<void> {
 
 // ── The tutorial ────────────────────────────────────────────────────────────────────────
 
-test('a new player completes all four lessons and then opens lock 1', async ({ page }) => {
+test('a new player completes all six lessons and then opens lock 1', async ({ page }) => {
   const watcher = await bootGame(page, { frames: 3 })
   await setManual(page, true)
 
@@ -78,7 +78,14 @@ test('a new player completes all four lessons and then opens lock 1', async ({ p
   expect(fresh?.tutorial).toEqual([])
   expect(fresh?.records).toEqual({})
 
-  for (const id of ['lesson-rotate', 'lesson-1', 'lesson-2', 'lesson-3']) {
+  for (const id of [
+    'lesson-rotate',
+    'lesson-1',
+    'lesson-2',
+    'lesson-pressure',
+    'lesson-3',
+    'lesson-serrated',
+  ]) {
     await page.evaluate((l) => globalThis.__shearline?.startLesson(l), id)
     const started = await lessonState(page)
     expect(started?.id, id).toBe(id)

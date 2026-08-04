@@ -44,6 +44,12 @@ const HEADER_H = 64
  * A label at +30, a bar at +44 running to +74, and a caption at +100.
  */
 const FOOTER_H = 124
+/**
+ * Where the footer band begins — exported for the chamber labels, which sit under the plug and
+ * were printing into this band at the compact face (D-157). One definition, so the two cannot
+ * drift apart.
+ */
+export const FOOTER_TOP = LOGICAL_HEIGHT - MARGIN - FOOTER_H
 /** Height of the footer's horizontal bars. Was the literal 16 in six places (D-115). */
 const BAR_H = 30
 /**
@@ -143,6 +149,15 @@ export interface HudOptions {
    * cannot guess. Reported from play as "VERY HARD" to read, which it was. See DECISIONS D-096.
    */
   readonly keys: readonly (readonly [string, string])[]
+  /**
+   * Where the lock assembly starts, so the key legend can stop short of it (D-157).
+   *
+   * The legend lives in the left gutter, and the gutter is not a fixed width: a five-chamber
+   * cylinder starts around x=384 and the legend's widest row reached past 410, so `WRENCH
+   * PRESSURE` printed into the shell on every wide lock. Passed from the real layout rather
+   * than re-derived, because the layout knows about rows and mirroring and a guess does not.
+   */
+  readonly assemblyLeft?: number
   /** What to press to start over once the pick has snapped — differs by input scheme. */
   readonly restartHint: string
   /**
@@ -514,8 +529,12 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
   const clockX = n > 0 ? dotsRight - (n - 1) * dotGap - 44 : dotsRight
   const rank = rankIndexFor(opts.elapsed, opts.par)
   const readable = readableAccents(p)
-  text(ctx, formatClock(opts.elapsed), clockX, MARGIN + HEADER_H / 2 + 12, {
-    font: font(ts(TYPE.clock)),
+  // Capped to the band that holds it: `typeFor` scales the 40px clock to ~70 on a phone, and a
+  // 70px digit in a 64px header band printed out through the border — reported as *"timing goes
+  // out of the border area"* (D-157). The cap only ever binds at the compact scale.
+  const clockSize = Math.min(ts(TYPE.clock), HEADER_H - 14)
+  text(ctx, formatClock(opts.elapsed), clockX, MARGIN + HEADER_H / 2 + clockSize * 0.36, {
+    font: font(clockSize),
     color: p.ink,
     align: 'right',
   })
@@ -1033,7 +1052,7 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
   // The touch controls are drawn on screen and labelled, so on a phone this legend described
   // controls the player was looking at — and did it *on top of them*, straight across the pause
   // pad and the wrench slider, which share the same gutter (D-122).
-  if (!compact) drawKeyLegend(vp, p, opts.keys)
+  if (!compact) drawKeyLegend(vp, p, opts.keys, (opts.assemblyLeft ?? LOGICAL_WIDTH) - 10)
 }
 
 /**
@@ -1058,15 +1077,12 @@ function drawKeyLegend(
   vp: Viewport,
   p: Palette,
   keys: readonly (readonly [string, string])[],
+  /** The legend's rows must end left of this — the lock starts where the gutter stops (D-157). */
+  maxRight: number,
 ): void {
   const { ctx } = vp
   const ts = (size: number): number => typeFor(vp, size)
   const x = MARGIN + 16
-  // The row pitch follows the type, or a scaled legend stacks its own lines on top of each other —
-  // the entries are drawn at `ROW` apart and the glyphs got 1.8x taller (D-132).
-  const ROW = Math.max(34, ts(TYPE.body) + 14)
-  // Below the header, and stopping well short of the rotation gauge in the lower gutter.
-  let ky = MARGIN + HEADER_H + 52
   /**
    * Cap boxes are all the same width — the widest in the set.
    *
@@ -1075,28 +1091,54 @@ function drawKeyLegend(
    * ragged is a list you have to read rather than scan. Measured rather than counted, which is the
    * rule this row has now broken twice (D-102, D-109).
    */
-  ctx.save()
-  ctx.font = font(ts(TYPE.body), 'bold')
-  const capW = keys.reduce((w, [key]) => Math.max(w, ctx.measureText(key).width + 20), 30)
-  ctx.restore()
+  /*
+   * And the whole column is measured against the lock — D-157. The gutter is whatever the current
+   * cylinder leaves of it: five chambers leave 374px and the legend's widest row wanted more, so
+   * `WRENCH PRESSURE` printed into the shell. The face gives way until the widest row fits,
+   * because a smaller legend is still a legend and a legend across the shell is noise on both.
+   */
+  let size = ts(TYPE.body)
+  let capW = 30
+  const widestRow = (s: number): number => {
+    ctx.save()
+    ctx.font = font(s, 'bold')
+    capW = keys.reduce((w, [key]) => Math.max(w, ctx.measureText(key).width + 20), 30)
+    ctx.font = font(s)
+    const labelW = keys.reduce(
+      (w, [, what]) =>
+        Math.max(w, ctx.measureText(what.toUpperCase()).width + s * 0.08 * (what.length - 1)),
+      0,
+    )
+    ctx.restore()
+    return x + capW + 14 + labelW
+  }
+  while (size > 14 && widestRow(size) > maxRight) size -= 1
+  widestRow(size)
+  // The row pitch follows the type, or a scaled legend stacks its own lines on top of each other —
+  // the entries are drawn at `ROW` apart and the glyphs got 1.8x taller (D-132).
+  const ROW = Math.max(34, size + 14)
+  // Below the header, and stopping well short of the rotation gauge in the lower gutter.
+  let ky = MARGIN + HEADER_H + 52
 
+  // The cap box follows the face it holds, or a fitted face sits in a box cut for another one.
+  const capH = Math.max(26, size + 6)
   for (const [key, what] of keys) {
     ctx.save()
     ctx.fillStyle = p.paper
-    ctx.fillRect(x, ky, capW, 26)
+    ctx.fillRect(x, ky, capW, capH)
     ctx.lineWidth = STROKE.standard
     ctx.strokeStyle = p.ink
-    ctx.strokeRect(snapX(vp, x, STROKE.standard), snapY(vp, ky, STROKE.standard), capW, 26)
+    ctx.strokeRect(snapX(vp, x, STROKE.standard), snapY(vp, ky, STROKE.standard), capW, capH)
     ctx.restore()
-    label(ctx, key, x + capW / 2, ky + 18, {
-      font: font(ts(TYPE.body), 'bold'),
-      size: ts(TYPE.body),
+    label(ctx, key, x + capW / 2, ky + capH / 2 + size * 0.36, {
+      font: font(size, 'bold'),
+      size,
       color: p.ink,
       align: 'center',
     })
-    label(ctx, what, x + capW + 14, ky + 18, {
-      font: font(ts(TYPE.body)),
-      size: ts(TYPE.body),
+    label(ctx, what, x + capW + 14, ky + capH / 2 + size * 0.36, {
+      font: font(size),
+      size,
       color: p.ink,
     })
     ky += ROW

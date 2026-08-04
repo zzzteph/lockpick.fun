@@ -26,6 +26,7 @@ export type FindingKind =
   | 'text-over-control'
   | 'low-contrast'
   | 'text-over-lock'
+  | 'crowded-text'
 
 export interface Finding {
   readonly kind: FindingKind
@@ -181,6 +182,55 @@ export function textOverControls(drawn: readonly DrawnText[], rects: readonly Bo
 }
 
 /**
+ * Text must not merely miss a control — it must clear it, by a readable margin.
+ *
+ * Every rule above waits for ink to actually cross something. Nothing asked for **air**: a
+ * caption ending one pixel short of a card's border passed every check while reading exactly like
+ * a collision. Reported from play as *"sometimes text is very near the elements — ensure that for
+ * every text on every page there is a padding."*
+ *
+ * Six logical px, which is about two on the smallest phone — the minimum at which a gap reads as
+ * a gap rather than a graze. A run that intersects the rect is out of scope here: fully inside is
+ * a caption (the control's own padding is `button`'s business), and straddling the edge already
+ * has a rule. Corner-to-corner proximity is ignored — diagonal nearness does not read as touching.
+ *
+ * A **caption is exempt entirely**, against every rect, not only its own. Two controls packed at
+ * the touch floor — the editor's sixteen-row table is built on exactly that arithmetic (D-131) —
+ * put each caption within a hair of the neighbouring control, and that closeness is the *box
+ * packing*, already adjudicated where the pitch was chosen. What this rule is for is free text:
+ * labels, headings and remarks, which always have somewhere else to be.
+ */
+export const MIN_TEXT_GAP = 6
+
+export function crowdedText(drawn: readonly DrawnText[], rects: readonly Box[]): Finding[] {
+  const out: Finding[] = []
+  for (const d of drawn) {
+    const area = Math.max(1, d.w * d.h)
+    const isCaption = rects.some((r) => {
+      const dx = Math.min(d.x + d.w, r.x + r.w) - Math.max(d.x, r.x)
+      const dy = Math.min(d.y + d.h, r.y + r.h) - Math.max(d.y, r.y)
+      return dx > 0 && dy > 0 && (dx * dy) / area > STRADDLE_HIGH
+    })
+    if (isCaption) continue
+    for (const r of rects) {
+      const gx = Math.max(r.x - (d.x + d.w), d.x - (r.x + r.w), 0)
+      const gy = Math.max(r.y - (d.y + d.h), d.y - (r.y + r.h), 0)
+      // Intersecting (both zero) belongs to the caption/straddle rules; diagonal (both positive)
+      // is not a graze. What is left is edge-on proximity, and that is the thing being measured.
+      const gap = gx === 0 && gy === 0 ? Infinity : gx === 0 ? gy : gy === 0 ? gx : Infinity
+      if (gap < MIN_TEXT_GAP) {
+        out.push({
+          kind: 'crowded-text',
+          detail: `"${d.str.slice(0, 30)}" is ${gap.toFixed(1)}px from a ${r.w.toFixed(0)}x${r.h.toFixed(0)} control (needs ${MIN_TEXT_GAP})`,
+          value: MIN_TEXT_GAP - gap,
+        })
+      }
+    }
+  }
+  return out
+}
+
+/**
  * WCAG AA for body text is 4.5:1; large text gets 3:1.
  *
  * "Large" is 24 CSS px, or 18.66 bold. The game's stage scales, so the threshold has to be applied
@@ -263,6 +313,7 @@ export function auditLayout(
     ...offStage(drawn),
     ...smallTargets(rects, scale, true),
     ...textOverControls(drawn, rects),
+    ...crowdedText(drawn, rects),
     ...lowContrast(drawn, scale),
     ...textOverLock(drawn, lock),
   ].sort((a, b) => b.value - a.value)

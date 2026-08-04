@@ -468,20 +468,26 @@ export function drawHelp(c: ShellContext): void {
   screenFrame(c, 'Help', c.status ?? 'what everything on the pick screen means')
 
   // The nav bar lives in `shell.ts` and is not exported; this screen has one destination, drawn in
-  // the same corner and at the same size as everywhere else (D-103).
-  if (
-    button(
-      vp,
-      p,
-      ui,
-      (() => {
-        const box = boxForCaption(vp, 'Menu', typeFor(vp, TYPE.body), { w: 150, h: 40 })
-        return { x: LOGICAL_WIDTH - MARGIN - 28 - box.w, y: MARGIN + 24, ...box }
-      })(),
-      'Menu',
-    )
-  ) {
+  // the same corner and at the same size as everywhere else (D-103) — two, when a paused attempt
+  // is waiting (D-157): help is reachable from the pause panel, and the way in needs a way back.
+  const menuBox = boxForCaption(vp, 'Menu', typeFor(vp, TYPE.body), { w: 150, h: 40 })
+  const menuX = LOGICAL_WIDTH - MARGIN - 28 - menuBox.w
+  if (button(vp, p, ui, { x: menuX, y: MARGIN + 24, ...menuBox }, 'Menu')) {
     actions.goto('menu')
+  }
+  if (c.pickActive) {
+    const backBox = boxForCaption(vp, 'Back to the lock', typeFor(vp, TYPE.body), { w: 150, h: 40 })
+    if (
+      button(
+        vp,
+        p,
+        ui,
+        { x: menuX - 20 - backBox.w, y: MARGIN + 24, ...backBox },
+        'Back to the lock',
+      )
+    ) {
+      actions.goto('pause')
+    }
   }
 
   /**

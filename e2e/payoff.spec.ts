@@ -87,7 +87,9 @@ test('the open sequence runs its beats and lands on the results page', async ({ 
   expect(counting.creditsShown).toBeGreaterThan(0)
   expect(counting.creditsShown).toBeLessThanOrEqual(1)
 
-  await advanceSequence(page, 1.4)
+  // Past the settle even with achievement cards holding the screen (D-157): a first open fires
+  // cards, and each stack holds for CARD_HOLD_SECONDS after the last card lands.
+  await advanceSequence(page, 2.8)
   const done = await openSequence(page)
   expect(done.settled).toBe(true)
   // The reveal runs 0 → 1; `credits` on the hook is the rank index the letter lands on (D-091).
@@ -179,7 +181,7 @@ test('the sequence still reads correctly with reduced motion on', async ({ page 
   const seq = await openSequence(page)
   expect(seq.reducedMotion).toBe(true)
 
-  await advanceSequence(page, 2.6)
+  await advanceSequence(page, 4.2)
   const done = await openSequence(page)
   // The information survives in full: same length, same payout counted out, same cards.
   expect(done.settled).toBe(true)
