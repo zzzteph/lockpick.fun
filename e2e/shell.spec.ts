@@ -244,13 +244,26 @@ test('@screenshot phase-07 bench', async ({ page }) => {
   watcher.assertClean()
 })
 
+test('@screenshot tutorial screen', async ({ page }) => {
+  const watcher = await bootGame(page, { frames: 3 })
+  const fresh = await getSave(page)
+  // One lesson down, so the capture shows every state a card can be in: done, next, waiting.
+  await setSave(page, { ...fresh, tutorial: ['lesson-rotate'] })
+  await goto(page, 'tutorial')
+  await renderOnce(page)
+  await captureStage(page, 'tutorial-screen')
+  watcher.assertClean()
+})
+
 test('@screenshot phase-07 results', async ({ page }) => {
   const watcher = await bootGame(page, { frames: 3 })
   await setManual(page, true)
   await loadLock(page, 3, 11)
   const opened = await openCurrentLock(page)
   expect(opened.opened).toBe(true)
-  await advanceSeconds(page, 2.6)
+  // Past the open sequence's 2.5s settle *and* the rank stamp's 0.45s landing (D-154), so the
+  // record shows the screen at rest rather than a letter mid-flight.
+  await advanceSeconds(page, 3.4)
   await renderOnce(page)
   expect(await screen(page)).toBe('results')
   await captureStage(page, 'phase-07-results')

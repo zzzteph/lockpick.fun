@@ -11,9 +11,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   LESSONS,
-  LESSON_1_LOCK,
-  LESSON_2_LOCK,
-  LESSON_3_LOCK,
+  LESSON_TURN_LOCK,
+  LESSON_TENSION_LOCK,
+  LESSON_OVERSET_LOCK,
+  LESSON_SPOOL_LOCK,
   TUTORIAL_LOCKS,
   currentLine,
   isTutorialLock,
@@ -40,11 +41,19 @@ import { holdFor, pick, tensionOnly } from '../sim/fixtures'
 const CONFIG = makeConfig({ tools: PERFECT_TOOLS, featherEnabled: false })
 
 describe('the teaching locks', () => {
-  it('are three, and every one is a legal lock', () => {
-    expect(TUTORIAL_LOCKS).toHaveLength(3)
+  it('are four, and every one is a legal lock', () => {
+    expect(TUTORIAL_LOCKS).toHaveLength(4)
     for (const def of TUTORIAL_LOCKS) {
       expect(() => validateLockDef(def)).not.toThrow()
     }
+  })
+
+  it('the turn lesson has exactly one pin, so the premise is visible with nothing else moving', () => {
+    expect(LESSON_TURN_LOCK.bitting).toHaveLength(1)
+    expect(LESSON_TURN_LOCK.pins).toEqual(['standard'])
+    // As forgiving as the tension lock: a first-ever attempt must not be able to overset.
+    const loosest = Math.max(...ALL_LOCKS.map((d) => d.toleranceQuality))
+    expect(LESSON_TURN_LOCK.toleranceQuality).toBeGreaterThan(loosest)
   })
 
   it('are kept out of the roster entirely', () => {
@@ -66,20 +75,20 @@ describe('the teaching locks', () => {
     }
   })
 
-  it('lesson 1 is more forgiving than anything on the bench', () => {
+  it('the tension lesson is more forgiving than anything on the bench', () => {
     const loosest = Math.max(...ALL_LOCKS.map((d) => d.toleranceQuality))
-    expect(LESSON_1_LOCK.toleranceQuality).toBeGreaterThan(loosest)
+    expect(LESSON_TENSION_LOCK.toleranceQuality).toBeGreaterThan(loosest)
     // Its window is wide enough that simply holding still anywhere sensible works.
-    const w = CAPTURE_WINDOW * LESSON_1_LOCK.toleranceQuality
+    const w = CAPTURE_WINDOW * LESSON_TENSION_LOCK.toleranceQuality
     expect(w).toBeGreaterThan(0.9)
   })
 
-  it('lesson 2 is tight enough to genuinely jam, which is the lesson', () => {
-    const w = CAPTURE_WINDOW * LESSON_2_LOCK.toleranceQuality
+  it('the overset lesson is tight enough to genuinely jam, which is the lesson', () => {
+    const w = CAPTURE_WINDOW * LESSON_OVERSET_LOCK.toleranceQuality
     // Narrower than the pick crosses inside `CAPTURE_TIME`, so overshooting really oversets.
     expect(w).toBeLessThan(0.4)
 
-    const s = createSimState(LESSON_2_LOCK, 5, CONFIG)
+    const s = createSimState(LESSON_OVERSET_LOCK, 5, CONFIG)
     // Light tension and a fast lift: exactly what a player does having just learned that
     // lifting works. The pick crosses the window in about two ticks, well under `CAPTURE_TIME`.
     holdFor(s, tensionOnly(0.15), 0.3)
@@ -91,10 +100,10 @@ describe('the teaching locks', () => {
     expect(s.stats.oversets).toBeGreaterThan(0)
   })
 
-  it('lesson 3 has exactly one spool, in the middle, and nothing else to confuse it', () => {
-    expect(LESSON_3_LOCK.pins.filter((p) => p === 'spool')).toHaveLength(1)
-    expect(LESSON_3_LOCK.pins[1]).toBe('spool')
-    expect(LESSON_3_LOCK.pins.filter((p) => p !== 'standard' && p !== 'spool')).toHaveLength(0)
+  it('the spool lesson has exactly one spool, in the middle, and nothing else to confuse it', () => {
+    expect(LESSON_SPOOL_LOCK.pins.filter((p) => p === 'spool')).toHaveLength(1)
+    expect(LESSON_SPOOL_LOCK.pins[1]).toBe('spool')
+    expect(LESSON_SPOOL_LOCK.pins.filter((p) => p !== 'standard' && p !== 'spool')).toHaveLength(0)
   })
 
   it('every teaching lock opens, across 50 seeds', () => {
@@ -106,8 +115,10 @@ describe('the teaching locks', () => {
 })
 
 describe('the lessons', () => {
-  it('are the three from GAME_DESIGN.md §10, in order', () => {
-    expect(LESSONS.map((l) => l.id)).toEqual(['lesson-1', 'lesson-2', 'lesson-3'])
+  it('are the course in order: the turn, then the three from GAME_DESIGN.md §10', () => {
+    // `lesson-rotate` leads because rotation is the premise the others assume; the original
+    // three keep their ids because the save file records ids.
+    expect(LESSONS.map((l) => l.id)).toEqual(['lesson-rotate', 'lesson-1', 'lesson-2', 'lesson-3'])
     expect(LESSONS.map((l) => l.lock.slug)).toEqual(TUTORIAL_LOCKS.map((d) => d.slug))
   })
 

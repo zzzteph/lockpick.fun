@@ -230,16 +230,15 @@ describe('nothing on a phone becomes unreachable', () => {
     expect(codesPageCount(compact, 8)).toBe(Math.ceil((shareable + 8) / CODES_COMPACT_PER_PAGE))
   })
 
-  it('every lesson stays reachable until all of them are done', () => {
-    // `startLesson` is called from exactly two places: the menu's shortcut, which always goes to
-    // the first lesson, and the bench's lesson cards. So while any lesson is unfinished, the cards
-    // are the only route to it and must be drawn.
+  it('every lesson is distinct, so the tutorial screen can never draw one over another', () => {
+    // The reachability worry this test used to carry (D-136) is gone by construction: the
+    // Tutorial screen draws every lesson unconditionally, done or not (D-152). What remains
+    // load-bearing is that ids are unique — the save records ids, and `lessonById` is how the
+    // cards start them.
     expect(LESSONS.length).toBeGreaterThan(1)
-    const afterFirst = [LESSONS[0]!.id]
-    const allDone = LESSONS.map((l) => l.id)
-    const stripShows = (done: string[]): boolean => !LESSONS.every((l) => done.includes(l.id))
-    expect(stripShows([]), 'before any lesson').toBe(true)
-    expect(stripShows(afterFirst), 'after lesson one — two and three are still unreached').toBe(true)
-    expect(stripShows(allDone), 'once every lesson is done').toBe(false)
+    const ids = LESSONS.map((l) => l.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    const slugs = LESSONS.map((l) => l.lock.slug)
+    expect(new Set(slugs).size).toBe(slugs.length)
   })
 })

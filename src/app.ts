@@ -169,6 +169,7 @@ import {
   drawResults,
   drawSettings,
   drawTrophies,
+  drawTutorial,
   codesPageCount,
   codesRoster,
   trophyPageCount,
@@ -231,6 +232,13 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   let scriptedInput: SimInput | null = null
   let outcome: AttemptOutcome | undefined
   let result: AttemptResult | null | undefined
+  /**
+   * Seconds since the results screen was entered, for the rank stamp's landing (D-154).
+   *
+   * Advanced by the same `seconds` every other clock in the game runs on, so the animation is
+   * deterministic under `advanceSeconds` and settles identically in a test and in play.
+   */
+  let resultsAge = 0
   /**
    * Today, as an ISO date, for the play-day tally (D-090).
    *
@@ -346,6 +354,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   function goto(next: ScreenName): void {
     previousScreen = screen
     screen = next
+    if (next === 'results') resultsAge = 0
     ui.reset()
     applyCursor(next)
     // Immediately, not on the next frame: a finger that lands the instant the lock appears must
@@ -436,10 +445,12 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     },
     abandon: () => {
       // Abandoning a lesson abandons the lesson, not just the attempt — otherwise the line at
-      // the bottom of the screen would follow the player onto their next lock.
+      // the bottom of the screen would follow the player onto their next lock. It also goes
+      // back to where the lesson was started, which is not where a lock attempt goes.
+      const wasLesson = lesson !== null
       lesson = null
       session = null
-      goto('bench')
+      goto(wasLesson ? 'tutorial' : 'bench')
     },
     startLesson: (id: string) => {
       startLesson(id)
@@ -1023,11 +1034,13 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         pointer.y,
       )
     if (overBenchLink && clicked) {
+      const wasLesson = lesson !== null
       lesson = null
       session = null
-      goto('bench')
+      goto(wasLesson ? 'tutorial' : 'bench')
     }
 
+    if (screen === 'results') resultsAge += seconds
     tickKeyboard(seconds)
     const inp = currentInput()
     if (screen === 'pick' && session) {
@@ -1050,8 +1063,9 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         for (let i = 0; i < ticks; i += 1) audio.creditTick(i)
         if (canSkip(sequence) && wantsSkip(keys, clicked)) skipOpenSequence(sequence)
       }
-      // A lesson has no results page to land on — it goes back to the bench.
-      if (view.opened && isSettled(sequence)) goto(outcome ? 'results' : 'bench')
+      // A lesson has no results page to land on — it goes back to the tutorial, where the
+      // card it just finished says `done` and the next one is marked `next` (D-152).
+      if (view.opened && isSettled(sequence)) goto(outcome ? 'results' : 'tutorial')
     } else {
       updateFx(fx, seconds)
     }
@@ -1106,6 +1120,8 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       armedDelete,
       helpPage,
       hapticsSupported: haptics.isSupported,
+      // With reduced motion the stamp is simply already down — a large age reads as settled.
+      resultsAge: fx.reducedMotion ? 9 : resultsAge,
       ...(benchTier !== undefined ? { benchTier } : {}),
     }
 
@@ -1115,6 +1131,9 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         break
       case 'bench':
         drawBench(shell)
+        break
+      case 'tutorial':
+        drawTutorial(shell)
         break
       case 'results':
         drawResults(shell)

@@ -19,7 +19,7 @@ import { LOGICAL_HEIGHT } from '../../src/render/viewport'
 
 /** Mirrors `drawCodes`: the page's own floor, below which the status line lives. */
 const FLOOR = LOGICAL_HEIGHT - 24 - 40
-const CARD_H = 150
+const CARD_H = 200
 const GAP = 12
 
 describe('the roster is paged to what the page has left', () => {
@@ -33,15 +33,18 @@ describe('the roster is paged to what the page has left', () => {
     })
   }
 
-  it('is still one page of twenty for a player with no designs', () => {
-    // The fix must not page a screen that was fitting perfectly well.
-    const rs = codesRoster(0)
-    expect(rs.pages).toBe(1)
-    expect(rs.perPage).toBeGreaterThanOrEqual(rs.total)
+  it('uses the room it has: three full rows with no designs, and never fewer than two', () => {
+    // D-155 traded the one-page-of-twenty density for bench-sized cards, so the roster pages by
+    // design now. What must hold instead is that a page is never a sliver: at least two rows
+    // whatever the designs section costs, and all three the room allows when it costs least.
+    expect(codesRoster(0).rows).toBe(3)
+    for (const saved of [0, 1, 5, 40]) {
+      expect(codesRoster(saved).rows, `${saved} designs`).toBeGreaterThanOrEqual(2)
+    }
   })
 
-  it('pages as soon as your own row pushes it down', () => {
-    expect(codesRoster(1).pages).toBeGreaterThan(1)
+  it('pages more once your own row pushes it down', () => {
+    expect(codesRoster(1).pages).toBeGreaterThan(codesRoster(0).pages)
     expect(codesRoster(1).top).toBeGreaterThan(codesRoster(0).top)
   })
 

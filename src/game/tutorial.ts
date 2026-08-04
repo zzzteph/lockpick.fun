@@ -1,5 +1,5 @@
 /**
- * The three lessons — `GAME_DESIGN.md §10`.
+ * The lessons — `GAME_DESIGN.md §10`, extended past the original three.
  *
  * The design rule there is unusually strict and worth restating, because it decides the whole
  * shape of this file: *"Teach through play with a single line of text at a time. No walls of
@@ -46,17 +46,40 @@ export interface Lesson {
 // ── The teaching locks ──────────────────────────────────────────────────────────────────
 
 /**
- * Lesson 1's lock: two standard pins, the most forgiving tolerance in the game.
+ * The first lock: **one pin**, the loosest tolerance in the game.
+ *
+ * The course used to open on the two-pin tension-and-lift lock, which teaches the hands before
+ * it has taught the head: a player with zero knowledge does not yet know *what opening a lock
+ * even is*. This lock exists to say the one sentence everything else depends on — the plug must
+ * rotate, and a pin crossing the shear line is all that stops it. One pin, so the whole idea is
+ * visible at once with nothing else moving.
+ */
+export const LESSON_TURN_LOCK: LockDef = {
+  id: 904,
+  slug: 'lesson-the-turn',
+  name: 'Lesson 1 — The Turn',
+  tier: 1,
+  family: 'pin-tumbler',
+  bitting: [3.4],
+  pins: ['standard'],
+  toleranceQuality: 1.5,
+  keyway: 'standard',
+  par: 45,
+  note: 'One pin, in the open. The whole idea of lockpicking, visible at once.',
+}
+
+/**
+ * The tension-and-lift lock: two standard pins, the most forgiving tolerance in the game.
  *
  * `toleranceQuality` 1.5 is looser than anything on the bench (the practice cutaway is 1.4),
  * because a first attempt should not be able to overset. Its window is 0.93mm, which the pick
  * crosses in about 90ms — twice `CAPTURE_TIME`, so simply holding still anywhere sensible
  * works.
  */
-export const LESSON_1_LOCK: LockDef = {
+export const LESSON_TENSION_LOCK: LockDef = {
   id: 901,
   slug: 'lesson-tension-and-lift',
-  name: 'Lesson 1 — Tension and Lift',
+  name: 'Lesson 2 — Tension and Lift',
   tier: 1,
   family: 'pin-tumbler',
   bitting: [3.2, 4.0],
@@ -68,17 +91,17 @@ export const LESSON_1_LOCK: LockDef = {
 }
 
 /**
- * Lesson 2's lock: three pins and a window tight enough that an overset is likely.
+ * The overset lock: three pins and a window tight enough that an overset is likely.
  *
  * `GAME_DESIGN.md §10` asks this lesson to *deliberately induce* an overset — "failure as
  * instruction" — so the lock is built to punish the natural instinct of a player who has just
  * learned that lifting works, which is to lift further. 0.55 gives a 0.34mm window; the pick
  * crosses it in 33ms, less than `CAPTURE_TIME`, so overshooting genuinely jams it.
  */
-export const LESSON_2_LOCK: LockDef = {
+export const LESSON_OVERSET_LOCK: LockDef = {
   id: 902,
   slug: 'lesson-overset-and-reset',
-  name: 'Lesson 2 — Overset and Reset',
+  name: 'Lesson 3 — Overset and Reset',
   tier: 1,
   family: 'pin-tumbler',
   bitting: [3.4, 2.9, 4.1],
@@ -90,15 +113,15 @@ export const LESSON_2_LOCK: LockDef = {
 }
 
 /**
- * Lesson 3's lock: three pins, one spool, dead centre.
+ * The spool lock: three pins, one spool, dead centre.
  *
  * A single spool in the middle so the false set cannot be confused with anything else, and a
  * forgiving tolerance so the *only* difficulty in the lesson is the spool itself.
  */
-export const LESSON_3_LOCK: LockDef = {
+export const LESSON_SPOOL_LOCK: LockDef = {
   id: 903,
   slug: 'lesson-the-spool',
-  name: 'Lesson 3 — The Spool',
+  name: 'Lesson 4 — The Spool',
   tier: 1,
   family: 'pin-tumbler',
   bitting: [3.2, 3.0, 2.8],
@@ -109,7 +132,12 @@ export const LESSON_3_LOCK: LockDef = {
   note: 'One spool, in the middle. Everything else is out of the way.',
 }
 
-export const TUTORIAL_LOCKS: readonly LockDef[] = [LESSON_1_LOCK, LESSON_2_LOCK, LESSON_3_LOCK]
+export const TUTORIAL_LOCKS: readonly LockDef[] = [
+  LESSON_TURN_LOCK,
+  LESSON_TENSION_LOCK,
+  LESSON_OVERSET_LOCK,
+  LESSON_SPOOL_LOCK,
+]
 
 // ── Predicates ──────────────────────────────────────────────────────────────────────────
 
@@ -121,10 +149,52 @@ const allSet = (s: SimState): boolean => s.chambers.every((c) => c.state === 'SE
 
 export const LESSONS: readonly Lesson[] = [
   {
+    /**
+     * The lesson for a player with zero knowledge — asked for as *"more extended tutorial…
+     * so any person with 0 knowledge can lockpick even real locks."*
+     *
+     * Everything the other lessons teach is technique; this one teaches the *premise*. The id
+     * is `lesson-rotate` rather than `lesson-0` because what it teaches is that rotation is
+     * the goal — the save file records ids, so the existing three keep theirs.
+     */
+    id: 'lesson-rotate',
+    title: 'The turn',
+    teaches: 'Why a lock opens at all: the plug must rotate, and one pin is all that stops it.',
+    lock: LESSON_TURN_LOCK,
+    steps: [
+      {
+        id: 'goal',
+        line: 'The goal is rotation: a lock opens when its plug turns. Hold Q and turn it.',
+        done: holdingTension,
+        hint: 'Q is the tension wrench. Hold it — you are turning the plug the way a key would.',
+        hintAfter: 6,
+      },
+      {
+        id: 'blocked',
+        line: 'It stopped. The pin is crossing the shear line — the seam the plug turns along.',
+        done: (s) => holdingTension(s) && s.pickChamber >= 0 && s.pickChamber === s.bindingChamber,
+        hint: 'Arrow keys move the pick. Go to the pin — it is carrying all your turning force.',
+        hintAfter: 8,
+      },
+      {
+        id: 'clear',
+        line: 'Lift it with Space. When the cut between its halves meets the seam, nothing blocks.',
+        done: anySet,
+        hint: 'Slowly. The click is the plug edge catching under the driver — that pin is done.',
+        hintAfter: 10,
+      },
+      {
+        id: 'open',
+        line: 'Nothing crosses the shear line now. Keep holding Q and the plug turns open.',
+        done: (s) => s.opened,
+      },
+    ],
+  },
+  {
     id: 'lesson-1',
     title: 'Tension and lift',
     teaches: 'Apply tension, find the pin the lock is leaning on, lift it until it clicks.',
-    lock: LESSON_1_LOCK,
+    lock: LESSON_TENSION_LOCK,
     steps: [
       {
         id: 'tension',
@@ -189,7 +259,7 @@ export const LESSONS: readonly Lesson[] = [
     id: 'lesson-2',
     title: 'Overset and reset',
     teaches: 'Lifting too far jams a pin. Letting the tension go is how you start again.',
-    lock: LESSON_2_LOCK,
+    lock: LESSON_OVERSET_LOCK,
     steps: [
       {
         id: 'start',
@@ -240,7 +310,7 @@ export const LESSONS: readonly Lesson[] = [
     id: 'lesson-3',
     title: 'The spool',
     teaches: 'A security pin lies to you. Recognising the lie, and pushing through it.',
-    lock: LESSON_3_LOCK,
+    lock: LESSON_SPOOL_LOCK,
     steps: [
       {
         id: 'start',

@@ -74,7 +74,29 @@ async function goto(page: Page, name: string): Promise<void> {
  */
 const SCREENS: { name: string; arrange: (page: Page) => Promise<void> }[] = [
   { name: 'menu', arrange: async (p) => goto(p, 'menu') },
+  {
+    /**
+     * The menu **with trophies earned** — the same lesson as `codes-with-designs` (D-147).
+     *
+     * The shared fixture earns no achievements, and that is the one state the recent-trophy
+     * column never draws in — so *Clean Sweep*'s 67-character condition ran through the button
+     * stack for as long as the column existed, and the sweep never saw it. Clean Sweep goes in
+     * the seed deliberately: it is the longest condition in the catalogue.
+     */
+    name: 'menu-with-trophies',
+    arrange: async (p) => {
+      await p.evaluate(() => {
+        const h = globalThis.__shearline!
+        h.setSave({
+          ...h.getSave(),
+          achievements: ['first-blood', 'clean-sweep', 'under-par', 'apprentice', 'journeyman'],
+        })
+      })
+      await goto(p, 'menu')
+    },
+  },
   { name: 'bench', arrange: async (p) => goto(p, 'bench') },
+  { name: 'tutorial', arrange: async (p) => goto(p, 'tutorial') },
   { name: 'trophies', arrange: async (p) => goto(p, 'trophies') },
   { name: 'codes', arrange: async (p) => goto(p, 'codes') },
   {

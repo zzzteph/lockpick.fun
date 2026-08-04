@@ -53,6 +53,7 @@ import {
 export type ScreenName =
   | 'menu'
   | 'bench'
+  | 'tutorial'
   | 'pick'
   | 'results'
   | 'settings'
@@ -70,7 +71,7 @@ export interface ShellActions {
   resume(): void
   restart(): void
   abandon(): void
-  /** Begin one of the three lessons from `GAME_DESIGN.md §10`. */
+  /** Begin one of the lessons from `GAME_DESIGN.md §10`, extended since. */
   startLesson(id: string): void
   updateSettings(patch: Partial<SettingsData>): void
   exportSave(): void
@@ -146,6 +147,11 @@ export interface ShellContext {
   /** Filled in on the results screen. */
   outcome?: AttemptOutcome
   result?: AttemptResult | null
+  /**
+   * Seconds since the results screen was entered — drives the rank stamp's landing (D-154).
+   * Absent or large means "settled": the app passes a large value under reduced motion.
+   */
+  resultsAge?: number
   /** Message shown along the bottom of whichever screen is up. */
   status?: string
   /** Challenge modifiers the player has opted into for the next attempt. */
@@ -430,7 +436,9 @@ export function drawMenu(c: ShellContext): void {
    * the title and a large one cannot produce a button the size of a door.
    */
   const w = compact ? 760 : 380
-  const h = compact ? Math.round(Math.min(Math.max(touchFloorFor(vp), 96), 150)) : 56
+  // Capped at 140, not 150: the Tutorial entry made the compact grid four rows of entries
+  // under the primary, and at 150 the last row's bottom lands at 1082 on a 1080 stage.
+  const h = compact ? Math.round(Math.min(Math.max(touchFloorFor(vp), 96), 140)) : 56
   const x = (LOGICAL_WIDTH - w) / 2
   const y = compact ? 236 : 320
   // Compact `gap` is the air *between* buttons; the flat layout's is a pitch. Hence `pitch` below.
@@ -448,15 +456,16 @@ export function drawMenu(c: ShellContext): void {
         }
       : { x, y: y + pitch * (1 + i), w, h }
 
-  // A brand-new player is sent to the first lesson, not to a wall of thirty-five locks. The
+  // A brand-new player is sent to the tutorial, not to a wall of thirty-five locks. The
   // game is unusually unforgiving of not knowing what tension is for, and "Start picking"
-  // dropping someone straight onto the bench was an invitation to bounce off it.
+  // dropping someone straight onto the bench was an invitation to bounce off it. To the
+  // tutorial *screen* rather than straight into lesson one, so the course is visible as a
+  // course — four cards, in order — before the first line of it starts talking.
   const taught = progress.data.tutorial.length > 0
   const hasProgress = progress.totalOpens > 0
   const primaryCaption = !taught ? 'Start the tutorial' : hasProgress ? 'Continue' : 'Start picking'
   if (button(vp, p, ui, { x, y, w, h }, primaryCaption, { primary: true })) {
-    if (taught) actions.goto('bench')
-    else actions.startLesson(LESSONS[0]?.id ?? 'lesson-1')
+    actions.goto(taught ? 'bench' : 'tutorial')
   }
   /**
    * Beside the button it is about — on the **left**, which is the side with nothing on it.
@@ -475,9 +484,12 @@ export function drawMenu(c: ShellContext): void {
     })
   }
   if (button(vp, p, ui, entry(0), 'Bench')) actions.goto('bench')
-  if (button(vp, p, ui, entry(1), 'Trophies')) actions.goto('trophies')
+  // Beside the bench, because it is the other place a lock gets picked — and once "Continue"
+  // is the primary, this button is the only way back to the lessons for a taught player.
+  if (button(vp, p, ui, entry(1), 'Tutorial')) actions.goto('tutorial')
+  if (button(vp, p, ui, entry(2), 'Trophies')) actions.goto('trophies')
   // Between the trophies and the settings on purpose: it is a place to *go*, not a preference.
-  if (button(vp, p, ui, entry(2), 'Share codes')) actions.goto('codes')
+  if (button(vp, p, ui, entry(3), 'Share codes')) actions.goto('codes')
   /**
    * The editor, which had no way in from here (D-128).
    *
@@ -486,9 +498,9 @@ export function drawMenu(c: ShellContext): void {
    * findable only by guessing which other screen linked to it. Reported as *"no editor at the
    * menu"*. It sits after Share codes because the two belong together: build one, then send it.
    */
-  if (button(vp, p, ui, entry(3), 'Editor')) actions.goto('editor')
-  if (button(vp, p, ui, entry(4), 'Help')) actions.goto('help')
-  if (button(vp, p, ui, entry(5), 'Settings')) actions.goto('settings')
+  if (button(vp, p, ui, entry(4), 'Editor')) actions.goto('editor')
+  if (button(vp, p, ui, entry(5), 'Help')) actions.goto('help')
+  if (button(vp, p, ui, entry(6), 'Settings')) actions.goto('settings')
 
   /*
    * A domain used to be drawn here and on the codes screen. It named a host nobody had registered,
@@ -569,6 +581,43 @@ export function drawMenu(c: ShellContext): void {
    */
   if (!compact && earned.length > 0) {
     const tx = LOGICAL_WIDTH - MARGIN - 96
+    /**
+     * The column may not reach back into the button stack — measured, because one did.
+     *
+     * A condition is right-aligned at x=1800 and the buttons' right edge is 1150, so a
+     * condition longer than the gap prints through whichever button shares its row. *Clean
+     * Sweep*'s 67 characters did exactly that, reported as *"its text overlaps with the menu
+     * button trophies"* — and the layout sweep never saw it because its fixture earns no
+     * achievements.
+     *
+     * Wrapped, not shrunk. Shrinking the face to fit was tried first and the sweep failed it
+     * on a 1280 laptop at exactly 10 CSS px — the gap needs a 15px face and the tiny-type floor
+     * is where it should be. A long condition becomes two right-aligned lines at full size,
+     * broken at the space that best balances them.
+     */
+    const sideRoom = tx - (x + w + 28)
+    const splitToFit = (s: string, size: number): string[] => {
+      ctx.save()
+      ctx.font = font(size)
+      if (ctx.measureText(s).width <= sideRoom) {
+        ctx.restore()
+        return [s]
+      }
+      const words = s.split(' ')
+      let best = [s]
+      let bestWidth = Infinity
+      for (let i = 1; i < words.length; i += 1) {
+        const a = words.slice(0, i).join(' ')
+        const b = words.slice(i).join(' ')
+        const widest = Math.max(ctx.measureText(a).width, ctx.measureText(b).width)
+        if (widest < bestWidth) {
+          bestWidth = widest
+          best = [a, b]
+        }
+      }
+      ctx.restore()
+      return best
+    }
     label(ctx, 'lately', tx, 320, {
       font: font(typeFor(vp, TYPE.dimension)),
       size: typeFor(vp, TYPE.dimension),
@@ -587,12 +636,19 @@ export function drawMenu(c: ShellContext): void {
       })
       // 24 below the name, in a 58px row. At 17 and 46 — numbers set for a 13px body — the 21px
       // name's descenders sat inside the 17px condition underneath it (D-103).
-      text(ctx, a.condition, tx, ty + 24, {
-        font: font(typeFor(vp, TYPE.dimension)),
-        color: p.inkLight,
-        align: 'right',
+      // Full ink, not `inkLight`: the column sits on the background grid, and D-148 already
+      // measured that ground — `inkLight` on `rule` is 3.92:1 against AA's 4.5. The size keeps
+      // the hierarchy the lighter tone used to carry.
+      const condSize = typeFor(vp, TYPE.dimension)
+      const condLines = splitToFit(a.condition, condSize)
+      condLines.forEach((line, li) => {
+        text(ctx, line, tx, ty + 24 + li * (condSize + 5), {
+          font: font(condSize),
+          color: p.ink,
+          align: 'right',
+        })
       })
-      ty += 58
+      ty += 58 + (condLines.length - 1) * (condSize + 5)
     }
     text(ctx, `${earned.length}/${ACHIEVEMENTS.length} earned`, tx, ty + 6, {
       font: font(typeFor(vp, TYPE.dimension)),
@@ -651,9 +707,8 @@ export function drawMenu(c: ShellContext): void {
  * letter in the corner already says whether it counts. See DECISIONS D-097.
  */
 // `CARD_H` went with the last screen that used it: the bench draws its own geometry now (D-102)
-// and the codes page draws `CODE_CARD_*`. `CARD_W` survives only as the width `CARDS_PER_ROW` is
-// derived from, which `benchHeight` still uses to count lesson rows.
-const CARD_W = 288
+// and the codes page draws `CODE_CARD_*`. `CARD_W` went with the lesson strip, whose rows were
+// the last thing counted in it (D-152).
 const CARD_GAP = 12
 
 /**
@@ -721,29 +776,27 @@ function codeGrid(_vp: Viewport): {
   )
   return { cols: CODE_COLS, cardW, cardH: CODE_CARD_H }
 }
-/** Lesson card height — one line of title over two of blurb, at the larger face. */
-const LESSON_H = 104
-
 /**
- * Codes-page card geometry: five to a row, not six (D-102).
+ * Codes-page card geometry: three to a row, the bench's own rhythm — D-155.
  *
- * At 288 wide a 21px name truncated half the roster back to "Halberd…" — the same failure D-099
- * fixed by giving the name the full card, arriving again from the other direction. Five columns is
- * 353 wide, which fits every name in the game, and twenty shareable locks still land in four rows.
+ * It was five columns of 150px cards, chosen in D-102 so every name fit and the whole roster
+ * landed on one page. Both were true and the page was still wrong, reported from play as *"in
+ * bench there are 6 max and they look cool, but in codes there are 15 of them and it's too
+ * tight."* Density is not a virtue on a page that already has a pager: three 597px columns give
+ * every card the bench card's presence, the lock drawing room to be read, and the roster pages
+ * itself — nine at a time with no designs, six once your own row is on the page.
  */
-const CODE_COLS = 5
+const CODE_COLS = 3
 /**
- * 150, not 136 — DECISIONS D-132.
+ * 200, not 150 — the height three columns can afford (D-155).
  *
- * The card carries a name, a drawing, its stats, its code and a row of three or four buttons, and
- * 136 was measured against a stack that had no button row in it. Fourteen more pixels is what the
- * roster can spare: four rows of them still land above the status line.
+ * The card carries a name, a drawing, its stats, its code and a row of three or four buttons.
+ * The extra fifty over D-132's measurement goes to the drawing, which scales with the card's
+ * height and at 150 was a 31px strip.
  */
-const CODE_CARD_H = 150
+const CODE_CARD_H = 200
 const BENCH_LEFT = MARGIN + 28
 const BENCH_WIDTH = LOGICAL_WIDTH - BENCH_LEFT * 2
-/** Cards per row, so a six-lock tier wraps instead of running off the page. */
-const CARDS_PER_ROW = Math.max(1, Math.floor((BENCH_WIDTH + CARD_GAP) / (CARD_W + CARD_GAP)))
 
 /**
  * A small side-elevation line drawing of a lock, sized to the card.
@@ -950,143 +1003,21 @@ export function drawBench(c: ShellContext): void {
   )
 
   navBar(c, [
+    ['Tutorial', () => actions.goto('tutorial')],
     ['Codes', () => actions.goto('codes')],
     ['Editor', () => actions.goto('editor')],
     ['Menu', () => actions.goto('menu')],
   ])
 
-  // The lessons sit above Tier 1, always visible and always replayable — `GAME_DESIGN.md §10`
-  // asks for both. Completed ones say so rather than disappearing: a player who wants to redo
-  // the spool lesson three tiers later should not have to hunt for it.
-  let y = 120
+  /*
+   * No lesson strip any more — the lessons live on their own Tutorial screen (D-152), and the
+   * bench is tiers and only tiers. 184 is where the tier strip already sat on a phone with the
+   * lessons done, so the row's own geometry (buttons at `y - 22`, label at `y + 4`) is unchanged.
+   */
+  let y = 184
   const taughtBasics = progress.data.tutorial.length > 0
   const grid = benchGrid(vp)
   const compactBench = isCompact(vp)
-  /**
-   * A heading with nothing under it is an orphan: it goes with the strip it heads (D-123). And on a
-   * phone it goes anyway — DECISIONS D-134.
-   *
-   * It sits directly under the screen's own title, so the top of the bench read `BENCH` / `LESSONS`
-   * with nothing between them, and the line after it — *"start here, the locks unlock once you
-   * finish the first"* — already says both what the cards are and what to do with them. Three
-   * stacked lines of chrome before the first thing you can press.
-   */
-  /**
-   * Hidden when the lessons are **finished**, not when one of them is — DECISIONS D-136.
-   *
-   * D-123 dropped the strip on a phone because three cards permanently marked `done` are the least
-   * useful 104px on the page. That is true once they are all done, and it was gated on
-   * `taughtBasics`, which is `tutorial.length > 0` — *any* lesson. So finishing lesson one, which
-   * is the thing the bench spends its whole empty state telling you to do, deleted the only way to
-   * reach lessons two and three. They are unreachable from anywhere else: the menu's shortcut goes
-   * to `LESSONS[0]` and these cards are the only other `startLesson` call in the game.
-   */
-  const allLessonsDone = LESSONS.every((l) => progress.data.tutorial.includes(l.id))
-  const showLessons = !isCompact(vp) || !allLessonsDone
-  if (showLessons && !isCompact(vp))
-    label(ctx, 'lessons', BENCH_LEFT, y, {
-      font: font(typeFor(vp, TYPE.heading)),
-      size: typeFor(vp, TYPE.heading),
-      color: p.ink,
-    })
-  if (!taughtBasics) {
-    /*
-     * On its own line on a phone — DECISIONS D-132.
-     *
-     * It sat at `BENCH_LEFT + 160` on the heading's row, which put it under the nav bar. That was
-     * survivable while the nav buttons were 40px tall and unreadable; once they were sized to their
-     * own captions (D-132) the row grew and printed straight through this sentence. Beside a
-     * heading is a fine place for a remark on a 1920px page and never a fine place on a 660px one.
-     */
-    const hereSize = typeFor(vp, TYPE.body)
-    const stacked = isCompact(vp)
-    if (stacked) y += hereSize + 14
-    text(
-      ctx,
-      stacked
-        ? 'start here — the locks unlock once you finish the first'
-        : 'start here — the locks below unlock once you finish the first one',
-      stacked ? BENCH_LEFT : BENCH_LEFT + 160,
-      y,
-      { font: font(hereSize), color: readableAccents(p).amber },
-    )
-  }
-  y += 18
-  /**
-   * On a phone, the lesson strip goes once the lessons are done (D-123).
-   *
-   * Three cards of one-line summaries, permanently marked `done`, are the least useful 104px on
-   * the page — and they are exactly the 104px the third row of lock cards needs once the grid
-   * drops to two columns. Before the lessons are finished they stay, because then they are the
-   * most useful thing on it.
-   */
-  if (showLessons)
-    LESSONS.forEach((lesson, i) => {
-      // On the same three-column grid as the locks below, so the page has one rhythm rather than
-      // two — and so a lesson's one-line summary is not cut to "…leaning" to fit a 288px card.
-      /**
-       * Wrapped into rows, and tall enough for its own type — DECISIONS D-132.
-       *
-       * The x was `BENCH_LEFT + (cardW + GAP) * i` with no row at all, which is fine at three
-       * columns and three lessons and wrong the moment the grid narrowed: D-122 took the compact
-       * bench to **two** columns, so the third lesson card has been drawn entirely off the right
-       * edge of the stage on every phone since. Nothing complained because nothing looks at what is
-       * outside the stage — the letterbox simply clips it.
-       *
-       * `LESSON_H` was 104 for a 21px title over two 17px lines. At the compact face that is a 38px
-       * title over two 35px lines, which is 108 before any padding, so the blurb printed out
-       * through the bottom border of its own card.
-       */
-      const lessonTitle = typeFor(vp, TYPE.body)
-      const lessonBlurb = typeFor(vp, TYPE.dimension)
-      const lessonH = Math.max(LESSON_H, lessonTitle + lessonBlurb * 2.3 + 46)
-      const rect: Rect = {
-        x: BENCH_LEFT + (grid.cardW + BENCH_GAP) * (i % grid.cols),
-        y: y + Math.floor(i / grid.cols) * (lessonH + BENCH_GAP),
-        w: grid.cardW,
-        h: lessonH,
-      }
-      const done = progress.data.tutorial.includes(lesson.id)
-      const st = ui.widget(rect)
-      cardFrame(vp, p, rect, st, false)
-      label(ctx, lesson.title, rect.x + 18, rect.y + 18 + lessonTitle, {
-        font: font(lessonTitle),
-        size: lessonTitle,
-        color: p.ink,
-      })
-      paragraph(ctx, lesson.teaches, rect.x + 18, rect.y + 30 + lessonTitle + lessonBlurb, {
-        font: font(lessonBlurb),
-        color: p.inkLight,
-        maxWidth: rect.w - 36,
-        lineHeight: lessonBlurb + 5,
-        maxLines: 2,
-      })
-      if (done) {
-        text(ctx, 'done', rect.x + rect.w - 18, rect.y + 18 + lessonTitle, {
-          font: font(lessonBlurb),
-          color: readableAccents(p).teal,
-          align: 'right',
-        })
-      }
-      if (st.activated) actions.startLesson(lesson.id)
-    })
-  /**
-   * 46, not 18 — the tier strip was drawn 4px *inside* the lesson cards.
-   *
-   * The buttons on that row are laid out at `y - 22` so their 40px boxes centre on `y`, and a gap
-   * of 18 makes that `-4`: the tier buttons and the Inspect switch each put their top border
-   * through the bottom border of the lesson card above them. Two bordered boxes sharing an edge
-   * read as one broken box. 46 leaves a clean 24px. See DECISIONS D-109.
-   */
-  // Counts the rows the lessons actually occupy — two columns means two rows for three lessons.
-  const lessonRowsDrawn = showLessons ? Math.ceil(LESSONS.length / grid.cols) : 0
-  const lessonBlockH = showLessons
-    ? lessonRowsDrawn *
-        (Math.max(LESSON_H, typeFor(vp, TYPE.body) + typeFor(vp, TYPE.dimension) * 2.3 + 46) +
-          BENCH_GAP) -
-      BENCH_GAP
-    : 0
-  y += lessonBlockH + 46
 
   /**
    * One tier at a time, chosen from a row of buttons — the bench used to be all twenty-five at once.
@@ -1216,7 +1147,7 @@ export function drawBench(c: ShellContext): void {
        * where it is *not* about the first lesson — the tier-progress case it alone can express.
        */
       const why = !taughtBasics
-        ? 'locked — finish the first lesson above'
+        ? 'locked — finish the first lesson in the tutorial'
         : `locked — open ${need} more tier ${tier - 1} lock${need === 1 ? '' : 's'}`
       if (!isCompact(vp) || taughtBasics)
       text(ctx, why, BENCH_LEFT, y, {
@@ -1227,22 +1158,19 @@ export function drawBench(c: ShellContext): void {
     y += 24
 
     /**
-     * On a phone, before the first lesson, the lock grid does not draw at all — D-132.
-     *
-     * Every card in it is locked until `taughtBasics`, so it is a full screen of things you cannot
-     * press. On a full page that is fine and even useful — `ART_DIRECTION.md §7` wants locked tiers
-     * visible, because aspiration is motivating. On a phone it does not fit: three lesson cards in
-     * two columns plus a tier strip plus six 210px cards is 192px more than the stage has, and the
-     * bench's own overflow warning said so in red, off the bottom of the screen.
-     *
-     * The lessons are the screen at that moment. One line says what is behind them.
+     * On a phone, before the first lesson, the lock grid still does not draw — D-132, surviving
+     * D-152 for a different reason. The original reason was room: the lesson strip plus the tier
+     * strip plus six cards overran the stage. The strip is gone, the room exists — but drawing
+     * the grid untaught was tried, and the layout sweep failed it on the smallest phones:
+     * a hatched card's name at that scale is under ten CSS pixels, a wall of things you cannot
+     * read *or* press. One line says what is behind the wall; the tutorial says how to get in.
      */
     const gridSuppressed = isCompact(vp) && !taughtBasics
     if (gridSuppressed) {
       const noteSize = typeFor(vp, TYPE.dimension)
       text(
         ctx,
-        `tier ${tier} — ${locks.length} locks, after the first lesson`,
+        `tier ${tier} — ${locks.length} locks, after the first lesson in the tutorial`,
         BENCH_LEFT,
         y + noteSize,
         {
@@ -1411,22 +1339,14 @@ export function drawBench(c: ShellContext): void {
 export function benchHeight(
   lockCount: number,
   tierCount: number,
-  lessonCount: number,
   /**
-   * The compact bench is a different shape and has to be checked as one (D-123).
-   *
-   * Two columns instead of three means a six-lock tier is **three** rows rather than two, and the
-   * room for the third comes from dropping the lesson strip. Both changes are in the same budget,
-   * so a helper that only knew the desktop shape would cheerfully report that a bench which runs
-   * off the bottom of a phone fits.
+   * The compact bench is a different shape and has to be checked as one (D-123): two columns
+   * instead of three means a six-lock tier is **three** rows rather than two.
    */
   compact = false,
 ): number {
-  const showLessons = !compact || lessonCount === 0
-  const lessonRows = showLessons ? Math.ceil(lessonCount / CARDS_PER_ROW) : 0
-  // The `+ 46` mirrors the gap under the lesson cards, which had to grow from 18 because the tier
-  // strip's buttons are drawn at `y - 22` and were landing inside the cards (D-109).
-  let y = 120 + 18 + lessonRows * (LESSON_H + 6) + 46
+  // The tier strip sits at a fixed 184 now that the lessons live on their own screen (D-152).
+  let y = 184
   // Tier buttons, then the lock/locked line, then the biggest tier's rows.
   y += 58 + 24
   const cols = compact ? 2 : BENCH_COLS
@@ -1436,83 +1356,106 @@ export function benchHeight(
   return y
 }
 
-// ── Results ─────────────────────────────────────────────────────────────────────────────
+// ── Tutorial ────────────────────────────────────────────────────────────────────────────
 
 /**
- * The binding-order diagram — ART_DIRECTION.md §6. "Every open teaches something about the
- * lock you just beat."
+ * The lessons' own screen — D-152.
+ *
+ * They lived at the top of the bench for the whole life of the project, as a strip of three
+ * summary cards above the tiers. Moved here because the course outgrew the strip: four lessons
+ * is a curriculum, and a curriculum deserves a page that says what order it goes in — while the
+ * bench, the busiest screen in the game, gets to be about tiers and only tiers.
+ *
+ * Every lesson is always shown and always replayable, done or not, which is the property D-136
+ * existed to protect. `startLesson` is called from exactly one place now: these cards.
  */
-function drawBindingOrder(
-  vp: Viewport,
-  p: Palette,
-  rect: Rect,
-  chamberCount: number,
-  order: readonly number[],
-): void {
+export function drawTutorial(c: ShellContext): void {
+  const { vp, p, ui, progress, actions } = c
   const { ctx } = vp
-  const pitch = rect.w / Math.max(1, chamberCount)
-  const boxW = Math.min(64, pitch * 0.7)
+  const doneCount = LESSONS.filter((l) => progress.data.tutorial.includes(l.id)).length
+  screenFrame(
+    c,
+    'Tutorial',
+    c.status ??
+      (doneCount === 0
+        ? 'start with lesson one — the bench unlocks once it is done'
+        : doneCount === LESSONS.length
+          ? 'all lessons done — they replay whenever you like'
+          : `${doneCount} of ${LESSONS.length} done — pick up where you left off`),
+  )
+  navBar(c, [
+    ['Bench', () => actions.goto('bench')],
+    ['Menu', () => actions.goto('menu')],
+  ])
+
   const readable = readableAccents(p)
-  for (let i = 0; i < chamberCount; i += 1) {
-    const cx = rect.x + pitch * (i + 0.5)
-    const bx = cx - boxW / 2
-    ctx.save()
-    ctx.fillStyle = p.paper
-    ctx.fillRect(bx, rect.y, boxW, 54)
-    ctx.lineWidth = STROKE.standard
-    ctx.strokeStyle = p.ink
-    ctx.strokeRect(snapX(vp, bx, STROKE.standard), snapY(vp, rect.y, STROKE.standard), boxW, 54)
-    ctx.restore()
-    text(ctx, String(i + 1), cx, rect.y + 34, {
-      font: font(typeFor(vp, TYPE.heading)),
+  text(
+    ctx,
+    isCompact(vp)
+      ? 'Four short lessons, in order.'
+      : 'Four short lessons, in order. Everything on the bench comes down to these.',
+    BENCH_LEFT,
+    170,
+    { font: font(typeFor(vp, TYPE.body)), color: p.inkLight },
+  )
+
+  /*
+   * Two columns of two, at half the page each: the blurb is the content here rather than a
+   * reminder, because this is the screen a zero-knowledge player reads before their first
+   * pick. Heights are measured from the type, the lesson the old strip learnt in D-132.
+   */
+  const cols = 2
+  const cardW = Math.floor((BENCH_WIDTH - BENCH_GAP * (cols - 1)) / cols)
+  const tagSize = typeFor(vp, TYPE.dimension)
+  const titleSize = typeFor(vp, TYPE.heading)
+  const blurbSize = typeFor(vp, TYPE.body)
+  // Three blurb lines on a phone, where the larger face wraps a `teaches` sentence past two —
+  // this is the screen whose whole job is being read, so the sentence must not truncate.
+  const blurbLines = isCompact(vp) ? 3 : 2
+  const cardH = Math.max(150, tagSize + titleSize + blurbSize * (blurbLines + 0.4) + 70)
+  const top = 210
+  const nextIdx = LESSONS.findIndex((l) => !progress.data.tutorial.includes(l.id))
+  LESSONS.forEach((lesson, i) => {
+    const rect: Rect = {
+      x: BENCH_LEFT + (cardW + BENCH_GAP) * (i % cols),
+      y: top + Math.floor(i / cols) * (cardH + BENCH_GAP),
+      w: cardW,
+      h: cardH,
+    }
+    const done = progress.data.tutorial.includes(lesson.id)
+    const st = ui.widget(rect)
+    cardFrame(vp, p, rect, st, false)
+    label(ctx, `lesson ${i + 1}`, rect.x + 20, rect.y + 16 + tagSize, {
+      font: font(tagSize),
+      size: tagSize,
+      color: p.inkLight,
+    })
+    label(ctx, lesson.title, rect.x + 20, rect.y + 30 + tagSize + titleSize, {
+      font: font(titleSize),
+      size: titleSize,
       color: p.ink,
-      align: 'center',
     })
-    const position = order.indexOf(i)
-    text(ctx, position >= 0 ? `${position + 1}${ordinal(position + 1)}` : '—', cx, rect.y + 78, {
-      font: font(typeFor(vp, TYPE.body)),
-      color: position >= 0 ? readable.amber : p.inkLight,
-      align: 'center',
+    paragraph(ctx, lesson.teaches, rect.x + 20, rect.y + 48 + tagSize + titleSize + blurbSize, {
+      font: font(blurbSize),
+      color: p.inkLight,
+      maxWidth: rect.w - 40,
+      lineHeight: blurbSize + 6,
+      maxLines: blurbLines,
     })
-  }
-  // The arrow chain, in the order they actually bound.
-  ctx.save()
-  ctx.lineWidth = STROKE.hairline
-  ctx.strokeStyle = readable.amber
-  ctx.beginPath()
-  for (let k = 0; k < order.length - 1; k += 1) {
-    const from = rect.x + pitch * ((order[k] as number) + 0.5)
-    const to = rect.x + pitch * ((order[k + 1] as number) + 0.5)
-    const y = rect.y + 96 + k * 12
-    ctx.moveTo(from, y)
-    ctx.lineTo(to, y)
-    const dir = Math.sign(to - from) || 1
-    ctx.moveTo(to - dir * 7, y - 4)
-    ctx.lineTo(to, y)
-    ctx.lineTo(to - dir * 7, y + 4)
-  }
-  ctx.stroke()
-  ctx.restore()
-  label(ctx, 'binding order', rect.x, rect.y - 12, {
-    font: font(typeFor(vp, TYPE.dimension)),
-    size: typeFor(vp, TYPE.dimension),
-    color: p.inkLight,
+    // `done` in teal on the finished ones; `next` in amber on the first that is not — so the
+    // order the page keeps talking about is visible as a mark, not just an argument.
+    if (done || i === nextIdx) {
+      text(ctx, done ? 'done' : 'next', rect.x + rect.w - 20, rect.y + 16 + tagSize, {
+        font: font(tagSize),
+        color: done ? readable.teal : readable.amber,
+        align: 'right',
+      })
+    }
+    if (st.activated) actions.startLesson(lesson.id)
   })
 }
 
-function ordinal(n: number): string {
-  if (n % 100 >= 11 && n % 100 <= 13) return 'th'
-  switch (n % 10) {
-    case 1:
-      return 'st'
-    case 2:
-      return 'nd'
-    case 3:
-      return 'rd'
-    default:
-      return 'th'
-  }
-}
+// ── Results ─────────────────────────────────────────────────────────────────────────────
 
 export function drawResults(c: ShellContext): void {
   const { vp, p, ui, progress, actions, outcome, result } = c
@@ -1583,39 +1526,27 @@ export function drawResults(c: ShellContext): void {
   }
 
   /**
-   * The rank, where the payout panel used to be.
+   * The rank, on the right half of the screen — where the binding-order chart used to be.
    *
-   * Credits went with D-091 and this is what replaced them. The panel says three things and no
-   * more: what you earned this time, what your best on this lock is, and — the only line worth
-   * hurrying for — whether this attempt moved it. A number that only ever goes up is not a reason
-   * to play a lock twice; a letter that can be beaten is.
+   * The panel says three things and no more: what you earned this time, what your best on this
+   * lock is, and — the only line worth hurrying for — whether this attempt moved it. A number
+   * that only ever goes up is not a reason to play a lock twice; a letter that can be beaten is.
+   *
+   * It sat under the stats at payout size (64) until D-151 removed the chart and the right half
+   * of the busiest good moment in the game became blank paper. Reported as *"looks very empty —
+   * you can move the rank to the right part of the screen and make it bigger and animated"*.
+   * So: 220px, stamped — it grows in from nothing with a slight overshoot, the same landing
+   * `drawCreditCount` gives the letter during the open sequence, driven by `resultsAge` so a
+   * test that advances the clock sees the settled frame. Reduced motion arrives settled (D-154).
    */
   if (result) {
-    /**
-     * 700 wide, not 420 — the panel was laid out for an 11px label face and holds an 18px one.
-     *
-     * `label` draws in caps with tracking, so "counts toward the next tier" is close to 300px of
-     * ink and the values were right-aligned 250px from the panel's left edge: every row printed the
-     * value *through* its own label, and the longest label ran out through the panel's right wall.
-     * Widened, with the values right-aligned to the far side and the labels given the whole gap in
-     * between, so nothing has to be short to fit. See DECISIONS D-099.
-     */
-    /**
-     * The rank panel, measured — and shorter on a phone. DECISIONS D-134.
-     *
-     * Every number in it was a literal against a 21px face: a 190px panel, the letter at +96, three
-     * record lines from +16 at a 30px pitch. Scaled, the lines are 38px tall at a 30px pitch, so
-     * they printed through each other *and* across the letter they are about. Reported as
-     * *"the name of the lock may not fit in the rank box"* — it is the rank block, and what did not
-     * fit is everything.
-     *
-     * Two of the three lines also go on a phone. `previous best` and `counts toward the next tier`
-     * are bookkeeping you can read on the bench whenever you like; `best on this lock` is the one
-     * that says whether this run mattered, and it is the comparison the big letter is inviting.
-     */
-    y += 20
     const rankBody = typeFor(vp, TYPE.body)
     const compactResults = isCompact(vp)
+    /*
+     * `previous best` and `counts toward the next tier` still go on a phone (D-134): they are
+     * bookkeeping you can read on the bench, and `best on this lock` is the comparison the big
+     * letter is inviting.
+     */
     const lines: [string, string][] = compactResults
       ? [['best on this lock', letterFor(result.bestRank)]]
       : [
@@ -1626,57 +1557,54 @@ export function drawResults(c: ShellContext): void {
             countsForTier(result.bestRank) ? 'yes' : 'not yet — needs D',
           ],
         ]
-    const rankLetter = typeFor(vp, TYPE.payout)
-    const pw = compactResults ? 820 : 700
-    const linePitch = rankBody + 14
-    const panelH = Math.max(
-      rankLetter + 40,
-      lines.length * linePitch + (result.improved ? 60 : 20) + 40,
-    )
-    panel(vp, p, { x: left - 20, y: y - 34, w: pw, h: panelH }, 'rank')
+    const LETTER = 220
+    const linePitch = rankBody + 16
+    const px = LOGICAL_WIDTH / 2 + 40
+    const pw = LOGICAL_WIDTH - MARGIN - 36 - px
+    const py = 200
+    const flashSize = typeFor(vp, TYPE.heading)
+    const ph = 60 + LETTER + 46 + lines.length * linePitch + (result.improved ? flashSize + 26 : 0) + 26
+    panel(vp, p, { x: px, y: py, w: pw, h: ph }, 'rank')
+
     const rankInk =
       result.rank <= 1 ? readable.teal : result.rank <= 3 ? readable.amber : readable.crimson
-    // The letter is centred in the panel's own height rather than parked at a fixed +96.
-    const letterX = left + 60
-    label(ctx, letterFor(result.rank), letterX, y - 34 + panelH / 2 + rankLetter * 0.36, {
-      font: font(rankLetter, 'bold'),
-      size: rankLetter,
-      color: rankInk,
-      align: 'center',
-    })
-    // Clear of the letter, which is as wide as it is tall.
-    const recordX = letterX + rankLetter * 0.7 + 24
-    let ly = y + 16
-    for (const [k, v] of lines) {
-      label(ctx, k, recordX, ly, { font: font(rankBody), size: rankBody, color: p.inkLight })
-      text(ctx, v, left + pw - 40, ly, { font: font(rankBody), color: p.ink, align: 'right' })
+    /*
+     * The stamp. Ease-out-back from zero: the letter grows in and overshoots by ~10% before it
+     * settles, so its bounds at any moment never exceed the clearance the panel is built with.
+     * Growing from nothing rather than shrinking from huge, deliberately — a letter that starts
+     * at double size would cross the record lines below it on its way down.
+     */
+    const age = c.resultsAge ?? 9
+    const k = Math.min(1, age / 0.45)
+    const back = 1.70158
+    const eased = 1 + (back + 1) * Math.pow(k - 1, 3) + back * Math.pow(k - 1, 2)
+    const letterCx = px + pw / 2
+    const letterCy = py + 60 + LETTER / 2
+    const glyph = letterFor(result.rank)
+    ctx.save()
+    ctx.globalAlpha = Math.min(1, age / 0.12)
+    ctx.translate(letterCx, letterCy)
+    ctx.scale(Math.max(0.001, eased), Math.max(0.001, eased))
+    ctx.font = font(LETTER, 'bold')
+    ctx.fillStyle = rankInk
+    ctx.fillText(glyph, -ctx.measureText(glyph).width / 2, LETTER * 0.36)
+    ctx.restore()
+
+    let ly = py + 60 + LETTER + 46
+    for (const [k2, v] of lines) {
+      label(ctx, k2, px + 40, ly, { font: font(rankBody), size: rankBody, color: p.inkLight })
+      text(ctx, v, px + pw - 40, ly, { font: font(rankBody), color: p.ink, align: 'right' })
       ly += linePitch
     }
-    if (result.improved) {
-      label(ctx, result.firstOpen ? 'first open' : 'new best', recordX, ly + 12, {
-        font: font(typeFor(vp, TYPE.heading)),
-        size: typeFor(vp, TYPE.heading),
+    if (result.improved && age > 0.5) {
+      // After the stamp lands, not with it — one thing arriving at a time.
+      label(ctx, result.firstOpen ? 'first open' : 'new best', px + 40, ly + 14, {
+        font: font(flashSize),
+        size: flashSize,
         color: readable.teal,
       })
     }
   }
-
-  /*
-   * The binding-order chart is a study aid, and a phone is not where you study — D-134.
-   *
-   * It threads a line from each chamber to the order it bound in, which is genuinely useful on a
-   * full page and is, at a phone's scale, a tangle of hairlines over the right-hand half of the
-   * screen. It is also the single largest block on the busiest screen in the game. The order is
-   * still recorded and still drawn on a desktop; what a phone gets instead is room.
-   */
-  if (!isCompact(vp))
-    drawBindingOrder(
-      vp,
-      p,
-      { x: LOGICAL_WIDTH / 2 + 40, y: 240, w: 620, h: 200 },
-      chambersOf(outcome.lock),
-      outcome.bindOrder,
-    )
 
   /**
    * The code for the lock you have just beaten, on the screen where you have just beaten it.
@@ -2455,8 +2383,11 @@ function codeCard(
    */
   const security = def.pins.filter((pin) => PROFILES[pin].grooveCount > 0).length
   const tiny = isCompact(vp)
-  const glyphW = tiny ? 0 : Math.min(88, Math.floor(rect.w * 0.34))
-  const glyphH = Math.max(26, Math.floor(dim * 1.5))
+  // The drawing takes whatever height the card has left over the fixed stack (name, code,
+  // buttons, padding ≈ 140px) — on the 200px card that is a readable 60px lock rather than the
+  // 31px strip the old 150px card could spare (D-155).
+  const glyphH = Math.max(26, Math.floor(dim * 1.5), rect.h - 140)
+  const glyphW = tiny ? 0 : Math.min(Math.floor(glyphH * 3), Math.floor(rect.w * 0.34))
   if (!tiny) drawLockGlyph(vp, p, def, { x: rect.x + pad, y: cy, w: glyphW, h: glyphH }, code === null)
   text(
     ctx,
@@ -2583,8 +2514,9 @@ function codeCard(
 /**
  * The codes page on a phone — a different page, not the same one squeezed.
  *
- * The flat layout is five columns of 136px cards, twenty-two of them, with an intro paragraph, an
- * entry field, and two headed sections. At a phone's scale that is a card 96 CSS px wide holding
+ * The flat layout was five columns of 136px cards, twenty-two of them (three of 200 since
+ * D-155), with an intro paragraph, an entry field, and two headed sections. At a phone's scale
+ * the five-column card was 96 CSS px wide holding
  * four lines of type and three buttons, which is the *"very small — every piece of the element,
  * and it looks like a mess"* in the report; the layout sweep counted over a thousand findings on
  * this screen alone, two thirds of everything left in the game.

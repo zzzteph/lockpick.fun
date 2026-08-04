@@ -155,8 +155,30 @@ export function drawLessonLine(
   if (lesson.line === null) return
   const { ctx } = vp
   const readable = readableAccents(p)
-  const width = 900
-  const h = 46
+  /**
+   * The box is sized from the sentence, not the sentence from the box.
+   *
+   * It was a fixed 900 wide against a face `typeFor` serves at 21 on a desktop and larger on
+   * a phone, so any line past about seventy characters printed out through both ends of its
+   * own panel — which most of the hints did. Reported as *"the quote does not fit in the
+   * box"*. Measured now, the same rule `captionWidth` codified in D-132; the face gives way
+   * only when even the full stage width cannot hold the line, which no desktop line reaches.
+   */
+  const pipRoom = lesson.total * 14 + 36
+  const maxText = LOGICAL_WIDTH - 2 * (pipRoom + 40)
+  let size = typeFor(vp, TYPE.body)
+  ctx.save()
+  ctx.font = font(size)
+  let textW = ctx.measureText(lesson.line).width
+  while (size > 15 && textW > maxText) {
+    size -= 1
+    ctx.font = font(size)
+    textW = ctx.measureText(lesson.line).width
+  }
+  ctx.restore()
+
+  const width = Math.ceil(textW) + 56
+  const h = Math.max(46, size + 24)
   const x = (LOGICAL_WIDTH - width) / 2
   // Under the header, above the drawing. The bottom of the stage belongs to the subtitle
   // track, and instruction and transcript must not sit on top of each other.
@@ -172,8 +194,8 @@ export function drawLessonLine(
   ctx.fillRect(x, y, 6, h)
   ctx.restore()
 
-  text(ctx, lesson.line, LOGICAL_WIDTH / 2, y + 29, {
-    font: font(typeFor(vp, TYPE.body)),
+  text(ctx, lesson.line, LOGICAL_WIDTH / 2, y + h / 2 + size * 0.36, {
+    font: font(size),
     color: p.ink,
     align: 'center',
   })

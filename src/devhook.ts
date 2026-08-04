@@ -277,7 +277,7 @@ export interface DevHook {
   /** Every achievement id the game knows about, for checking a save has no orphans. */
   achievementIds(): string[]
 
-  /** Begin one of the three lessons. */
+  /** Begin one of the lessons, by id. */
   startLesson(id: string): void
   /** The running lesson, or null. */
   lessonState(): HookLesson | null

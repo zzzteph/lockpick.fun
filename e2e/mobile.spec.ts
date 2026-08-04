@@ -367,12 +367,12 @@ test.describe('the shell screens on a phone', () => {
       h.setSave({
         ...save,
         records: records as never,
-        tutorial: ['lesson-1', 'lesson-2', 'lesson-3'],
+        tutorial: ['lesson-rotate', 'lesson-1', 'lesson-2', 'lesson-3'],
         achievements: ['first-blood', 'apprentice', 'under-par'],
       })
     })
 
-    for (const name of ['bench', 'settings', 'trophies', 'help', 'codes', 'editor']) {
+    for (const name of ['bench', 'tutorial', 'settings', 'trophies', 'help', 'codes', 'editor']) {
       await goto(page, name)
       expect(await page.evaluate(() => globalThis.__shearline?.getScreen()), name).toBe(name)
       await captureStage(page, `mobile-screen-${name}`)

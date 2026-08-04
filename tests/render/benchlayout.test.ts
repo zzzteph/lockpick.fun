@@ -10,11 +10,13 @@
  * The test was never written. The helper has sat exported and called by nothing ever since —
  * present, plausible, and inert, which is this project's own stated failure mode. It is called
  * now.
+ *
+ * The lesson strip is gone from these sums (D-152): the lessons live on their own Tutorial
+ * screen, so the bench is bounded by the tier strip and the largest tier alone.
  */
 
 import { describe, expect, it } from 'vitest'
 import { ALL_LOCKS } from '../../src/game/locks'
-import { LESSONS } from '../../src/game/tutorial'
 import { benchHeight } from '../../src/ui/shell'
 import { LOGICAL_HEIGHT } from '../../src/render/viewport'
 
@@ -27,7 +29,7 @@ describe('the bench', () => {
   const floor = LOGICAL_HEIGHT - MARGIN - STATUS_BAND
 
   it('fits the roster that actually ships', () => {
-    const h = benchHeight(ALL_LOCKS.length, tiers.length, LESSONS.length)
+    const h = benchHeight(ALL_LOCKS.length, tiers.length)
     expect(h, `bench runs to y=${h}, past the status line at ${floor}`).toBeLessThanOrEqual(floor)
   })
 
@@ -35,50 +37,24 @@ describe('the bench', () => {
     // The bench draws one tier at a time (D-102), so the page is bounded by the largest tier and
     // not by the total. Asked directly, so a roster that grew one tier is caught.
     const biggest = Math.max(...tiers.map((t) => ALL_LOCKS.filter((d) => d.tier === t).length))
-    const h = benchHeight(biggest * tiers.length, tiers.length, LESSONS.length)
+    const h = benchHeight(biggest * tiers.length, tiers.length)
     expect(h).toBeLessThanOrEqual(floor)
   })
 
   it('would catch a tier that grew too large — the check is not vacuous', () => {
     // If this passed at any size, the two above would prove nothing. Twenty locks in one tier is
     // four rows of cards and must not fit.
-    expect(benchHeight(20 * tiers.length, tiers.length, LESSONS.length)).toBeGreaterThan(floor)
+    expect(benchHeight(20 * tiers.length, tiers.length)).toBeGreaterThan(floor)
   })
 
   /**
    * The compact bench is a different shape, and it is the one that nearly did not fit — D-123.
-   *
-   * Two columns turns a six-lock tier into three rows, and three rows only fit because the lesson
-   * strip goes. That is two changes paying for each other, which is exactly the arrangement that
-   * silently stops balancing when one of them moves.
+   * Two columns turns a six-lock tier into three rows of taller-typed cards.
    */
   it('fits on a phone, where it is two columns and three rows', () => {
-    const h = benchHeight(ALL_LOCKS.length, tiers.length, LESSONS.length, true)
+    const h = benchHeight(ALL_LOCKS.length, tiers.length, true)
     expect(h, `compact bench runs to y=${h}, past the status line at ${floor}`).toBeLessThanOrEqual(
       floor,
     )
-  })
-
-  it('would not fit on a phone if the lesson strip stayed — the trade is real', () => {
-    // `benchHeight` keeps the strip when no lesson is done, which is correct: a player who has not
-    // been taught needs it more than they need the third row of locks. This asserts the *other*
-    // half — that the room genuinely had to come from somewhere.
-    const withLessons = benchHeight(ALL_LOCKS.length, tiers.length, 0, true)
-    const compactWithStrip = withLessons + LESSONS.length * 0 + 110
-    expect(compactWithStrip).toBeGreaterThan(floor)
-  })
-
-  it('leaves the tier strip clear of the lesson cards', () => {
-    // Mirrors `drawBench`: lesson cards start at y=120 and are `LESSON_H` tall; the strip's buttons
-    // are drawn at `y - 22` after `y += LESSON_H + GAP`. At the old gap of 18 that put 40px-tall
-    // bordered buttons 4px *inside* the cards above them.
-    const LESSON_TOP = 120
-    const LESSON_H = 104
-    const GAP = 46
-    const BUTTON_RISE = 22
-    const cardBottom = LESSON_TOP + LESSON_H
-    const buttonTop = LESSON_TOP + LESSON_H + GAP - BUTTON_RISE
-    expect(buttonTop, 'the tier strip overlaps the lesson cards').toBeGreaterThan(cardBottom)
-    expect(buttonTop - cardBottom, 'and leaves enough air to read as a separate row').toBeGreaterThanOrEqual(16)
   })
 })

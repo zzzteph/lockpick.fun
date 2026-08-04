@@ -69,7 +69,7 @@ async function openIt(page: Page, tension = 0.45, rounds = 40): Promise<void> {
 
 // ── The tutorial ────────────────────────────────────────────────────────────────────────
 
-test('a new player completes all three lessons and then opens lock 1', async ({ page }) => {
+test('a new player completes all four lessons and then opens lock 1', async ({ page }) => {
   const watcher = await bootGame(page, { frames: 3 })
   await setManual(page, true)
 
@@ -78,7 +78,7 @@ test('a new player completes all three lessons and then opens lock 1', async ({ 
   expect(fresh?.tutorial).toEqual([])
   expect(fresh?.records).toEqual({})
 
-  for (const id of ['lesson-1', 'lesson-2', 'lesson-3']) {
+  for (const id of ['lesson-rotate', 'lesson-1', 'lesson-2', 'lesson-3']) {
     await page.evaluate((l) => globalThis.__shearline?.startLesson(l), id)
     const started = await lessonState(page)
     expect(started?.id, id).toBe(id)
@@ -232,7 +232,7 @@ test('every pin state is distinguishable with colour removed', async ({ page }) 
 test('every menu is keyboard-navigable, with a visible focus ring', async ({ page }) => {
   const watcher = await bootGame(page, { frames: 3 })
 
-  for (const name of ['menu', 'bench', 'settings', 'trophies', 'editor']) {
+  for (const name of ['menu', 'bench', 'tutorial', 'settings', 'trophies', 'editor']) {
     await page.evaluate((n) => globalThis.__shearline?.goto(n), name)
     await renderOnce(page)
 
@@ -271,7 +271,8 @@ test('the keyboard can start a lock without touching the mouse', async ({ page }
   await page.evaluate(() => globalThis.__shearline?.goto('bench'))
   await renderOnce(page)
 
-  // Tab to the first lesson card and press it.
+  // Tab to the first focusable control and press it — the nav row, now that the lesson cards
+  // live on the tutorial screen. Any of them leaves the bench, which is the claim.
   const before = await page.evaluate(() => globalThis.__shearline?.getScreen())
   expect(before).toBe('bench')
   for (let i = 0; i < 6; i += 1) {
@@ -368,7 +369,7 @@ test('the mouse pointer is visible on every screen', async ({ page }) => {
     })
 
   // Every screen made of buttons and cards needs a pointer to operate at all.
-  for (const name of ['menu', 'bench', 'shop', 'loadout', 'settings', 'trophies', 'results']) {
+  for (const name of ['menu', 'bench', 'tutorial', 'settings', 'trophies', 'results']) {
     await page.evaluate((n) => globalThis.__shearline?.goto(n), name)
     await renderOnce(page)
     expect(await cursorNow(), `${name} has no visible pointer`).toBe('default')

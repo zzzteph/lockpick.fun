@@ -89,7 +89,7 @@ test('@screenshot phase-14 the finished bench', async ({ page }) => {
     }, {
       ...current,
       records,
-      tutorial: ['lesson-1', 'lesson-2', 'lesson-3'],
+      tutorial: ['lesson-rotate', 'lesson-1', 'lesson-2', 'lesson-3'],
       achievements: ['first-blood', 'apprentice', 'journeyman', 'under-par', 'half-par'],
       __removedTools: [
         'medium-hook',
