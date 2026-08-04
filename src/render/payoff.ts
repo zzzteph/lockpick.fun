@@ -9,6 +9,7 @@
 import type { Achievement } from '../game/achievements'
 import { RANKS } from '../game/ranks'
 import { text } from './draw'
+import { drawTrophyArt } from './trophyart'
 import {
   BURST_RAYS,
   burst,
@@ -157,9 +158,11 @@ export function drawAchievementCards(
   const cardH = Math.max(CARD_H, 14 + tag + 10 + name + 16)
   ctx.save()
   ctx.font = font(name)
+  // The widest name plus the drawing that now leads the card (D-159) — measured together, or
+  // the icon would push the name back out through the border the measuring paid for.
   const cardW = Math.max(
     CARD_W,
-    ...earned.map((a) => Math.ceil(ctx.measureText(a.name).width) + 44),
+    ...earned.map((a) => Math.ceil(ctx.measureText(a.name).width) + 44 + (cardH - 14) + 8),
   )
   ctx.restore()
 
@@ -180,11 +183,16 @@ export function drawAchievementCards(
     ctx.fillRect(x, y, 7, cardH)
     ctx.restore()
 
-    text(ctx, 'ACHIEVEMENT', x + 22, y + 14 + tag, {
+    // The trophy's own drawing rides its card in — the moment it is earned is the moment the
+    // picture should first be seen (D-159). Text starts after it; nothing waits on loading.
+    const artSize = cardH - 14
+    const hasArt = drawTrophyArt(ctx, a.id, x + 16, y + 7, artSize, false)
+    const tx = x + (hasArt ? 16 + artSize + 14 : 22)
+    text(ctx, 'ACHIEVEMENT', tx, y + 14 + tag, {
       font: font(tag),
       color: p.inkLight,
     })
-    text(ctx, a.name, x + 22, y + 14 + tag + 10 + name, { font: font(name), color: p.ink })
+    text(ctx, a.name, tx, y + 14 + tag + 10 + name, { font: font(name), color: p.ink })
   }
 }
 

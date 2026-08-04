@@ -52,10 +52,17 @@ export default defineConfig({
      * separate `.woff2` would leave the game rendering in a fallback face for anyone who opened it
      * by double-clicking — which is precisely the machine-dependent layout D-146 exists to end.
      *
-     * The subset weights are 5.7KB each. 12KB clears them with room and inlines nothing else the
-     * game has.
+     * The subset weights are 5.7KB each. 12KB cleared them with room — and then the trophy art
+     * arrived (D-159): thirty-four 256px PNGs, the largest just over 14KB, which must inline for
+     * exactly the reason the fonts must. A separate PNG fetched from a `file://` page is
+     * cross-origin, and drawing one taints the canvas — `getImageData` (which the grayscale
+     * locked variants are built with) would throw for anyone who opened the game by
+     * double-clicking. 20KB covers the whole set; nothing else the game ships is in that range.
      */
-    assetsInlineLimit: 12288,
+    assetsInlineLimit: 20480,
+    // 588KB, deliberately: the trophy art rides the bundle as data URIs (D-159), and one file
+    // that opens from a double-click beats a small file plus thirty-four requests that do not.
+    chunkSizeWarningLimit: 700,
     rollupOptions: {
       // The game, and only the game. `dev/audio-debug.html` is a bench instrument — the dev
       // server serves it from `dev/`, and it has no business in a shipped bundle. It also

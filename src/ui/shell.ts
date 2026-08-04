@@ -23,6 +23,7 @@ import { countsForTier, effectivePar, letterFor } from '../game/ranks'
 import type { AttemptOutcome, AttemptResult, Progress } from '../game/progress'
 import { LESSONS } from '../game/tutorial'
 import { hatchRect, label, paragraph, text } from '../render/draw'
+import { drawTrophyArt } from '../render/trophyart'
 import { STROKE, TYPE, alpha, font, readableAccents, type Palette } from '../render/palette'
 import {
   LOGICAL_HEIGHT,
@@ -2300,11 +2301,41 @@ export function drawTrophies(c: ShellContext): void {
     ctx.strokeRect(snapX(vp, x + 14, STROKE.standard), snapY(vp, y + 16, STROKE.standard), 14, 14)
     ctx.restore()
 
-    text(ctx, a.name, x + 40, y + nameSize + 10, {
+    /**
+     * The trophy's own drawing, on the right of its plate — D-159.
+     *
+     * Earned draws in colour; unearned draws the grayscale copy at reduced strength, so a
+     * locked trophy reads as the same picture waiting to be coloured in — the visual sibling
+     * of D-132's "say what to do, not that it is locked". The art carries its own cream card
+     * background, so it reads on both themes; a thin `rule` frame makes it a deliberate
+     * taped-on drawing rather than a floating square. Text yields the width: the name and the
+     * condition wrap short of the art rather than under it.
+     */
+    const artSize = Math.min(h - 20, 130)
+    const artX = x + w - artSize - 12
+    const artDrawn = drawTrophyArt(ctx, a.id, artX, y + (h - artSize) / 2, artSize, !got)
+    if (artDrawn) {
+      ctx.save()
+      ctx.lineWidth = STROKE.hairline
+      ctx.strokeStyle = p.rule
+      ctx.strokeRect(
+        snapX(vp, artX, STROKE.hairline),
+        snapY(vp, y + (h - artSize) / 2, STROKE.hairline),
+        artSize,
+        artSize,
+      )
+      ctx.restore()
+    }
+    const textRoom = (artDrawn ? artX - 14 : x + w - 14) - (x + 40)
+
+    paragraph(ctx, a.name, x + 40, y + nameSize + 10, {
       font: font(nameSize),
       // `rule` is the hairline tone — 1.56:1 on paper. A name nobody can read is not a name
       // (D-135); unreachable trophies are already marked by their own explanatory line.
       color: got ? p.ink : p.inkLight,
+      maxWidth: textRoom,
+      lineHeight: nameSize + 4,
+      maxLines: 1,
     })
     paragraph(
       ctx,
@@ -2333,7 +2364,8 @@ export function drawTrophies(c: ShellContext): void {
          * the filled square and the name's own colour.
          */
         color: p.inkLight,
-        maxWidth: w - 54,
+        // Short of the trophy's drawing, not under it (D-159).
+        maxWidth: textRoom,
         lineHeight: condSize + 4,
         maxLines: 2,
       },
