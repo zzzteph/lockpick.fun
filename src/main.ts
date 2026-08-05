@@ -24,3 +24,19 @@ if (!(canvas instanceof HTMLCanvasElement)) {
 void loadGameFont().then(() => {
   startApp(canvas)
 })
+
+/**
+ * The offline layer — DECISIONS D-162.
+ *
+ * `sw.js` is generated at build time (see `serviceWorker()` in vite.config.ts) with the built
+ * asset names baked in, so an installed copy opens instantly and works with no connection.
+ * Registered after the game has started because the game must never wait on it, and guarded
+ * three ways: never in dev (the worker would cache what HMR is rewriting), never from `file://`
+ * (double-clicked `dist/` has no origin to register under), and never fatally — a browser that
+ * refuses gets the plain website, which is the whole game anyway.
+ */
+if (!import.meta.env.DEV && 'serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {
+    // Electron, a locked-down browser, or a transient failure: the game is already running.
+  })
+}

@@ -14,6 +14,17 @@
     />
     <meta name="theme-color" content="#14171a" />
     <meta name="mobile-web-app-capable" content="yes" />
+    <!--
+      The installable-app layer (D-162): the manifest asks for a fullscreen landscape launch —
+      which retires the whole browser-chrome fight for anyone who installs — and the icons are
+      drawn by `dev/pwa-icons.ts` in the game's own drafting language. The Apple pair is the
+      same request in the dialect iOS Safari actually reads.
+    -->
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>SHEAR LINE</title>
     <style>
       html,
