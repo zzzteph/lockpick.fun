@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  COMPACT_SCALE,
   LOGICAL_HEIGHT,
   LOGICAL_WIDTH,
   clientToLogical,
   deviceScale,
+  isCompact,
   snapX,
   snapY,
   syncViewport,
@@ -32,6 +34,7 @@ function fakeViewport(cssWidth: number, cssHeight: number, dpr: number): Viewpor
     scale: 1,
     offsetX: 0,
     offsetY: 0,
+    interfaceMode: 'auto',
   }
   syncViewport(vp, dpr)
   return vp
@@ -152,6 +155,52 @@ describe('half-pixel snapping — ART_DIRECTION.md §8', () => {
     const s = deviceScale(vp)
     const device = snapX(vp, 640, 1) * s + vp.offsetX * vp.dpr
     expect(Math.abs(device % 1)).toBeCloseTo(0.5, 9)
+  })
+})
+
+describe("compact, full, and the player's say — DECISIONS D-160", () => {
+  it('auto keeps the scale rule: phones compact, desks full', () => {
+    const phone = fakeViewport(844, 390, 3)
+    expect(phone.scale).toBeLessThan(COMPACT_SCALE)
+    expect(isCompact(phone)).toBe(true)
+
+    const desk = fakeViewport(1600, 900, 1)
+    expect(isCompact(desk)).toBe(false)
+  })
+
+  it('exactly the threshold is full, not compact', () => {
+    // 1152x648 is COMPACT_SCALE precisely; the boundary belongs to the full page.
+    const vp = fakeViewport(1152, 648, 1)
+    expect(vp.scale).toBeCloseTo(COMPACT_SCALE, 12)
+    expect(isCompact(vp)).toBe(false)
+  })
+
+  it('the override beats the heuristic in both directions', () => {
+    const phone = fakeViewport(844, 390, 3)
+    phone.interfaceMode = 'full'
+    expect(isCompact(phone)).toBe(false)
+
+    const desk = fakeViewport(1600, 900, 1)
+    desk.interfaceMode = 'compact'
+    expect(isCompact(desk)).toBe(true)
+  })
+
+  it('auto has no fold-class exception: squarish tablet glass stays compact', () => {
+    // A Z Fold inner screen is 0.53 by the scale rule, tablet by any honest measure — and it
+    // stays compact anyway, because the full page's smallest face clears MIN_TYPE_CSS only from
+    // 0.647 up. A heuristic must not default anyone onto type the audit calls unreadable; the
+    // interfaceMode override is how a fold player takes the full page knowingly (D-160).
+    for (const [w, h] of [
+      [1016, 984], // galaxy-z-fold-7 inner
+      [1080, 892], // pixel-9-pro-fold inner
+      [1024, 768], // ipad-mini
+      [780, 360], // galaxy-s24 landscape
+      [390, 844], // portrait phone
+    ] as const) {
+      const vp = fakeViewport(w, h, 2)
+      expect(vp.scale).toBeLessThan(COMPACT_SCALE)
+      expect(isCompact(vp), `${w}x${h} should stay compact under auto`).toBe(true)
+    }
   })
 })
 

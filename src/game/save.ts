@@ -28,6 +28,8 @@ function parFor(slug: string): number {
   return lockBySlug(slug)?.par ?? 0
 }
 export type ThemeName = 'drafting' | 'blueprint'
+/** Kept literally in step with `render/viewport.ts` — the assignment in `app.ts` holds them together. */
+export type InterfaceMode = 'auto' | 'full' | 'compact'
 
 export interface SettingsData {
   /** Mouse-to-lift sensitivity multiplier. */
@@ -73,6 +75,16 @@ export interface SettingsData {
    */
   haptics: boolean
   theme: ThemeName
+  /**
+   * Full page, compact page, or let the screen size decide — DECISIONS D-160.
+   *
+   * `auto` is the compact heuristic (`COMPACT_SCALE`, plus the fold-class exception). The other
+   * two exist because players found the override themselves: Chrome's Desktop-site checkbox
+   * inflates the CSS viewport until the full page appears, and *"to have the PROPER UI I need to
+   * check in chrome - PC version, then it works perfectly"* is a player doing the browser's-menu
+   * version of this setting. The choice belongs in the game, remembered, one tap away.
+   */
+  interfaceMode: InterfaceMode
 }
 
 export const DEFAULT_SETTINGS: SettingsData = {
@@ -107,6 +119,9 @@ export const DEFAULT_SETTINGS: SettingsData = {
   // spreads `DEFAULT_SETTINGS` under whatever it read, so an old save picks this up as true.
   haptics: true,
   theme: 'drafting',
+  // No migration needed: `migrate` spreads DEFAULT_SETTINGS under whatever it read, exactly as
+  // haptics arrived. An old save wakes up on auto, which is where every save has always been.
+  interfaceMode: 'auto',
 }
 
 export interface LockRecord {

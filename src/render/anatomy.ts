@@ -272,6 +272,7 @@ export function drawAnatomy(
   p: Palette,
   layout: CutawayLayout,
   state: SimState,
+  opts: { skipKey?: boolean } = {},
 ): void {
   // A key stack with no key pin — a wafer or disc lock — has nothing to name here.
   if (state.chambers.length === 0 || state.chambers[0]?.kind !== 'pin') return
@@ -280,5 +281,6 @@ export function drawAnatomy(
   drawPartNames(vp, p, layout)
   drawKeywayLabel(vp, p, layout)
   drawShearLabel(vp, p, layout)
-  drawAnatomyKey(vp, p, layout)
+  // The margin key cedes its column to the drag-to-lift strip while a finger is down (D-160).
+  if (!opts.skipKey) drawAnatomyKey(vp, p, layout)
 }

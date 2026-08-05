@@ -13,6 +13,16 @@
 export const LOGICAL_WIDTH = 1920
 export const LOGICAL_HEIGHT = 1080
 
+/**
+ * The player's say over the compact/full decision — `settings.interfaceMode`, mirrored onto the
+ * viewport every frame by `app.ts` so `isCompact` stays a pure function of the viewport.
+ *
+ * The same union is written out in `game/save.ts` rather than imported: render does not import
+ * from game (the theme union has the same arrangement), and the assignment in `app.ts` is where
+ * the compiler holds the two copies together.
+ */
+export type InterfaceMode = 'auto' | 'full' | 'compact'
+
 export interface Viewport {
   readonly canvas: HTMLCanvasElement
   readonly ctx: CanvasRenderingContext2D
@@ -25,6 +35,8 @@ export interface Viewport {
   /** Letterbox offset in CSS px, always a whole number of device pixels. */
   offsetX: number
   offsetY: number
+  /** See `InterfaceMode`. 'auto' until the save has been read. */
+  interfaceMode: InterfaceMode
 }
 
 export function createViewport(canvas: HTMLCanvasElement): Viewport {
@@ -39,6 +51,7 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
     scale: 1,
     offsetX: 0,
     offsetY: 0,
+    interfaceMode: 'auto',
   }
   syncViewport(vp)
   return vp
@@ -93,7 +106,24 @@ export function deviceScale(vp: Viewport): number {
  */
 export const COMPACT_SCALE = 0.6
 
+/**
+ * The player's word beats the heuristic — DECISIONS D-160.
+ *
+ * `auto` is the scale rule, unchanged. `full` and `compact` are the player saying they know
+ * better, and they can: the browser never tells the page how many millimetres a CSS pixel is, so
+ * the heuristic is a guess about glass it cannot see. The proof it guesses wrong is that players
+ * were reaching for Chrome's Desktop-site checkbox — the same override, one menu further away,
+ * paid for again on every visit.
+ *
+ * An *automatic* fold-class exception — squarish tablet glass gets the full page under auto —
+ * was built and taken out again. The full page's smallest face clears `MIN_TYPE_CSS` only from
+ * 0.647 up, so every sub-0.6 device it could ever fire on would be defaulted onto type the
+ * layout audit calls unreadable, and the sweep said so 72 times. A player choosing `full` waives
+ * the floor knowingly; a heuristic must not waive it for them. See DECISIONS D-160.
+ */
 export function isCompact(vp: Viewport): boolean {
+  if (vp.interfaceMode === 'full') return false
+  if (vp.interfaceMode === 'compact') return true
   return vp.scale < COMPACT_SCALE
 }
 

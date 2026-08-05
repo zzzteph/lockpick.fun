@@ -609,3 +609,79 @@ test.describe('the results screen is laid out', () => {
     })
   }
 })
+
+/**
+ * The interface override — DECISIONS D-160.
+ *
+ * Players were reaching for Chrome's Desktop-site checkbox to get the full page on a phone:
+ * *"to have the PROPER UI I need to check in chrome - PC version, then it works perfectly."*
+ * `settings.interfaceMode: 'full'` is that override made the game's own, so these run the state
+ * the checkbox was producing — the full page with a finger on it — and hold it to the same rules
+ * as every supported state.
+ */
+test.describe('interface FULL on a phone', () => {
+  test.use({ viewport: PHONE_LANDSCAPE, hasTouch: true, isMobile: true })
+
+  test('the override beats the heuristic, and survives the save', async ({ page }) => {
+    const watcher = await bootGame(page)
+    const before = await page.evaluate(() => globalThis.__shearline!.layoutState())
+    expect(before.compact, 'a phone starts compact under auto').toBe(true)
+    expect(before.interfaceMode).toBe('auto')
+
+    await page.evaluate(() => {
+      const h = globalThis.__shearline!
+      const save = h.getSave()
+      h.setSave({ ...save, settings: { ...save.settings, interfaceMode: 'full' } })
+      h.renderOnce()
+    })
+    const after = await page.evaluate(() => globalThis.__shearline!.layoutState())
+    expect(after.interfaceMode).toBe('full')
+    expect(after.compact, 'FULL must beat the scale rule').toBe(false)
+
+    // And the round trip: what was written is what a fresh read hands back.
+    const stored = await page.evaluate(() => globalThis.__shearline!.getSave())
+    expect(stored.settings.interfaceMode).toBe('full')
+    watcher.assertClean()
+  })
+
+  /**
+   * The full page with the touch chrome on, held to the collision rules.
+   *
+   * This exact state shipped broken for as long as the checkbox has existed: the key legend
+   * printed across the withdraw pad ("TAP over PICK OUT by 6px") and the meter captions ran
+   * 42% and 52% across the drag-to-lift strip, because both were gated on `compact` standing in
+   * for "touch". Tiny type is *not* asserted against here: FULL below the compact threshold is
+   * the player waiving the type floor knowingly, and the audit's floor stays for the states the
+   * game chooses on its own.
+   */
+  test('@screenshot the full page under touch has no collisions', async ({ page }) => {
+    const watcher = await bootGame(page, { frames: 3 })
+    await page.evaluate(() => {
+      const h = globalThis.__shearline!
+      const save = h.getSave()
+      h.setSave({ ...save, settings: { ...save.settings, interfaceMode: 'full' } })
+    })
+    await setManual(page, true)
+    await loadLock(page, 22, 5) // six chambers: the widest assembly, the least spare page
+    await touchTap(page, 900, 600)
+    await setInput(page, { chamber: 2, liftTarget: 1.2, tensionHeld: true, tensionLevel: 0.45 })
+    await stepTicks(page, 90)
+    await renderOnce(page)
+
+    const touching = await page.evaluate(() => globalThis.__shearline?.getTouch() ?? false)
+    expect(touching, 'the shot has to be of the touch chrome on the full page').toBe(true)
+    const layout = await page.evaluate(() => globalThis.__shearline!.layoutState())
+    expect(layout.compact).toBe(false)
+
+    const audit = await page.evaluate(() => globalThis.__shearline!.auditScreen())
+    const collisions = audit.findings.filter((f) =>
+      ['overlap', 'text-over-control', 'crowded-text', 'off-stage'].includes(f.kind),
+    )
+    expect(
+      collisions,
+      `full+touch collisions:\n  ${collisions.map((f) => `[${f.kind}] ${f.detail}`).join('\n  ')}`,
+    ).toEqual([])
+    await captureStage(page, 'mobile-full-pick')
+    watcher.assertClean()
+  })
+})

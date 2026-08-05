@@ -727,6 +727,9 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   function applySettings(): void {
     const s = progress.data.settings
     palette = THEMES[s.theme]
+    // The seam that keeps save.ts's InterfaceMode and viewport.ts's in step: if either union
+    // gains a value the other lacks, this assignment is where the compiler says so (D-160).
+    vp.interfaceMode = s.interfaceMode
     fx.reducedMotion = motionQuery.matches || s.reducedMotion
     input.settings.sensitivity = s.sensitivity
     input.settings.tensionToggle = s.tensionToggle
@@ -1207,6 +1210,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         activeChamber: view.pickChamber,
         showTargets: assist === 'training',
         fx,
+        touchActive: input.touch.active,
         ...(felt ? { felt } : {}),
       })
       // The pick is drawn where the *hand* is, sliding along the keyway, rather than snapped
@@ -1291,6 +1295,8 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
             ['R', 'restart'],
             ['esc', 'pause'],
           ] as const),
+      // The gutters belong to the pads while a finger is down, whatever the layout (D-160).
+      touchActive: input.touch.active,
       benchHot: overBenchLink,
       // Short enough to sit between the strain meter and the plug bar at the larger face (D-102).
       restartHint: input.touch.active ? 'tap pause, then restart' : 'press [R] for a fresh pick',
@@ -1609,6 +1615,11 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   hook.goto = (name: string): void => {
     goto(name as ScreenName)
   }
+  hook.layoutState = (): { compact: boolean; interfaceMode: string; scale: number } => ({
+    compact: isCompact(vp),
+    interfaceMode: vp.interfaceMode,
+    scale: vp.scale,
+  })
   hook.getSave = (): SaveData => JSON.parse(JSON.stringify(progress.data)) as SaveData
   hook.setSave = (data: SaveData): void => {
     progress.data = data

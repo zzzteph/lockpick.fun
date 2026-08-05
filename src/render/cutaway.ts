@@ -69,6 +69,11 @@ export interface CutawayOptions {
    * tip — and its driver is drawn unshaped, so the pin's *type* stays hidden.
    */
   readonly felt?: FeltPins
+  /**
+   * True while the touch controls are on screen, which costs the anatomy its margin key — the
+   * drag-to-lift strip lives where the key's column lands on a six-chamber lock (D-160).
+   */
+  readonly touchActive?: boolean
 }
 
 /** In blind mode, only the chamber under the tip is drawn at all. */
@@ -801,8 +806,13 @@ export function drawCutaway(
    * which (D-050), and on a full page it costs nothing. On a phone it is six labels at a size
    * nobody can read, drawn across the one thing they need to see. The lock itself is the tutorial
    * on a small screen; the words are in Help.
+   *
+   * Under touch the part names stay — they sit inside the body and at the mouth margin, which no
+   * pad occupies — but the pin-stack key goes: its column lands where the drag-to-lift strip is
+   * once the assembly is six chambers wide, and "key pin, 70% across the edge of a control" is
+   * what the audit made of keeping it (D-160).
    */
-  if (!isCompact(vp)) drawAnatomy(vp, p, layout, state)
+  if (!isCompact(vp)) drawAnatomy(vp, p, layout, state, { skipKey: opts.touchActive ?? false })
 }
 
 function drawChamberLabels(

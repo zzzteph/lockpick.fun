@@ -322,6 +322,15 @@ export interface DevHook {
     drawn: number
     scale: number
   }
+  /**
+   * Which page the layout decided on, and what decided it — DECISIONS D-160.
+   *
+   * `compact` is the decision every screen draws by; the other two are the evidence: the player's
+   * override and the stage scale. Exposed because a test asserting the FULL override has nothing
+   * else honest to read — screenshots of the two menus differ by almost nothing, and widget
+   * counts are a coincidence, not a claim.
+   */
+  layoutState(): { compact: boolean; interfaceMode: string; scale: number }
 }
 
 declare global {

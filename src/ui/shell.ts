@@ -66,6 +66,9 @@ export type ScreenName =
 
 const MARGIN = 24
 
+/** The three answers to "which page?" — the default first, then the two overrides (D-160). */
+const INTERFACE_MODES = ['auto', 'full', 'compact'] as const
+
 export interface ShellActions {
   goto(screen: ScreenName): void
   startLock(def: LockDef): void
@@ -1869,6 +1872,62 @@ export function drawSettings(c: ShellContext): void {
   // It mirrors the touch controls too now (D-130) — worth saying where there is room to say it.
   if (!compact)
     text(ctx, 'mirrors the lock, so the keyway opens on your side', left + 344, y + 34, {
+      font: font(typeFor(vp, TYPE.dimension)),
+      color: p.inkLight,
+    })
+  y += compact ? 18 + segH + 42 : 84
+
+  /**
+   * Full page, compact page, or let the screen decide — DECISIONS D-160.
+   *
+   * On the row above the volume sliders because the people it exists for reach this screen
+   * through the compact layout, and a control that overrules the compact layout has to be
+   * findable *from* it. The row is the override the player was getting from Chrome's
+   * Desktop-site checkbox, put where it can be remembered.
+   */
+  /**
+   * Full ink, not `inkLight` — the D-148 rule, met by a different road.
+   *
+   * `sampleGround` reads one row of pixels across the run, and at 844x390 this label's row lands
+   * exactly on a horizontal grid hairline: five samples, five hits, median `rule`, and `inkLight`
+   * on `rule` is 3.92:1. The sibling labels above pass by the luck of their rows falling between
+   * hairlines, which is not a property to build on — a label that cannot choose its ground gets
+   * the ink that clears every ground it could have (16.4:1). See DECISIONS D-160.
+   */
+  label(ctx, 'interface', left, y, {
+    font: font(typeFor(vp, TYPE.dimension)),
+    size: typeFor(vp, TYPE.dimension),
+    color: p.ink,
+  })
+  const modeIndex = segmented(
+    vp,
+    p,
+    ui,
+    // Sized from the longest word at the live face, exactly as the assist row is (D-132).
+    {
+      x: left,
+      y: y + (compact ? 18 : 10),
+      w: compact
+        ? Math.min(
+            860,
+            INTERFACE_MODES.reduce(
+              (m, mode) =>
+                Math.max(m, Math.ceil(captionWidth(vp, mode, typeFor(vp, TYPE.body))) + 24),
+              0,
+            ) * INTERFACE_MODES.length,
+          )
+        : 450,
+      h: segH,
+    },
+    INTERFACE_MODES,
+    INTERFACE_MODES.indexOf(s.interfaceMode),
+  )
+  const nextMode = INTERFACE_MODES[modeIndex]
+  if (nextMode !== undefined && nextMode !== s.interfaceMode) {
+    actions.updateSettings({ interfaceMode: nextMode })
+  }
+  if (!compact)
+    text(ctx, 'full is the desktop page; compact enlarges what a phone needs', left + 474, y + 34, {
       font: font(typeFor(vp, TYPE.dimension)),
       color: p.inkLight,
     })

@@ -150,6 +150,16 @@ export interface HudOptions {
    */
   readonly keys: readonly (readonly [string, string])[]
   /**
+   * True while the touch controls are on screen — DECISIONS D-160.
+   *
+   * The compact gates below used to stand in for this, because compact and touch arrived
+   * together on every device anyone had tested. They are not the same thing: a phone forced to
+   * the full page (`interfaceMode: 'full'`, or Chrome's Desktop-site checkbox before it) is
+   * full *and* touching, and the legend and the meter captions printed straight across the pads
+   * that had moved into their gutters.
+   */
+  readonly touchActive?: boolean
+  /**
    * Where the lock assembly starts, so the key legend can stop short of it (D-157).
    *
    * The legend lives in the left gutter, and the gutter is not a fixed width: a five-chamber
@@ -929,7 +939,9 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
      * off the top edge, which is exactly what it was.
      */
     let cy = CAPTION_Y
-    if (!compact) {
+    // Not under touch either: the drag-to-lift strip lives in this gutter (D-129), and on the
+    // full page with a finger down these two lines printed 42% and 52% across its edge (D-160).
+    if (!compact && !opts.touchActive) {
       for (const line of ['force — how hard you push', 'resistance — how hard it pushes back']) {
         cy += paragraph(ctx, line, captionX, cy, {
           font: font(ts(TYPE.dimension)),
@@ -1049,10 +1061,14 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
 
   drawSidebarLamp(vp, p, state, footerY)
 
-  // The touch controls are drawn on screen and labelled, so on a phone this legend described
-  // controls the player was looking at — and did it *on top of them*, straight across the pause
-  // pad and the wrench slider, which share the same gutter (D-122).
-  if (!compact) drawKeyLegend(vp, p, opts.keys, (opts.assemblyLeft ?? LOGICAL_WIDTH) - 10)
+  // The touch controls are drawn on screen and labelled, so the legend would describe controls
+  // the player is looking at — and do it *on top of them*, straight across the pause pad and the
+  // wrench slider, which share the same gutter (D-122). Gated on touch itself, not on compact
+  // standing in for it: the full page with a finger on it has the same pads in the same gutter,
+  // and "TAP over PICK OUT by 6px" is what the audit made of the old gate there (D-160).
+  if (!compact && !opts.touchActive) {
+    drawKeyLegend(vp, p, opts.keys, (opts.assemblyLeft ?? LOGICAL_WIDTH) - 10)
+  }
 }
 
 /**
