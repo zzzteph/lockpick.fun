@@ -645,6 +645,64 @@ test.describe('interface FULL on a phone', () => {
   })
 
   /**
+   * The double-tap that used to undo the choice — DECISIONS D-161.
+   *
+   * Tapping FULL re-laid the settings screen out on the very next frame, under the finger that
+   * tapped: the interface row jumped up and shrank, and the spot the thumb still covered fell to
+   * the COMPACT cell, with the near-miss floor making it generous. A confirmation tap — the most
+   * natural gesture there is — silently undid the choice. Reported as the pick screen coming up
+   * "very big" right after choosing FULL. The change is applied on the way *out* of the screen
+   * now, so the same coordinates tapped twice must mean the same cell both times.
+   */
+  test('a second tap on the same spot cannot undo FULL', async ({ page }) => {
+    const watcher = await bootGame(page)
+    await goto(page, 'settings')
+    // Reach the FULL cell through the real click path, the way a finger would.
+    const candidates = [
+      { x: 376, y: 463 },
+      { x: 300, y: 463 },
+      { x: 440, y: 463 },
+      { x: 376, y: 445 },
+      { x: 376, y: 480 },
+    ]
+    let hit: { x: number; y: number } | null = null
+    for (const c of candidates) {
+      await page.evaluate((pt) => globalThis.__shearline!.clickAt(pt.x, pt.y), c)
+      const mode = await page.evaluate(
+        () => globalThis.__shearline!.getSave().settings.interfaceMode,
+      )
+      if (mode === 'full') {
+        hit = c
+        break
+      }
+    }
+    expect(hit, 'the FULL cell should be reachable by tapping the row').not.toBeNull()
+    if (!hit) return
+
+    // The screen must NOT have reflowed under the finger: the same spot is still FULL.
+    await page.evaluate((pt) => globalThis.__shearline!.clickAt(pt.x, pt.y), hit)
+    const after = await page.evaluate(
+      () => globalThis.__shearline!.getSave().settings.interfaceMode,
+    )
+    expect(after, 'a repeat tap re-selects FULL; it must not flip to COMPACT').toBe('full')
+
+    // Leaving and returning is a fresh visit: the full-page settings layout appears, and holds
+    // to the collision rules (its tiny type is the player's explicit choice, as everywhere).
+    await goto(page, 'menu')
+    await goto(page, 'settings')
+    const audit = await page.evaluate(() => globalThis.__shearline!.auditScreen())
+    const collisions = audit.findings.filter((f) =>
+      ['overlap', 'text-over-control', 'crowded-text', 'off-stage'].includes(f.kind),
+    )
+    expect(
+      collisions,
+      `settings-in-FULL collisions:\n  ${collisions.map((f) => `[${f.kind}] ${f.detail}`).join('\n  ')}`,
+    ).toEqual([])
+    await captureStage(page, 'mobile-settings-full')
+    watcher.assertClean()
+  })
+
+  /**
    * The full page with the touch chrome on, held to the collision rules.
    *
    * This exact state shipped broken for as long as the checkbox has existed: the key legend

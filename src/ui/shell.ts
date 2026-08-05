@@ -1766,6 +1766,9 @@ export function drawSettings(c: ShellContext): void {
    * So the space that was already there gets used. Controls left, switches right, and the pitch
    * roughly doubles. Nothing is dropped and nothing is paged.
    */
+  // Safe to read live only because an interface change is *applied* on screen exit (D-161):
+  // while the player is here, `isCompact` cannot change out from under their finger, and a
+  // half-pinned version of this screen — structure frozen, type sizes live — moves anyway.
   const compact = isCompact(vp)
   const left = MARGIN + 60
   const w = 420

@@ -357,6 +357,9 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     screen = next
     if (next === 'results') resultsAge = 0
     ui.reset()
+    // Any interface change chosen *on* the settings screen lands here, on the way out —
+    // never while the finger that chose it is still over the row (D-161).
+    vp.interfaceMode = progress.data.settings.interfaceMode
     applyCursor(next)
     // Immediately, not on the next frame: a finger that lands the instant the lock appears must
     // already be a gesture on the lock rather than a stray tap on the screen it came from (D-082).
@@ -727,9 +730,18 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   function applySettings(): void {
     const s = progress.data.settings
     palette = THEMES[s.theme]
-    // The seam that keeps save.ts's InterfaceMode and viewport.ts's in step: if either union
-    // gains a value the other lacks, this assignment is where the compiler says so (D-160).
-    vp.interfaceMode = s.interfaceMode
+    /**
+     * The seam that keeps save.ts's InterfaceMode and viewport.ts's in step: if either union
+     * gains a value the other lacks, this assignment is where the compiler says so (D-160).
+     *
+     * Deferred while the player is *on* the settings screen — DECISIONS D-161. Applying it live
+     * re-laid that screen out under the finger that tapped FULL: the row jumped up and shrank,
+     * the vacated spot fell to the COMPACT cell's inflated touch rect, and the confirmation tap
+     * players naturally make silently undid the choice — reported as the pick screen coming up
+     * "very big" straight after choosing FULL. `goto` applies it on the way out instead; every
+     * other path (boot, imports, the dev hook mid-menu) still applies it here, immediately.
+     */
+    if (screen !== 'settings') vp.interfaceMode = s.interfaceMode
     fx.reducedMotion = motionQuery.matches || s.reducedMotion
     input.settings.sensitivity = s.sensitivity
     input.settings.tensionToggle = s.tensionToggle
