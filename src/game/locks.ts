@@ -272,8 +272,10 @@ const ROSTER: LockDef[] = [
     family: 'pin-tumbler',
     bitting: [3.15, 3.2, 2.9, 3.05, 3.3, 3.4],
     // Two t-pins among the serrated ones. A t-pin has the highest measured tension wall in the
-    // game (T≈0.65, D-053) — it is the pin that punishes a heavy hand hardest, and until now no
-    // lock in the roster carried one.
+    // game (T≈0.65, D-053) — square shoulders, so it catches and holds where a mushroom shoves
+    // back; the pin that actually punishes a heavy hand hardest is the mushroom (wall ≈0.29).
+    // The old version of this comment drew the opposite conclusion from the same number, and a
+    // store-copy fact-check caught the sentence it seeded. Until now no roster lock carried one.
     pins: ['t-pin', 'serrated', 'serrated', 't-pin', 'spool', 'spool'],
     toleranceQuality: 0.72,
     keyway: 'standard',

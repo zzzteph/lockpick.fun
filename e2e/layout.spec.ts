@@ -89,7 +89,10 @@ const SCREENS: { name: string; arrange: (page: Page) => Promise<void> }[] = [
         const h = globalThis.__shearline!
         h.setSave({
           ...h.getSave(),
-          achievements: ['first-blood', 'clean-sweep', 'under-par', 'apprentice', 'journeyman'],
+          // Flawless carries the longest condition left after the D-164 cut (Clean Sweep, the
+          // previous record-holder, went with it) — the seed exists to run the longest string
+          // through the recent-trophy column.
+          achievements: ['first-blood', 'flawless-tier', 'under-par', 'apprentice', 'journeyman'],
         })
       })
       await goto(p, 'menu')

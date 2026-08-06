@@ -7,10 +7,12 @@
  * becomes true, and one loop asserts that every id in `ACHIEVEMENTS` appears in it and fires.
  * Adding one without a scenario fails the suite.
  *
- * Thirty-eight, not the forty `CONTENT.md §3` lists: `rake-and-run` and `rake-master` went with
- * the rake (D-058). The counts below are asserted against the catalogue as it now is, and the
- * group totals with them — a spec number kept as a target after the content behind it was removed
- * is a test that fails for the right reason and gets "fixed" by putting the content back.
+ * Thirteen, not the forty `CONTENT.md §3` lists nor the thirty-four this suite once counted:
+ * `rake-and-run` and `rake-master` went with the rake (D-058), the shop and disc-detainer cuts
+ * took their plates (D-088, D-104), and D-164 was the owner's launch cut down to the spine. The
+ * counts below are asserted against the catalogue as it now is — a spec number kept as a target
+ * after the content behind it was removed is a test that fails for the right reason and gets
+ * "fixed" by putting the content back.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -22,8 +24,7 @@ import {
   unreachableAchievements,
   type AchievementContext,
 } from '../../src/game/achievements'
-import { CHALLENGES } from '../../src/game/challenges'
-import { ALL_LOCKS, chambersOf, locksInTier } from '../../src/game/locks'
+import { ALL_LOCKS, locksInTier } from '../../src/game/locks'
 import { Progress, outcomeFrom, type AttemptOutcome } from '../../src/game/progress'
 import { MemoryStorage, newSave, type LockRecord, type SaveData } from '../../src/game/save'
 import type { LockDef } from '../../src/sim'
@@ -70,29 +71,12 @@ function opened(locks: readonly LockDef[], patch: Partial<SaveData> = {}): SaveD
   return save({ records, ...patch })
 }
 
-/** Every lock opened, every challenge cleared somewhere. */
-function everything(): SaveData {
-  const records: Record<string, LockRecord> = {}
-  for (const d of ALL_LOCKS) records[d.slug] = record({ challenges: CHALLENGES.map((c) => c.id) })
-  return save({ records })
-}
-
-/** Every Tier 1 and Tier 2 lock opened under par. */
-function speedRunSave(): SaveData {
-  const records: Record<string, LockRecord> = {}
-  for (const d of [...locksInTier(1), ...locksInTier(2)]) {
-    records[d.slug] = record({ bestTime: d.par - 1 })
-  }
-  return save({ records })
-}
-
-
 /**
  * One world per achievement, in which that achievement — and only what it implies — is true.
  *
  * These are hand-built rather than played, on purpose. Several conditions describe states a
- * playthrough would take hours to reach (fifty resets, fifteen minutes, twenty-five opens),
- * and a test that cannot reach them is a test that cannot prove they fire.
+ * playthrough would take hours to reach (twenty-five opens, every lock in the game), and a
+ * test that cannot reach them is a test that cannot prove they fire.
  */
 const SCENARIOS: Record<string, () => AchievementContext> = {
   'first-blood': () => ({
@@ -104,56 +88,6 @@ const SCENARIOS: Record<string, () => AchievementContext> = {
   locksmith: () => ({ outcome: null, save: opened(locksInTier(3)) }),
   specialist: () => ({ outcome: null, save: opened(locksInTier(4)) }),
   'master-of-the-bench': () => ({ outcome: null, save: opened(ALL_LOCKS) }),
-  completionist: () => ({ outcome: null, save: everything() }),
-
-  'single-pin-purist': () => {
-    const def = lockOf((d) => chambersOf(d) >= 5, 'five or more chambers')
-    return { outcome: attempt({ lock: def }), save: save() }
-  },
-  'feather-touch': () => ({
-    outcome: attempt({ lock: ALL_LOCKS[0] as LockDef, feathers: 1, oversets: 1 }),
-    save: save(),
-  }),
-  'push-through': () => {
-    const def = lockOf((d) => d.pins.filter((p) => p === 'spool').length >= 4, 'four spools')
-    return { outcome: attempt({ lock: def, securityPinsSet: 4, resets: 0 }), save: save() }
-  },
-  'not-fooled': () => ({
-    outcome: attempt({ lock: ALL_LOCKS[0] as LockDef, falseSets: 3 }),
-    save: save(),
-  }),
-  'light-hand': () => ({
-    outcome: attempt({ lock: ALL_LOCKS[0] as LockDef, maxTension: 0.28 }),
-    save: save(),
-  }),
-  'iron-grip': () => ({
-    outcome: attempt({ lock: ALL_LOCKS[0] as LockDef, minTensionWhileHeld: 0.74 }),
-    save: save(),
-  }),
-  'clean-sweep': () => {
-    const locks = locksInTier(1)
-    return {
-      outcome: attempt({ lock: locks[locks.length - 1] as LockDef, oversets: 0 }),
-      save: opened(locks),
-    }
-  },
-  architect: () => ({ outcome: null, save: save({ customLocks: [ALL_LOCKS[0] as LockDef] }) }),
-  prolific: () => ({
-    outcome: null,
-    save: save({ customLocks: [0, 1, 2, 3, 4].map(() => ALL_LOCKS[0] as LockDef) }),
-  }),
-  'own-medicine': () => ({
-    outcome: attempt({ lock: { ...(ALL_LOCKS[0] as LockDef), id: 10_000 } }),
-    save: save(),
-  }),
-  'every-cylinder': () => {
-    const cylinders = ALL_LOCKS.filter((d) => d.family === 'pin-tumbler')
-    return { outcome: null, save: opened(cylinders) }
-  },
-  surgeon: () => {
-    const def = lockOf((d) => d.tier >= 4, 'a Tier 4+ lock')
-    return { outcome: attempt({ lock: def, oversets: 0 }), save: save() }
-  },
 
   'expert-hands': () => ({
     outcome: attempt({ lock: ALL_LOCKS[0] as LockDef, assist: 'medium' }),
@@ -171,70 +105,33 @@ const SCENARIOS: Record<string, () => AchievementContext> = {
     const def = ALL_LOCKS[0] as LockDef
     return { outcome: attempt({ lock: def, seconds: def.par - 1 }), save: save() }
   },
-  'half-par': () => {
-    const def = ALL_LOCKS[0] as LockDef
-    return { outcome: attempt({ lock: def, seconds: def.par / 2 - 1 }), save: save() }
-  },
-  'speed-run': () => ({ outcome: null, save: speedRunSave() }),
-  'no-second-chances': () => {
-    const def = lockOf((d) => d.tier >= 4, 'a Tier 4+ lock')
-    return {
-      outcome: attempt({ lock: def, resets: 0 }),
-      save: save({ records: { [def.slug]: record({ opens: 1 }) } }),
-    }
-  },
-  'the-sovereign': () => {
-    const def = ALL_LOCKS.find((d) => d.id === 31)
-    return { outcome: null, save: def ? opened([def]) : save() }
-  },
-
-  /*
-   * `wafer-thin`, `dimpled` and `round-and-round` stood here for families cut in D-088, and
-   * `disc-jockey` and `high-security` for the disc detainers cut in D-104. All five outlived the
-   * achievements they built a world for: the catalogue loop only asks that every achievement *has*
-   * a scenario, so a scenario for an achievement that no longer exists was never once run and
-   * never once complained. The reverse assertion is in the catalogue suite now.
-   */
-  sidebar: () => ({
-    outcome: null,
-    save: opened(ALL_LOCKS.filter((d) => d.sidebar !== undefined)),
-  }),
-  'cracked-it': () => {
-    const def = ALL_LOCKS.find((d) => d.id === 36)
-    return { outcome: null, save: def ? opened([def]) : save() }
-  },
-
+  // `record()` defaults to bestRank 0 — an S on every lock in the tier is exactly the ask.
   'flawless-tier': () => ({ outcome: null, save: opened(locksInTier(1)) }),
-  regular: () => ({
-    outcome: null,
-    save: save({
-      playDays: Object.fromEntries(Array.from({ length: 7 }, (_, i) => [`2026-07-0${i + 1}`, 1])),
-    }),
-  }),
-  persistent: () => ({
-    outcome: attempt({ lock: ALL_LOCKS[0] as LockDef, resets: 50 }),
-    save: save(),
-  }),
-  patience: () => ({
-    outcome: attempt({ lock: ALL_LOCKS[0] as LockDef, seconds: 15 * 60 }),
-    save: save(),
-  }),
+
+  architect: () => ({ outcome: null, save: save({ customLocks: [ALL_LOCKS[0] as LockDef] }) }),
   curious: () => ({
     outcome: null,
     save: save({ records: { x: record({ opens: 25 }) } }),
   }),
+
+  /*
+   * Twenty-one scenarios stood here for the plates D-164 retired — the technique column, the
+   * family column, Completionist, the par variants, the endurance oddities. The paired
+   * assertions below are why they could not simply be left: a scenario nothing indexes is never
+   * run, which is this project's own named failure mode, and the reverse loop now fails on any
+   * scenario that outlives its achievement.
+   */
 }
 
 // ── The suite ───────────────────────────────────────────────────────────────────────────
 
 describe('the achievement catalogue', () => {
-  it('is the thirty-four left after the inventory and the disc detainers were removed', () => {
-    // Was 38. The shop went with D-088 and took *Well Equipped*, *Full Kit* and *Frugal* with it;
-    // *One Tool* became *Clean Sweep*, and the wafer, dimple and tubular family trophies became
-    // editor and cylinder ones. D-104 cut the disc detainers and took *Disc Jockey* and
-    // *High Security* — "open every Tier 5 lock", of which there are none. Nothing left is
-    // unreachable.
-    expect(ACHIEVEMENTS).toHaveLength(34)
+  it('is the thirteen of the launch cut', () => {
+    // Was 38, then 34 (D-088, D-104), now 13: the owner's D-164 cut, made while entering the
+    // Steamworks rows, kept the progression ladder, the difficulty and rank feats, the editor's
+    // front door and one long-haul oddity. The number is asserted so the next cut or addition
+    // has to come here and say so.
+    expect(ACHIEVEMENTS).toHaveLength(13)
   })
 
   it('has unique ids and names', () => {
@@ -242,15 +139,15 @@ describe('the achievement catalogue', () => {
     expect(new Set(ACHIEVEMENTS.map((a) => a.name)).size).toBe(ACHIEVEMENTS.length)
   })
 
-  it('is spread across all five groups, with none of them empty', () => {
-    // The exact split moved with the roster cut (D-088) and will move again with the next content
-    // change. What has to hold is that every group is worth opening: a group with one plate in it
-    // is a heading with nothing under it.
-    const groups = ['progression', 'technique', 'mastery', 'family', 'bench'] as const
+  it('is spread across the three groups that remain, with none of them empty', () => {
+    // Five groups before D-164; the cut emptied technique and family outright, so the type
+    // union shrank with the content. Bench holds two — below the old three-plate bar, kept
+    // because a heading with two honest plates beats retiring the editor's column entirely.
+    const groups = ['progression', 'mastery', 'bench'] as const
     let total = 0
     for (const g of groups) {
       const n = achievementsInGroup(g).length
-      expect(n, g).toBeGreaterThanOrEqual(3)
+      expect(n, g).toBeGreaterThanOrEqual(2)
       total += n
     }
     expect(total).toBe(ACHIEVEMENTS.length)
@@ -271,10 +168,10 @@ describe('the achievement catalogue', () => {
   /**
    * …and no scenario for an achievement that does not exist.
    *
-   * The paired assertion, and the one that was missing. Five scenarios outlived their achievements
-   * across two content cuts — worlds built, and never once run, because the loop below iterates
-   * `ACHIEVEMENTS` and a scenario nothing indexes is simply never asked for. That is this
-   * project's own stated failure mode: code that is present, tested-looking, and inert.
+   * The paired assertion. Five scenarios once outlived their achievements across two content
+   * cuts — worlds built, and never once run, because the loop below iterates `ACHIEVEMENTS` and
+   * a scenario nothing indexes is simply never asked for. D-164 retired twenty-one at once;
+   * this loop is what proves their worlds left with them.
    */
   it('has no scenario left over from an achievement that was removed', () => {
     const ids = new Set(ACHIEVEMENTS.map((a) => a.id))
@@ -291,8 +188,6 @@ describe('every achievement can fire', () => {
       if (!build) return
       const ctx = build()
       if (!a.reachable()) {
-        // Unreachable is allowed — but only for the reason the achievement declares, and the
-        // roster test below is what keeps that list from quietly growing.
         expect(a.test(ctx), `${a.id} claims to be unreachable but fired`).toBe(false)
         return
       }
@@ -302,26 +197,19 @@ describe('every achievement can fire', () => {
 })
 
 describe('reachability against the roster that actually exists', () => {
-  it('names every unreachable achievement, and each names a lock that is not built', () => {
-    const blocked = unreachableAchievements()
-    // Only the two that name a specific Tier 6 lock may be unreachable, and only while those
-    // locks are unauthored. Phase 13 adds #31; #36 may be cut, per CONTENT.md §1.
-    const allowed = new Set(['the-sovereign', 'cracked-it'])
-    const unexpected = blocked.filter((a) => !allowed.has(a.id)).map((a) => a.id)
-    expect(unexpected, 'an achievement became unearnable').toEqual([])
-    for (const a of blocked) {
-      const id = a.id === 'the-sovereign' ? 31 : 36
-      expect(ALL_LOCKS.some((d) => d.id === id), `${a.id}`).toBe(false)
-    }
+  it('leaves nothing unreachable', () => {
+    // The allow-list this test once carried is long retired: the-sovereign was authored, the
+    // Bench Safe plate was re-pointed (D-163) and then cut with the rest of D-164. An entry
+    // appearing here again is a shipped-dead trophy, loudly.
+    expect(unreachableAchievements().map((a) => a.id)).toEqual([])
   })
 
-  it('becomes reachable the moment the lock it names is authored', () => {
+  it('reachability still tracks the roster, not the spec', () => {
     // Proven by construction rather than by mutating the roster: `reachable()` is a lookup on
-    // `ALL_LOCKS`, and the paired test above shows it currently returns false for exactly the
-    // ids whose lock is absent. Adding the lock flips it — which is what Phase 13 will do.
-    const sovereign = achievementById('the-sovereign')
-    expect(sovereign).toBeDefined()
-    expect(sovereign?.reachable()).toBe(ALL_LOCKS.some((d) => d.id === 31))
+    // the tier lists, so authoring or cutting a lock moves it without anyone remembering to.
+    const specialist = achievementById('specialist')
+    expect(specialist).toBeDefined()
+    expect(specialist?.reachable()).toBe(locksInTier(4).length > 0)
   })
 })
 
@@ -332,7 +220,7 @@ describe('newlyEarned', () => {
     if (!ctx) return
     const first = newlyEarned(ctx)
     expect(first.map((a) => a.id)).toContain('master-of-the-bench')
-    // Declaration order: progression before family, always.
+    // Declaration order: progression before mastery, always.
     const ids = ACHIEVEMENTS.map((a) => a.id)
     const positions = first.map((a) => ids.indexOf(a.id))
     expect(positions).toEqual([...positions].sort((x, y) => x - y))
@@ -343,15 +231,16 @@ describe('newlyEarned', () => {
   })
 
   it('fires several at once when one open completes several conditions', () => {
-    const ctx = SCENARIOS['completionist']?.()
+    const ctx = SCENARIOS['master-of-the-bench']?.()
     expect(ctx).toBeDefined()
     if (!ctx) return
     const earned = newlyEarned(ctx)
-    // Opening the last lock in the game completes the whole progression column and every
-    // family column at the same moment. That stack is exactly what the card beat animates.
+    // Opening the last lock in the game completes the whole progression column at the same
+    // moment — and `record()`'s default S ranks bring Flawless with it. That stack is exactly
+    // what the card beat animates.
     expect(earned.length).toBeGreaterThan(4)
-    expect(earned.map((a) => a.id)).toContain('completionist')
     expect(earned.map((a) => a.id)).toContain('master-of-the-bench')
+    expect(earned.map((a) => a.id)).toContain('flawless-tier')
   })
 })
 
@@ -366,7 +255,6 @@ describe('Progress.claimAchievements', () => {
     const first = progress.claimAchievements(o)
     expect(first.map((a) => a.id)).toContain('first-blood')
     expect(first.map((a) => a.id)).toContain('under-par')
-    expect(first.map((a) => a.id)).toContain('half-par')
     expect(progress.hasAchievement('first-blood')).toBe(true)
 
     // Same attempt again: the records move on, but nothing already earned re-fires.
@@ -377,62 +265,37 @@ describe('Progress.claimAchievements', () => {
     const reloaded = new Progress(storage)
     expect(reloaded.hasAchievement('first-blood')).toBe(true)
   })
-
-  it('Clean Sweep needs the tier finished *and* the finishing lock clean', () => {
-    const storage = new MemoryStorage()
-    const progress = Progress.fresh(storage)
-    const tier1 = locksInTier(1)
-    for (const def of tier1) progress.completeAttempt(attempt({ lock: def }))
-    const last = tier1[tier1.length - 1] as LockDef
-
-    // Tier complete, but the finishing attempt jammed a pin.
-    expect(
-      progress.claimAchievements(attempt({ lock: last, oversets: 2 })).map((a) => a.id),
-    ).not.toContain('clean-sweep')
-    // Same tier, clean attempt.
-    expect(
-      progress.claimAchievements(attempt({ lock: last, oversets: 0 })).map((a) => a.id),
-    ).toContain('clean-sweep')
-  })
 })
 
 describe('the conditions are not accidentally always true', () => {
   const negatives: Record<string, () => AchievementContext> = {
-    'single-pin-purist': () => ({
-      outcome: attempt({ lock: lockOf((d) => chambersOf(d) < 5, 'small'), oversets: 0 }),
-      save: save(),
-    }),
-    'light-hand': () => ({
-      outcome: attempt({ lock: ALL_LOCKS[0] as LockDef, maxTension: 0.31 }),
-      save: save(),
-    }),
-    'iron-grip': () => ({
-      outcome: attempt({ lock: ALL_LOCKS[0] as LockDef, minTensionWhileHeld: 0.69 }),
-      save: save(),
-    }),
-    surgeon: () => ({
-      outcome: attempt({ lock: lockOf((d) => d.tier >= 4, 'T4+'), oversets: 1 }),
-      save: save(),
-    }),
     'under-par': () => {
       const def = ALL_LOCKS[0] as LockDef
       return { outcome: attempt({ lock: def, seconds: def.par + 1 }), save: save() }
     },
-    'feather-touch': () => ({
-      // Feathered, but nothing was ever overset — there was nothing to recover from.
-      outcome: attempt({ lock: ALL_LOCKS[0] as LockDef, feathers: 2, oversets: 0 }),
+    'expert-hands': () => ({
+      outcome: attempt({ lock: ALL_LOCKS[0] as LockDef, assist: 'easy' }),
       save: save(),
     }),
-    'clean-sweep': () => {
+    'blind-master': () => ({
+      // Hard, but on a Tier 1 lock — the tier is the half that must not be forgotten.
+      outcome: attempt({ lock: lockOf((d) => d.tier === 1, 'a Tier 1 lock'), assist: 'hard' }),
+      save: save(),
+    }),
+    'flawless-tier': () => {
+      // Every Tier 1 lock opened, but one of them at rank A — the standard is S across the tier.
       const locks = locksInTier(1)
-      return {
-        // Tier complete, but the finishing attempt jammed a pin.
-        outcome: attempt({ lock: locks[locks.length - 1] as LockDef, oversets: 1 }),
-        save: opened(locks),
-      }
+      const records: Record<string, LockRecord> = {}
+      for (const d of locks) records[d.slug] = record()
+      const first = locks[0] as LockDef
+      records[first.slug] = record({ bestRank: 1 })
+      return { outcome: null, save: save({ records }) }
     },
+    curious: () => ({
+      outcome: null,
+      save: save({ records: { x: record({ opens: 24 }) } }),
+    }),
     architect: () => ({ outcome: null, save: save({ customLocks: [] }) }),
-    'own-medicine': () => ({ outcome: attempt({ lock: ALL_LOCKS[0] as LockDef }), save: save() }),
   }
 
   for (const [id, build] of Object.entries(negatives)) {
@@ -445,11 +308,11 @@ describe('the conditions are not accidentally always true', () => {
 
   it('never fires an attempt-shaped achievement on a failed attempt', () => {
     const def = ALL_LOCKS[0] as LockDef
-    const failed = attempt({ lock: def, opened: false, seconds: 1, falseSets: 9, resets: 99 })
+    const failed = attempt({ lock: def, opened: false, seconds: 1, assist: 'hard' })
     const earned = newlyEarned({ outcome: failed, save: save() })
     expect(earned.map((a) => a.id)).not.toContain('under-par')
-    expect(earned.map((a) => a.id)).not.toContain('persistent')
-    expect(earned.map((a) => a.id)).not.toContain('not-fooled')
+    expect(earned.map((a) => a.id)).not.toContain('blind-faith')
+    expect(earned.map((a) => a.id)).not.toContain('expert-hands')
   })
 })
 
@@ -470,13 +333,13 @@ describe('outcomeFrom carries what the achievements need', () => {
       feathers: 3,
       falseSetsEntered: 4,
       maxCounterForce: 0,
-        maxResistance: 0,
+      maxResistance: 0,
       maxTension: 0.82,
       minTensionWhileHeld: 0.11,
       elapsed: 12.5,
     }
     const o = outcomeFrom(def, state as never, stats, { challenges: ['no-resets'] })
-        expect(o.feathers).toBe(3)
+    expect(o.feathers).toBe(3)
     expect(o.maxTension).toBeCloseTo(0.82)
     expect(o.minTensionWhileHeld).toBeCloseTo(0.11)
     expect(o.assist).toBe('hard')
@@ -493,7 +356,7 @@ describe('outcomeFrom carries what the achievements need', () => {
       feathers: 0,
       falseSetsEntered: 0,
       maxCounterForce: 0,
-        maxResistance: 0,
+      maxResistance: 0,
       maxTension: 0,
       // The sentinel `minTensionWhileHeld` starts at, meaning "never held".
       minTensionWhileHeld: Infinity,
@@ -504,8 +367,9 @@ describe('outcomeFrom carries what the achievements need', () => {
       { opened: true, time: 0, chambers: [], config: { assist: 'easy' as const } } as never,
       stats,
     )
-    // Or *Iron Grip* is earned by a lock nobody ever put a wrench in.
+    // Infinity leaking through would read as "held very hard the whole time" to any consumer
+    // of this field — the old Iron Grip was earned exactly that way once, which is why the
+    // field is clamped even now that the plate is gone.
     expect(o.minTensionWhileHeld).toBe(0)
-    expect(achievementById('iron-grip')?.test({ outcome: o, save: save() })).toBe(false)
   })
 })

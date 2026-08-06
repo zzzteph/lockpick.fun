@@ -248,13 +248,14 @@ test('a whole playthrough: new save, tutorial, one lock a tier, everything banke
     gatesPassed,
   )
 
-  // Achievements fired off real opens rather than being handed out. This run opens *some* of
-  // each tier and *all* of Tier 4, so `specialist` is the one that proves a whole-tier
-  // condition can be earned by playing — `apprentice` cannot, because Tier 1 is deliberately
-  // only sampled here.
+  // Achievements fired off real opens rather than being handed out. Under the 34-plate
+  // catalogue this sampled run banked technique plates in passing and the bar here was five;
+  // the thirteen that survived D-164 are milestones, and a run that samples tiers rather than
+  // finishing them legitimately banks exactly the two a sampled run should. The loop below —
+  // every banked id is a real achievement — is the assertion that actually guards the save.
   expect(end.achievements).toContain('first-blood')
   expect(end.achievements).toContain('under-par')
-  expect(end.achievements.length).toBeGreaterThan(4)
+  expect(end.achievements.length).toBeGreaterThanOrEqual(2)
   // …and every id on the save is a real achievement, not a typo that will never render.
   const known = await page.evaluate(() => globalThis.__shearline?.achievementIds() ?? [])
   for (const id of end.achievements) expect(known, `unknown achievement "${id}"`).toContain(id)
