@@ -178,6 +178,15 @@ export interface SaveData {
    * saved form identical to the authored form means a custom lock is a first-class lock everywhere.
    */
   customLocks: LockDef[]
+  /**
+   * The Gauntlet's personal bests, by the difficulty the run was played at — D-165.
+   *
+   * A score, deliberately not a currency (D-091 buried currencies): nothing is bought with it and
+   * nothing unlocks behind it. It is a number to beat, which is the whole mode. Only *survived*
+   * runs write here; a fallen run leaves no trace, which is also the whole mode. The run itself is
+   * never persisted anywhere — that absence is what makes "no resume" true across a relaunch.
+   */
+  gauntletBest: Partial<Record<AssistMode, number>>
 }
 
 export function newSave(): SaveData {
@@ -189,6 +198,7 @@ export function newSave(): SaveData {
     tutorial: [],
     playDays: {},
     customLocks: [],
+    gauntletBest: {},
     // Any odd 32-bit value; the mixer below does the work of spreading it.
     lockSalt: (Math.floor(Math.random() * 0xffffffff) | 1) >>> 0,
   }
@@ -394,6 +404,15 @@ export function migrate(raw: unknown): SaveData {
     customLocks: Array.isArray(data['customLocks'])
       ? (data['customLocks'].filter(isRecord) as unknown as LockDef[])
       : [],
+    // Same road haptics and interfaceMode arrived by: absent on an old save, defaults to empty.
+    // Non-numeric entries are dropped rather than trusted — a best is a number or it is nothing.
+    gauntletBest: isRecord(data['gauntletBest'])
+      ? Object.fromEntries(
+          Object.entries(data['gauntletBest']).filter(
+            ([, v]) => typeof v === 'number' && Number.isFinite(v) && v >= 0,
+          ),
+        )
+      : {},
     // A save from before D-073 has no salt; give it one rather than defaulting everybody to the
     // same bench, which would make every player's locks identical.
     lockSalt:

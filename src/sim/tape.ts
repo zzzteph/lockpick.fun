@@ -91,6 +91,7 @@ export function cloneSimState(s: SimState): SimState {
     pickChamber: s.pickChamber,
     pickPosition: s.pickPosition,
     resistance: s.resistance,
+    wheelTurn: s.wheelTurn,
     pickForce: s.pickForce,
     pickContact: s.pickContact,
     pickStrain: s.pickStrain,

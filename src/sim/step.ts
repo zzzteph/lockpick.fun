@@ -16,6 +16,7 @@ import {
   grooveCeilingLift,
   grooveDepthAt,
   grooveFloorLift,
+  quantizeDetent,
   readShearLine,
   sidebarAlignedAt,
   taperAt,
@@ -800,6 +801,12 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
   // once — so from here on, exactly one chamber is under the tool: the one the tip has reached.
 
   const bindingLast = state.bindingChamber
+  // The wheel-turn envelope (D-169): saturated by the turner below the moment a wheel moves,
+  // decaying here so a parked wheel goes quiet in about 180ms. The 180 is an envelope, not a
+  // reading — the wheel's motion is pulsed (it snaps detent to detent while the command
+  // crawls), and a meter fed the raw pulses flickers at click rate.
+  const comboFamily = state.instance.def.family === 'combination'
+  if (comboFamily) state.wheelTurn = Math.max(0, state.wheelTurn - dt / 0.18)
   /**
    * Radians per second of *backward* plug rotation demanded by pins bearing on the ledge (D-075).
    * Accumulated here and applied after θ is integrated, so the wrench and the pick fight each other
@@ -847,10 +854,43 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
       // floor-only tool and no spring, a disc turned past its gate could never come back.
       //
       // Once the sidebar has dropped into a disc's true gate the disc is pinned and stops
-      // turning at all.
-      if (c.state !== 'SET' && c.index === pick && settled) {
-        const want = clamp(input.liftTarget + state.pickWobble, 0, c.maxLift)
-        c.lift = moveToward(c.lift, want, toolRate * dt)
+      // turning at all — on a **disc detainer**. A combination wheel is never pinned: the
+      // fence leg cams out of the gate under the thumb, so a seated wheel stays turnable and
+      // turning it off its digit un-seats it — the owner's rule ("you must always be able to
+      // rotate"), and the real object's. The pack re-binds it in delta order.
+      //
+      // A combination wheel is this same disc with detents: the commanded angle snaps to the
+      // digit's centre, so the wheel travels through the space between clicks but only ever
+      // *parks* on a digit — hand wobble moves the command inside one detent and changes
+      // nothing, which is what a real wheel's spring plunger does to a shaky thumb.
+      if ((c.state !== 'SET' || comboFamily) && c.index === pick && settled) {
+        const commanded = clamp(input.liftTarget + state.pickWobble, 0, c.maxLift)
+        if (comboFamily) {
+          // A dial is a circle: the turner takes the short way round, through the seam when
+          // that is nearer — digit 9 to digit 0 is one click on a real wheel, not a rewind
+          // across every gate on the dial. The wheel's own angle wraps with it.
+          const want = quantizeDetent(commanded)
+          const stepMax = toolRate * dt
+          let delta = want - c.lift
+          if (delta > c.maxLift / 2) delta -= c.maxLift
+          else if (delta < -c.maxLift / 2) delta += c.maxLift
+          const before = c.lift
+          const moved = Math.abs(delta) <= stepMax ? want : c.lift + Math.sign(delta) * stepMax
+          c.lift = ((moved % c.maxLift) + c.maxLift) % c.maxLift
+          // A wheel speaks only while it turns: motion saturates the envelope the resistance
+          // reading scales by, and the decay above silences a parked wheel (D-169).
+          if (Math.abs(c.lift - before) > 1e-6) state.wheelTurn = 1
+        } else {
+          c.lift = moveToward(c.lift, commanded, toolRate * dt)
+        }
+      }
+      // Rolled off its gate: the fence leg cams back out and the seat is gone. The limiter
+      // loop re-nominates it next tick — it held the smallest delta of the unseated, so the
+      // bind comes straight back to it, which is exactly the tell a scrambled wheel gives.
+      if (comboFamily && c.state === 'SET' && Math.abs(c.lift - c.setLift) > c.captureWindow / 2) {
+        c.state = 'FREE'
+        c.sidebarAligned = false
+        c.captureTimer = 0
       }
       applyCounterRotation(state, c, T, dt)
       c.lift = clamp(c.lift, 0, c.maxLift)
@@ -1290,7 +1330,10 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
    * push saturates it, which is right for a gate and was wrong for a *reading* — see below.
    */
   const felt = pick >= 0 ? chambers[pick] : undefined
-  const contact = feltPressure(felt, input, settled)
+  // On a combination wheel the load is the *turn*: a static hand feels nothing on a real
+  // one, and the drag-probe under motion is the family's whole decode (D-169).
+  const contact =
+    comboFamily && felt?.kind === 'disc' ? state.wheelTurn : feltPressure(felt, input, settled)
   state.pickContact = contact
   state.resistance = resistanceFor(felt, T, state.time, contact, settled ? input.liftTarget : 0)
   if (state.resistance > state.stats.maxResistance) state.stats.maxResistance = state.resistance

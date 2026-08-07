@@ -132,6 +132,14 @@ import {
 import { DEFAULT_INPUT_SETTINGS, InputController, LIFT_PX_PER_MM } from './ui/input'
 import { Haptics, detectVibrator } from './ui/haptics'
 import { auditLayout, type Box, type Finding } from './render/audit'
+import {
+  computePadlockLayout,
+  drawPadlock,
+  padlockAuditBox,
+  padlockCentre,
+  wheelRect,
+  type PadlockLayout,
+} from './render/padlock'
 import { assemblyBounds } from './render/layout'
 import { startRecording, stopRecording } from './render/probe'
 import {
@@ -169,15 +177,41 @@ import {
   drawPause,
   drawResults,
   drawSettings,
+  drawGauntlet,
   drawTrophies,
   drawTutorial,
   codesPageCount,
   codesRoster,
   trophyPageCount,
+  type GauntletScreenView,
   type ScreenName,
   type ShellActions,
   type ShellContext,
 } from './ui/shell'
+import { generateDungeonLock } from './game/gauntlet'
+// The scripted solver, for the dev hook alone: `solveCurrentLock` lets the browser suite play
+// any lock with the same machine that proves the roster openable. ~15KB of prod bundle carrying
+// a dev instrument — accepted, because a DEV-gated import would need a second chunk and the
+// build is deliberately one file (D-037).
+import { solveLock } from './sim/solver'
+import {
+  DUNGEON_DIFFICULTY_FACTOR,
+  PICK_TURN_SECONDS,
+  canPick,
+  dungeonScore,
+  logLine,
+  movePlayer,
+  pickAbandoned,
+  pickOpened,
+  pickSnapped,
+  pickTheLock,
+  pickTick,
+  startDungeon,
+  stepBack,
+  useKey,
+  waitTurn,
+  type DungeonRunState,
+} from './game/dungeonRun'
 import { HELP_PAGE_COUNT, drawHelp } from './ui/help'
 import { Ui, grown, pointInRect, type Rect, type UiFrame } from './ui/widgets'
 
@@ -230,6 +264,9 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   // Non-null exactly when the current lock is drawn and driven face-on rather than in the
   // side cutaway — the disc detainers and the tubulars (`SIMULATION.md §10`).
   let face: FaceLayout | null = null
+  // Non-null exactly when the current lock is the combination padlock (D-167): a body, a
+  // shackle, and a row of digit wheels. Static geometry — nothing about it turns with θ.
+  let padlock: PadlockLayout | null = null
   let scriptedInput: SimInput | null = null
   let outcome: AttemptOutcome | undefined
   let result: AttemptResult | null | undefined
@@ -335,7 +372,9 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     const tools = toolOverride ? withTools(progress.toolStats(), toolOverride) : progress.toolStats()
     return makeConfig({
       tools,
-      assist: progress.data.settings.assist,
+      // Through `activeAssist`, not the settings directly: a Gauntlet run's chosen difficulty
+      // must be the difficulty its locks are actually simulated at (D-165).
+      assist: activeAssist(),
       featherEnabled: featherOverride ?? progress.hasFeathering,
     })
   }
@@ -363,7 +402,11 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     applyCursor(next)
     // Immediately, not on the next frame: a finger that lands the instant the lock appears must
     // already be a gesture on the lock rather than a stray tap on the screen it came from (D-082).
-    input.setPlayScreen(next === 'pick' && session !== null, face ? null : layout)
+    input.setPlayScreen(
+      next === 'pick' && session !== null,
+      face || padlock ? null : layout,
+      next === 'pick' && session !== null ? padlock : null,
+    )
     if (next !== 'pick') audio.hush()
   }
 
@@ -413,12 +456,104 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
    */
   let inspecting = false
 
+  /**
+   * The Lock dungeon's run — the crawler's since `docs/DUNGEON.md` — or null when no run
+   * stands. Deliberately a plain variable and never persisted: a relaunch has no dungeon to
+   * resume, the same airtight "no resume" the five-slot runs kept (D-165). The difficulty
+   * pick, the new-best flag and the banked score are screen furniture beside it.
+   */
+  let dungeonRun: DungeonRunState | null = null
+  let gauntletDifficulty = progress.data.settings.assist
+  /** True while the dungeon guide page covers the gauntlet screen. */
+  let guideOpen = false
+  let gauntletNewBest = false
+  /** Score banked when the run ended upright, difficulty factor applied. For the summary. */
+  let dungeonBankedScore = 0
+  /** True once this run's end has been settled into the save — banking must fire once. */
+  let dungeonSettled = false
+  /** Seconds accumulated inside a dungeon pick: every `PICK_TURN_SECONDS`, the floor turns. */
+  let pickClock = 0
+
+  /**
+   * The assist level the current pick is actually played at. The dungeon's chosen difficulty
+   * overrides the settings for exactly the locks of its floor — the visual ladder, the sim
+   * config and the par scaling all read this one function, so a Hard run cannot leak
+   * Training's x-ray.
+   */
+  function activeAssist(): typeof progress.data.settings.assist {
+    return dungeonRun && dungeonRun.phase === 'picking'
+      ? gauntletDifficulty
+      : progress.data.settings.assist
+  }
+
+  /** The keys the crawl owns outright — stripped from the widget layer while it runs. */
+  const MOVEMENT_KEYS = new Set([
+    'ArrowUp',
+    'ArrowDown',
+    'ArrowLeft',
+    'ArrowRight',
+    'Space',
+    ' ',
+    'KeyW',
+    'KeyA',
+    'KeyS',
+    'KeyD',
+  ])
+
+  /** Bank an upright ending exactly once: gold and parts, scaled by the chosen difficulty. */
+  function settleDungeon(): void {
+    if (!dungeonRun || dungeonSettled) return
+    if (dungeonRun.phase !== 'won') return
+    dungeonSettled = true
+    dungeonBankedScore = Math.round(
+      dungeonScore(dungeonRun) * DUNGEON_DIFFICULTY_FACTOR[gauntletDifficulty],
+    )
+    gauntletNewBest = progress.noteGauntlet(gauntletDifficulty, dungeonBankedScore)
+  }
+
+  /**
+   * The door from the floor into the pick screen: the bump set `phase: 'picking'`, and this
+   * builds the actual lock and opens it on the bench. With no pick left the kneel is refused
+   * on the spot — the machine walks back to the crawl and the status line says why.
+   */
+  function enterDungeonPick(): void {
+    if (!dungeonRun || dungeonRun.phase !== 'picking' || !dungeonRun.picking) return
+    if (!canPick(dungeonRun)) {
+      pickAbandoned(dungeonRun)
+      status = 'no pick left — find a spare in a chest'
+      return
+    }
+    const target = dungeonRun.picking
+    const thing =
+      target.kind === 'gate'
+        ? dungeonRun.floor.gate
+        : target.kind === 'chest'
+          ? dungeonRun.floor.chests[target.id]
+          : dungeonRun.floor.doors[target.id]
+    if (!thing) {
+      pickAbandoned(dungeonRun)
+      return
+    }
+    const salt = target.kind === 'gate' ? 400 : target.kind === 'chest' ? target.id : 200 + target.id
+    const def = generateDungeonLock(dungeonRun.floor.seed, salt, thing.lockTier, thing.wheel)
+    pickClock = 0
+    startLock(def, ((dungeonRun.floor.seed + salt * 104729) >>> 0) || 1)
+  }
+
+  /** Every dungeon verb funnels through here so run-endings settle in exactly one place. */
+  function afterDungeonAction(): void {
+    if (!dungeonRun) return
+    if (dungeonRun.phase === 'picking') enterDungeonPick()
+    settleDungeon()
+  }
+
   function startLock(def: LockDef, seed = seedFor(def), inspect = false): void {
     inspecting = inspect
     session = new Session(def, seed, currentConfig())
     layout = computeLayout(def.bitting.length, 0, def.rows ?? 1, mirrored())
     const kind = faceKindFor(def.family)
     face = kind ? computeFaceLayout(def.bitting.length, kind, 0) : null
+    padlock = def.family === 'combination' ? computePadlockLayout(def.bitting.length) : null
     resizeFx(fx, def.bitting.length)
     clearFx(fx)
     eventLog.length = 0
@@ -467,6 +602,55 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       challenges = challenges.includes(id)
         ? challenges.filter((c) => c !== id)
         : [...challenges, id]
+    },
+    // ── The Lock dungeon (docs/DUNGEON.md) ──
+    gauntletSelectDifficulty: (difficulty) => {
+      gauntletDifficulty = difficulty
+    },
+    gauntletGuide: (open) => {
+      guideOpen = open
+    },
+    gauntletStart: (difficulty) => {
+      gauntletDifficulty = difficulty
+      gauntletNewBest = false
+      dungeonSettled = false
+      dungeonBankedScore = 0
+      guideOpen = false
+      // Math.random is fine in the game layer (the sim's lint rule owns the sim); `|| 1` keeps a
+      // zero seed — legal but a degenerate xorshift seed-story — out of circulation.
+      dungeonRun = startDungeon(((Math.random() * 0xffffffff) >>> 0) || 1)
+      status = ''
+    },
+    dungeonMove: (dx, dy) => {
+      if (!dungeonRun) return
+      movePlayer(dungeonRun, dx, dy)
+      afterDungeonAction()
+    },
+    dungeonUseKey: () => {
+      if (!dungeonRun) return
+      useKey(dungeonRun)
+      settleDungeon() // the key can turn the gate itself
+    },
+    dungeonPickLock: () => {
+      if (!dungeonRun) return
+      pickTheLock(dungeonRun)
+      afterDungeonAction() // phase is 'picking' now: the lock screen takes over
+    },
+    dungeonStepBack: () => {
+      if (!dungeonRun) return
+      stepBack(dungeonRun)
+    },
+    dungeonWait: () => {
+      if (!dungeonRun) return
+      waitTurn(dungeonRun)
+      settleDungeon()
+    },
+    gauntletReset: () => {
+      dungeonRun = null
+      gauntletNewBest = false
+      dungeonSettled = false
+      dungeonBankedScore = 0
+      status = ''
     },
     // ── The lock editor (D-080) ──
     //
@@ -777,9 +961,20 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         tryRotateToLandscape(canvas)
       },
       onRestart: () => {
+        // No restarts inside a dungeon pick — R does nothing there. The lock is the lock;
+        // walking away and bumping it again is the crawler's honest retry.
+        if (dungeonRun && dungeonRun.phase === 'picking') return
         if (screen === 'pick' && session) startLock(session.def)
       },
       onPause: () => {
+        // Esc during a dungeon pick is the walk-away: the turns already spent are the cost,
+        // and the floor is waiting exactly where it was.
+        if (dungeonRun && dungeonRun.phase === 'picking' && screen === 'pick') {
+          pickAbandoned(dungeonRun)
+          session = null
+          goto('gauntlet')
+          return
+        }
         if (screen === 'pick') goto('pause')
         else if (screen === 'pause') goto('pick')
         else if (screen !== 'menu') goto(previousScreen === 'pick' ? 'bench' : 'menu')
@@ -848,6 +1043,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     if (screen !== 'pick') {
       return { chamber: -1, liftTarget: 0, tensionHeld: false, tensionLevel: 0 }
     }
+    if (padlock && session) return input.readPadlock(padlock, session.view.chambers)
     if (face && session) return input.readFace(face, session.view.chambers)
     return input.read(layout, maxLift())
   }
@@ -858,15 +1054,24 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     // reaches the top of the travel whatever is loaded (D-082).
     const chambers = session?.state.chambers
     const ceiling = chambers?.length ? Math.max(...chambers.map((c) => c.maxLift)) : 4
-    input.setPlayScreen(screen === 'pick' && session !== null, face ? null : layout)
+    input.setPlayScreen(
+      screen === 'pick' && session !== null,
+      face || padlock ? null : layout,
+      screen === 'pick' && session !== null ? padlock : null,
+    )
     input.tick(seconds, chambers?.length ?? 0, ceiling)
   }
 
   function absorb(events: readonly SimEvent[]): void {
     if (events.length === 0 || !session) return
-    audio.handleEvents(events, session.state)
-    haptics.handleEvents(events)
-    if (progress.data.settings.subtitles) pushSubtitleEvents(subtitles, events)
+    // A wheel seating is training's tell alone (owner's rule): above training the seat makes
+    // no sound, no buzz, no caption — the drag moving to the next wheel is the only
+    // announcement, the same family-scoped silence the no-dimple visuals keep (D-169).
+    const silentSeat = session.def.family === 'combination' && activeAssist() !== 'training'
+    const heard = silentSeat ? events.filter((e) => e.type !== 'PIN_SET') : events
+    audio.handleEvents(heard, session.state)
+    haptics.handleEvents(heard)
+    if (progress.data.settings.subtitles) pushSubtitleEvents(subtitles, heard)
     eventLog.push(...events)
     if (eventLog.length > 512) eventLog.splice(0, eventLog.length - 512)
     for (const e of events) {
@@ -879,6 +1084,32 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
           w.resolve()
         }
       }
+    }
+  }
+
+  /** The Lock dungeon screen's whole world, assembled fresh each frame it is on. */
+  function gauntletView(): GauntletScreenView {
+    const best = progress.data.gauntletBest[gauntletDifficulty]
+    if (!dungeonRun) {
+      return {
+        phase: 'briefing',
+        difficulty: gauntletDifficulty,
+        guide: guideOpen,
+        ...(best !== undefined ? { best } : {}),
+      }
+    }
+    // While a lock is on the bench the app is on the pick screen; the map screen only ever
+    // sees crawl and the three ends.
+    const phase =
+      dungeonRun.phase === 'picking' ? 'crawl' : dungeonRun.phase
+    return {
+      phase,
+      difficulty: gauntletDifficulty,
+      guide: guideOpen,
+      run: dungeonRun,
+      score: dungeonBankedScore,
+      ...(best !== undefined ? { best } : {}),
+      newBest: gauntletNewBest,
     }
   }
 
@@ -902,6 +1133,19 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       status = `${session.def.name} — inspected. Nothing recorded.`
       session = null
       goto('bench')
+      return
+    }
+    /**
+     * A dungeon open resolves the chest or door and nothing else — no record (a floor's locks
+     * exist for one sitting), no achievements, no play-day: the run's own gold is the entire
+     * bookkeeping. No payoff sequence either: the crawl's rhythm is the reward, and the loot
+     * line lands in the map's own ticker the moment the lid comes up.
+     */
+    if (dungeonRun && dungeonRun.phase === 'picking') {
+      pickOpened(dungeonRun)
+      settleDungeon() // the gate itself can win the run right here
+      session = null
+      goto('gauntlet')
       return
     }
     const base = outcomeFrom(session.def, session.state, session.state.stats, { challenges })
@@ -1003,11 +1247,21 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     const keys = input.takeKeys()
     const clicked = input.takeClick()
     const pointer = input.pointer
+    /**
+     * While a crawl is live, movement keys belong to the floor and never to the widget
+     * focus ring. The first self-playtest walked the invisible focus with the arrows and
+     * then Space — meant as "wait" — activated whichever widget it had landed on. The
+     * dungeon's own keydown listener owns these keys there; the Ui simply never sees them.
+     */
+    const uiKeys =
+      screen === 'gauntlet' && dungeonRun && dungeonRun.phase === 'crawl'
+        ? new Set([...keys].filter((k) => !MOVEMENT_KEYS.has(k)))
+        : keys
     const uiFrame: UiFrame = {
       pointerX: pointer.x,
       pointerY: pointer.y,
       clicked,
-      keys,
+      keys: uiKeys,
     }
 
     // Typing a lock's name. Safe to consume keys wholesale here because picking is the keyboard's
@@ -1050,10 +1304,17 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         pointer.y,
       )
     if (overBenchLink && clicked) {
-      const wasLesson = lesson !== null
-      lesson = null
-      session = null
-      goto(wasLesson ? 'tutorial' : 'bench')
+      if (dungeonRun && dungeonRun.phase === 'picking') {
+        // The header link is the same walk-away Esc is: the lock stays shut, the floor waits.
+        pickAbandoned(dungeonRun)
+        session = null
+        goto('gauntlet')
+      } else {
+        const wasLesson = lesson !== null
+        lesson = null
+        session = null
+        goto(wasLesson ? 'tutorial' : 'bench')
+      }
     }
 
     if (screen === 'results') resultsAge += seconds
@@ -1079,9 +1340,49 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         for (let i = 0; i < ticks; i += 1) audio.creditTick(i)
         if (canSkip(sequence) && wantsSkip(keys, clicked)) skipOpenSequence(sequence)
       }
+      /**
+       * The dungeon's picking clock — the owner's chosen rule (docs/DUNGEON.md): every few
+       * seconds of real picking, the floor takes a turn around you. Enemies close in, an
+       * adjacent one hits you mid-kneel, and the floor can kill you with your hands still
+       * inside the lock — which ends the attempt on the spot.
+       */
+      if (dungeonRun && dungeonRun.phase === 'picking' && !view.opened) {
+        pickClock += seconds
+        const per = PICK_TURN_SECONDS[gauntletDifficulty]
+        // Re-read through the state type: `pickTick` mutates `phase` behind a function call,
+        // and the narrowing from the guard above would otherwise call this unreachable.
+        const run: DungeonRunState = dungeonRun
+        while (pickClock >= per && run.phase === 'picking') {
+          pickClock -= per
+          pickTick(run)
+        }
+        if (run.phase === 'caught') {
+          session = null
+          status = 'a hand on your collar — caught at the lock'
+          goto('gauntlet')
+          render(uiFrame, inp)
+          hook.framesRendered += 1
+          hook.ready = true
+          return
+        }
+      }
+      /**
+       * A snapped pick inside the dungeon is a spent pick, not a death (docs/DUNGEON.md —
+       * the pick is loot now). Watched here in the frame, because the ordinary path lets the
+       * player sit with a broken pick and press R; the dungeon's answer is the walk back.
+       */
+      if (dungeonRun && dungeonRun.phase === 'picking' && view.pickBroken && !view.opened) {
+        pickSnapped(dungeonRun)
+        session = null
+        status = 'the pick snapped inside the lock'
+        goto('gauntlet')
+      }
       // A lesson has no results page to land on — it goes back to the tutorial, where the
-      // card it just finished says `done` and the next one is marked `next` (D-152).
-      if (view.opened && isSettled(sequence)) goto(outcome ? 'results' : 'tutorial')
+      // card it just finished says `done` and the next one is marked `next` (D-152). A dungeon
+      // open never reaches here: `finishAttempt` routes it straight back to the floor.
+      if (view.opened && isSettled(sequence)) {
+        goto(outcome ? 'results' : 'tutorial')
+      }
     } else {
       updateFx(fx, seconds)
     }
@@ -1142,6 +1443,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       // the lock" on a lock that is already open would be a door to a finished room.
       pickActive: session !== null && !session.state.opened,
       ...(benchTier !== undefined ? { benchTier } : {}),
+      ...(screen === 'gauntlet' ? { gauntlet: gauntletView() } : {}),
     }
 
     switch (screen) {
@@ -1169,6 +1471,9 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       case 'help':
         drawHelp(shell)
         break
+      case 'gauntlet':
+        drawGauntlet(shell)
+        break
       case 'editor':
         drawEditor(shell)
         break
@@ -1193,28 +1498,47 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     // than the HUD — the chrome should stay put while the lock lurches.
     const jolt = impactJolt(sequence)
 
-    const assist = progress.data.settings.assist
+    const assist = activeAssist()
     /**
-     * The four levels, as a ladder of what the drawing is allowed to show (D-046).
+     * The four levels, as a ladder of what the drawing is allowed to show — re-rungs by the
+     * owner in D-166 (each one step gentler than D-046's ladder, and the hand never vanishes:
+     * *"in hard level - I still want to see the lockpick"*).
      *
-     * `training` gets the real cutaway. `easy` gets one pin — the one under the tip — drawn
-     * plain so its type stays hidden. `medium` and `hard` get no pins at all; what separates
-     * them is whether you can see your own hand.
+     * `training` gets the real cutaway, annotated. `easy` gets the same cutaway with the
+     * narration off — every pin, real shapes, but no state colour, pattern or word. `medium`
+     * gets one pin — the one under the tip — drawn plain so its type stays hidden. `hard` gets
+     * no pins at all: your pick, the meter, and the depth readout.
      */
     const felt =
-      assist === 'training'
+      assist === 'training' || assist === 'easy'
         ? undefined
-        : { active: assist === 'easy' ? view.pickChamber : -1 }
-    const showPick = assist !== 'hard'
+        : { active: assist === 'medium' ? view.pickChamber : -1 }
+    const showPick = true
 
     ctx.save()
     ctx.translate(currentDrift + shake.x, shake.y + jolt)
-    if (face) {
+    const shackle = session.def.family === 'combination'
+    if (padlock) {
+      // The combination padlock, drawn as the thing you hold (D-167). No tool overlay: the
+      // active wheel's focus ring is the hand, and the shackle is the wrench.
+      drawPadlock(vp, palette, view, padlock, {
+        activeChamber: view.pickChamber,
+        // No x-ray at ANY assist since D-173 — the owner: "there should be NO helping
+        // wheels both in EASY or training modes". A wheel pack is a sealed object
+        // everywhere; training keeps only its seat *sound* (the earlier explicit ruling).
+        showTargets: false,
+        plainStates: true,
+        fx,
+      })
+    } else if (face) {
       drawFaceOn(vp, palette, view, face, {
         activeChamber: view.pickChamber,
         showTargets: assist === 'training',
         fx,
         chamberNoun: session.def.family === 'radial-slider' ? 'slider' : 'pin',
+        // The ladder on a face: geometry stays (the face is the outside of the lock), the
+        // narration goes. Training alone keeps the colour language (D-166).
+        plainStates: assist !== 'training',
       })
       drawFaceTool(vp, palette, face, view, inp)
     } else {
@@ -1223,6 +1547,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         showTargets: assist === 'training',
         fx,
         touchActive: input.touch.active,
+        plainStates: assist === 'easy',
         ...(felt ? { felt } : {}),
       })
       // The pick is drawn where the *hand* is, sliding along the keyway, rather than snapped
@@ -1243,27 +1568,42 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       elapsed: view.time,
       inspecting,
       lesson: lesson !== null,
-      // The face locks draw a dial, not the side cutaway, and their gutter is never crowded.
-      ...(face ? {} : { assemblyLeft: assemblyBounds(layout).x }),
+      // The face locks draw a dial and the padlock a body, not the side cutaway — their
+      // gutters are never crowded.
+      ...(face || padlock ? {} : { assemblyLeft: assemblyBounds(layout).x }),
       // The payoff owns the rank band from the moment the lock opens (D-100).
       payoff: sequence.running,
       // The meter is on at every level: it is the substitute for touch, and the higher levels
       // take away the picture precisely so that the meter is what you read instead. What the
       // ladder changes is whether the meter *interprets* itself for you (D-054).
       showResistance: true,
-      // Training and Easy get the word; Medium and Hard get the number only — and on both it now
-      // stays silent until you are actually leaning on the pin (D-076).
-      showStateWord: assist === 'training' || assist === 'easy',
-      showBinding: assist === 'training',
+      // Training alone gets the word since D-166: Easy's whole deal is the state narration
+      // going quiet, and a meter that still says BINDING would hand the colour channel back
+      // through the side door. The number stays silent until you lean on the pin (D-076).
+      // …and for wheels not even training: the column's word would name a seated wheel,
+      // which is the "helping" the owner struck at every level (D-173).
+      showStateWord: !shackle && assist === 'training',
+      showBinding: !shackle && assist === 'training',
       /**
        * Easy keeps a bare set/not-set count, because how many pins you have done is something a
        * real picker remembers rather than something the lock tells them — and with the pins drawn
        * only under the tip, taking the dots away too meant the *default* level had no progress
        * indicator of any kind. That was never asked for. Medium and Hard have none by design.
+       *
+       * Wheels are stricter: a teal dot on a seated wheel literally names a correct digit, and
+       * the owner's rule is that above training a wheel pack shows nothing anywhere —
+       * "easy == medium == hard". Training keeps the full dots as part of its x-ray language.
        */
-      pinDots:
-        assist === 'training' ? 'full' : assist === 'easy' ? 'progress' : 'none',
-      depthMm: assist === 'hard' ? pickDepthMm(view) : null,
+      // Wheels show NO dots at any assist (D-173) — a counted dot is a decoded digit.
+      pinDots: shackle
+        ? 'none'
+        : assist === 'training'
+          ? 'full'
+          : assist === 'easy'
+            ? 'progress'
+            : 'none',
+      // Depth is a pick reading; nothing is inserted into a wheel pack.
+      depthMm: !shackle && assist === 'hard' ? pickDepthMm(view) : null,
       /**
        * Carrying the hook high is a real control now, so the legend has to say so — D-139.
        *
@@ -1272,7 +1612,23 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
        * whatever it passes (D-138). A control the player cannot discover is the same as no control,
        * and this one is invisible: it is the absence of a thing the game has always done for you.
        */
-      keys: input.touch.active
+      keys: shackle
+        ? // A wheel pack has no keyway to carry a hook along: choose a wheel, turn it, pull.
+          input.touch.active
+          ? ([
+              ['tap', 'a wheel'],
+              ['drag ⟳', 'turn it'],
+              ['slider', 'shackle'],
+            ] as const)
+          : ([
+              ['← →', 'choose a wheel'],
+              ['space', 'turn'],
+              ['↑ ↓', 'one click'],
+              ['Q', 'pull the shackle'],
+              ['R', 'restart'],
+              ['esc', 'pause'],
+            ] as const)
+        : input.touch.active
         ? ([
             ['tap', 'a pin'],
             ['drag up', 'to lift'],
@@ -1324,14 +1680,17 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       tensionHint: input.touch.active
         ? // Which edge depends on the hand the lock is held in (D-130), and "drag" rather than
           // "slide to" because the wrench moves from where it is now, not to where you touched.
-          `drag the wrench up the ${mirrored() ? 'right' : 'left'} edge`
-        : 'hold [Q] to turn the wrench',
+          `drag the ${shackle ? 'shackle' : 'wrench'} up the ${mirrored() ? 'right' : 'left'} edge`
+        : shackle
+          ? 'hold [Q] to pull the shackle'
+          : 'hold [Q] to turn the wrench',
       // Teach the grip that makes this playable one-handed-per-control, until it has happened.
       ...(session && pickedButUnturned(session.state)
-        ? { heldHint: 'every pin is up — turn harder' }
+        ? { heldHint: shackle ? 'every wheel is seated — pull through' : 'every pin is up — turn harder' }
         : input.touch.active && !input.usedBothThumbs
           ? { heldHint: 'keep that thumb there — lift with the other' }
           : {}),
+      shackle,
       par: session.def.par,
       mirrored: mirrored(),
       pressureStep: input.wrenchStep,
@@ -1354,9 +1713,11 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     }
 
     if (view.opened) {
-      const centre = face
-        ? { x: face.cx, y: face.cy }
-        : { x: LOGICAL_WIDTH / 2, y: mmToY(layout, 0) }
+      const centre = padlock
+        ? padlockCentre(padlock)
+        : face
+          ? { x: face.cx, y: face.cy }
+          : { x: LOGICAL_WIDTH / 2, y: mmToY(layout, 0) }
       drawOpenSequence(vp, palette, sequence, earnedThisAttempt, centre)
       // Not on touch: a tap skips and needs no advertisement, and at the compact face the hint
       // printed across the header's own furniture (D-157).
@@ -1450,7 +1811,26 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
      * rule and the exception happen to have the same boundary. Scoping it this way is honest;
      * carrying a list of allowed strings would not be.
      */
-    const lock = isCompact(vp) && screen === 'pick' && session ? assemblyBounds(layout) : null
+    /*
+     * On a face lock the cutaway's assembly box is the wrong lock — the drawing is a circle
+     * about the stage centre, and holding the bezel against a rectangle it never touches
+     * produced the sweep's first false findings on the wheel pack. The face's own box is the
+     * inscribed square: text may sit in the circle's corner slack (the bezel does), but not
+     * across the rings themselves.
+     */
+    const faceBox = (): Box | null => {
+      if (!face) return null
+      const half = face.rOuter * Math.SQRT1_2
+      return { x: face.cx - half, y: face.cy - half, w: half * 2, h: half * 2 }
+    }
+    // The padlock's box is the sealed metal above the wheel row: the digits ARE the
+    // interface, exactly as the cutaway's pins are the drawing (D-167).
+    const lock =
+      isCompact(vp) && screen === 'pick' && session
+        ? padlock
+          ? padlockAuditBox(padlock)
+          : (faceBox() ?? assemblyBounds(layout))
+        : null
     return {
       findings: auditLayout(drawn, vp.scale, rects, lock),
       drawn: drawn.length,
@@ -1481,12 +1861,17 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     // A face-on lock has no "along the keyway" to point at, so the tool tip's own geometry
     // answers the question instead — the same function the renderer draws it with, which is
     // what keeps the harness honest about where the player would actually have to click.
-    const tip = face
-      ? toolTip(face, session?.view.chambers[chamber], liftMm)
-      : {
-          x: plugChamberX(layout, chamber),
-          y: mmToY(layout, KEYWAY_FLOOR) - liftMm * LIFT_PX_PER_MM,
+    const tip = padlock
+      ? {
+          x: wheelRect(padlock, chamber).x + padlock.wheelW / 2,
+          y: padlock.rowY,
         }
+      : face
+        ? toolTip(face, session?.view.chambers[chamber], liftMm)
+        : {
+            x: plugChamberX(layout, chamber),
+            y: mmToY(layout, KEYWAY_FLOOR) - liftMm * LIFT_PX_PER_MM,
+          }
     const logicalX = tip.x
     const logicalY = tip.y
     const rect = canvas.getBoundingClientRect()
@@ -1632,6 +2017,95 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     interfaceMode: vp.interfaceMode,
     scale: vp.scale,
   })
+  // ── The Lock dungeon (docs/DUNGEON.md): the floor driven from a known seed, for the e2e ──
+  hook.startDungeonRun = (seed: number, difficulty): void => {
+    gauntletDifficulty = difficulty
+    gauntletNewBest = false
+    dungeonSettled = false
+    dungeonBankedScore = 0
+    guideOpen = false
+    dungeonRun = startDungeon((seed >>> 0) || 1)
+    goto('gauntlet')
+  }
+  hook.dungeonUseKey = (): void => {
+    actions.dungeonUseKey()
+  }
+  hook.dungeonPickLock = (): void => {
+    actions.dungeonPickLock()
+  }
+  hook.dungeonStepBack = (): void => {
+    actions.dungeonStepBack()
+  }
+  hook.dungeonGuide = (open: boolean): void => {
+    guideOpen = open
+  }
+  hook.dungeonForceUnlock = (): void => {
+    // Test-only: pose the key-or-pick choice so the layout sweep can audit the panel
+    // without hunting a floor whose door happens to be adjacent.
+    if (dungeonRun && dungeonRun.phase === 'crawl') {
+      dungeonRun.player.keys = Math.max(1, dungeonRun.player.keys)
+      dungeonRun.phase = 'unlock'
+      dungeonRun.picking = { kind: 'door', id: 0 }
+    }
+  }
+  hook.dungeonMove = (dx: number, dy: number): void => {
+    actions.dungeonMove(dx, dy)
+  }
+  hook.dungeonWait = (): void => {
+    actions.dungeonWait()
+  }
+  hook.dungeonLog = (line: string): void => {
+    if (dungeonRun) logLine(dungeonRun, line)
+  }
+  hook.dungeonState = () => {
+    if (!dungeonRun) return null
+    return {
+      phase: dungeonRun.phase,
+      turn: dungeonRun.turn,
+      x: dungeonRun.player.x,
+      y: dungeonRun.player.y,
+      picks: dungeonRun.player.picks,
+      keys: dungeonRun.player.keys,
+      tracker: dungeonRun.player.tracker,
+      seed: dungeonRun.floor.seed,
+      score: dungeonBankedScore,
+      picking: dungeonRun.picking ? { ...dungeonRun.picking } : null,
+      enemies: dungeonRun.enemies.map((e) => ({ kind: e.kind, x: e.x, y: e.y, awake: e.awake })),
+    }
+  }
+  /**
+   * Open the live session with the real solver's own hands — D-165.
+   *
+   * `solveLock` re-derives a full input tape for this def, seed and config (deterministic, so
+   * what it solves offline is exactly the session on screen), and the tape is then played into
+   * the LIVE session through the same `advance`/`absorb` road a human's inputs take — so the
+   * open fires `LOCK_OPENED`, `finishAttempt`, the payoff and the gauntlet banking naturally.
+   * The e2e helper's fixed-wrench loop cannot ease off for a mushroom; this can, because easing
+   * off is in the solver's repertoire. Returns false when even the solver fails, which for any
+   * generated or authored lock is itself a finding.
+   */
+  hook.solveCurrentLock = (): boolean => {
+    // A local reference, because the open's own pipeline may clear `session` mid-replay —
+    // the dungeon's `finishAttempt` hands the screen back to the floor the moment the lid
+    // comes up, and the loop below must keep reading the session it was actually driving.
+    const live = session
+    if (!live || live.state.opened) return live?.state.opened ?? false
+    const r = solveLock(live.def, live.seed, currentConfig(), { maxSeconds: 180 })
+    if (!r.opened) return false
+    // Tick by tick, exactly as `stepTicks` does — a segment fed to `advance` as one big span
+    // of seconds loses ticks to float flooring, and a 45ms capture window does not forgive an
+    // off-by-one. The first version of this replay desynced precisely that way.
+    for (const seg of r.tape) {
+      for (let i = 0; i < seg.ticks && !live.state.opened; i += 1) {
+        absorb(live.advance(1 / 120, seg.input))
+      }
+      if (live.state.opened) break
+    }
+    return live.state.opened
+  }
+  hook.benchTier = (tier: number): void => {
+    benchTier = tier
+  }
   hook.getSave = (): SaveData => JSON.parse(JSON.stringify(progress.data)) as SaveData
   hook.setSave = (data: SaveData): void => {
     progress.data = data
@@ -1837,6 +2311,23 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   boxObserver?.observe(canvas)
   window.addEventListener('resize', refit)
   window.addEventListener('orientationchange', refit)
+
+  /**
+   * The dungeon floor's keyboard — turn-based, so it wants key *events*, not held state.
+   * Repeats are allowed on purpose: holding an arrow walks. Only listening while the map is
+   * actually the screen keeps it from eating the pick screen's or the menus' keys.
+   */
+  window.addEventListener('keydown', (e) => {
+    if (screen !== 'gauntlet' || !dungeonRun || dungeonRun.phase !== 'crawl') return
+    const k = e.key
+    if (k === 'ArrowUp' || k === 'w' || k === 'W') actions.dungeonMove(0, -1)
+    else if (k === 'ArrowDown' || k === 's' || k === 'S') actions.dungeonMove(0, 1)
+    else if (k === 'ArrowLeft' || k === 'a' || k === 'A') actions.dungeonMove(-1, 0)
+    else if (k === 'ArrowRight' || k === 'd' || k === 'D') actions.dungeonMove(1, 0)
+    else if (k === ' ') actions.dungeonWait()
+    else return
+    e.preventDefault()
+  })
 
   return {
     hook,

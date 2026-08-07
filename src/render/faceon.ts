@@ -242,6 +242,12 @@ export interface FaceOptions {
   readonly fx: Fx
   /** What the chambers are called on this lock, for the hint line. Defaults to "pin". */
   readonly chamberNoun?: string
+  /**
+   * The D-166 ladder, as it lands on a face: geometry cannot be taken away here — the face is
+   * the *outside* of the lock, and a hand can always see where its own wheels are turned — so
+   * what the ladder silences is the narration: state colours and the captured hatch go steel.
+   */
+  readonly plainStates?: boolean
 }
 
 /**
@@ -251,7 +257,13 @@ export interface FaceOptions {
  * whatever notch is under it, and only reaches the bottom when every notch beneath it is a
  * true one. Partial drops are the false gates lying, and they are visible as such.
  */
-function drawSidebar(vp: Viewport, p: Palette, layout: FaceLayout, state: SimState): void {
+function drawSidebar(
+  vp: Viewport,
+  p: Palette,
+  layout: FaceLayout,
+  state: SimState,
+  plainStates = false,
+): void {
   const { ctx } = vp
   const x = layout.cx + layout.rOuter + 46
   const top = layout.cy - layout.rOuter + 14
@@ -266,7 +278,15 @@ function drawSidebar(vp: Viewport, p: Palette, layout: FaceLayout, state: SimSta
   ctx.strokeRect(x, top, 22, height)
   const barH = 54
   const y = top + (height - barH) * Math.min(1, drop)
-  ctx.fillStyle = state.sidebarDropped ? p.teal : cheated > 0 ? p.violet : p.steel
+  // The bar's POSITION stays at every level — shackle give is a thing a hand feels — but its
+  // colour is narration, and above training the narration is off (D-166).
+  ctx.fillStyle = plainStates
+    ? p.steel
+    : state.sidebarDropped
+      ? p.teal
+      : cheated > 0
+        ? p.violet
+        : p.steel
   ctx.fillRect(x + 3, y, 16, barH)
   ctx.strokeStyle = p.ink
   ctx.lineWidth = STROKE.standard
@@ -291,7 +311,7 @@ function drawDiscFace(
   for (const c of state.chambers) {
     const { inner, outer } = ringRadii(layout, c.index)
     const active = c.index === opts.activeChamber
-    const ink = stateInk(p, c, opts.showTargets)
+    const ink = opts.plainStates === true ? p.steel : stateInk(p, c, opts.showTargets)
 
     ctx.save()
     ringPath(ctx, layout, inner, outer)
@@ -299,7 +319,7 @@ function drawDiscFace(
     ctx.fill('evenodd')
     // A set disc is filled with the same hatch a set driver gets in the cutaway, so the two
     // views say "captured" the same way.
-    if (c.state === 'SET' || c.state === 'FALSE_SET') {
+    if (opts.plainStates !== true && (c.state === 'SET' || c.state === 'FALSE_SET')) {
       hatchPath(
         ctx,
         () => ringPath(ctx, layout, inner, outer),
@@ -375,7 +395,7 @@ function drawDiscFace(
       })
     }
   }
-  drawSidebar(vp, p, layout, state)
+  drawSidebar(vp, p, layout, state, opts.plainStates === true)
 }
 
 /**
@@ -467,7 +487,7 @@ function drawTubularFace(
     )
     // Filled with the state colour, not outlined in it — the same language the cutaway uses,
     // so a player coming to their first tubular already knows what teal means.
-    ctx.fillStyle = driverFill(p, c, opts.fx)
+    ctx.fillStyle = driverFill(p, c, opts.fx, opts.plainStates === true)
     ctx.fill()
     ctx.lineWidth = STROKE.standard
     ctx.strokeStyle = p.ink
@@ -592,6 +612,9 @@ export function drawFaceTool(
  */
 export function faceKindFor(family: string): FaceKind | null {
   if (family === 'disc-detainer') return 'disc-detainer'
+  // NOT the combination family: its second picture is `render/padlock.ts` — the owner
+  // rejected the ring dial outright ("the wheels is totally wrong"), and the wheel pack is
+  // drawn as the padlock it is. D-167.
   if (family === 'tubular' || family === 'radial-slider') return 'tubular'
   return null
 }

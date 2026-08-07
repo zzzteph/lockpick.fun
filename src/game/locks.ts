@@ -82,6 +82,31 @@ const ROSTER: LockDef[] = [
     par: 50,
     note: 'Tighter than it looks. The first lock that will punish a heavy hand.',
   },
+  {
+    /**
+     * The first combination lock, and the reason the family starts in Tier 1: everyone has
+     * held one. Three wheels, honest gates on the digit grid (code 4-1-7 → 1.35, 0.45, 2.25),
+     * no false gates — Tier 1 carries no security features, wheels included. The decode is
+     * the whole lesson: pull the shackle, find the wheel that drags, dial it until the drag
+     * moves on.
+     */
+    id: 39,
+    slug: 'brasswell-3-wheel-luggage',
+    name: 'Brasswell 3-Wheel Luggage',
+    tier: 1,
+    family: 'combination',
+    bitting: [3, 3, 3],
+    pins: ['standard', 'standard', 'standard'],
+    discs: {
+      trueGates: [1.35, 0.45, 2.25],
+      falseGates: [[], [], []],
+      gateWidth: 0.15,
+    },
+    toleranceQuality: 1.2,
+    keyway: 'standard',
+    par: 55,
+    note: 'Every suitcase you have ever owned. Pull the shackle and read the wheels with your thumb.',
+  },
 
   // ── Tier 2 — Standard cylinders ───────────────────────────────────────────────────────
   {
@@ -244,6 +269,30 @@ const ROSTER: LockDef[] = [
     par: 130,
     note: 'Three slim spools. Every lie is a short one — keep moving.',
   },
+  {
+    /**
+     * Four wheels (code 2-8-5-3) and one false gate on each — the spool's lie in wheel form:
+     * a notch that takes the fence partway, drags like the truth, and holds the shackle shut.
+     * The false digits (6, 1, 9, 7) sit well away from the code, so walking the dial finds the
+     * lie before the truth about half the time, which is the tier's whole curriculum.
+     */
+    id: 40,
+    slug: 'ironhold-combination-chain',
+    name: 'Ironhold Combination Chain',
+    tier: 3,
+    family: 'combination',
+    bitting: [3, 3, 3, 3],
+    pins: ['standard', 'standard', 'standard', 'standard'],
+    discs: {
+      trueGates: [0.75, 2.55, 1.65, 1.05],
+      falseGates: [[1.95], [0.45], [2.85], [2.25]],
+      gateWidth: 0.12,
+    },
+    toleranceQuality: 0.85,
+    keyway: 'standard',
+    par: 135,
+    note: 'Four wheels, and one digit on each that feels right and is not.',
+  },
 
   // ── Tier 4 — High security ────────────────────────────────────────────────────────────
   {
@@ -346,6 +395,35 @@ const ROSTER: LockDef[] = [
     keyway: 'tight',
     par: 210,
     note: 'One of everything the trade ever put in a chamber.',
+  },
+  {
+    /**
+     * The family's showpiece: four wheels (code 7-2-9-4), *three* false gates on every one —
+     * twelve lies against four truths, on a 0.09 gate the width of a held breath. The Protec
+     * fixture's spirit at padlock scale: most detents on the dial do something, and only the
+     * drag under the pull says which something you found.
+     */
+    id: 41,
+    slug: 'meridian-strongbox-wheels',
+    name: 'Meridian Strongbox Wheels',
+    tier: 4,
+    family: 'combination',
+    bitting: [3, 3, 3, 3],
+    pins: ['standard', 'standard', 'standard', 'standard'],
+    discs: {
+      trueGates: [2.25, 0.75, 2.85, 1.35],
+      falseGates: [
+        [0.15, 1.35, 2.55],
+        [1.65, 2.55, 0.15],
+        [0.45, 1.65, 2.25],
+        [0.15, 1.95, 2.85],
+      ],
+      gateWidth: 0.09,
+    },
+    toleranceQuality: 0.6,
+    keyway: 'standard',
+    par: 240,
+    note: 'Twelve false gates across four wheels. Every third digit is a lie with good manners.',
   },
 ]
 

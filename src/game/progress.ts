@@ -322,6 +322,21 @@ export class Progress {
     this.save()
   }
 
+  /**
+   * Bank a survived Gauntlet run's total — D-165. Returns whether it is a new personal best,
+   * which is the one thing the tally screen wants to know. Called only for completed runs: a
+   * fallen run banks nothing, and that rule lives in the run machine, not here.
+   */
+  noteGauntlet(difficulty: SaveData['settings']['assist'], total: number): boolean {
+    const prev = this.data.gauntletBest[difficulty] ?? 0
+    const isBest = total > prev
+    if (isBest) {
+      this.data.gauntletBest = { ...this.data.gauntletBest, [difficulty]: total }
+      this.save()
+    }
+    return isBest
+  }
+
   get totalOpens(): number {
     let n = 0
     for (const r of Object.values(this.data.records)) n += r.opens

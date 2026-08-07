@@ -26,10 +26,11 @@ import {
 test.describe.configure({ mode: 'serial' })
 
 /**
- * This test plays the entire game — six lessons and twenty-two locks, every pin worked one at
- * a time through the same input API a human uses. It takes about twenty-five seconds alone and
- * longer when six workers are sharing six cores, so the 60s default is a measure of contention
- * rather than of the game. Raised here only, so a genuine hang elsewhere still trips it.
+ * This test plays the entire game — seven lessons and a walk across all twenty-five locks'
+ * tiers, every pin worked one at a time through the same input API a human uses. It takes about
+ * twenty-five seconds alone and longer when six workers are sharing six cores, so the 60s
+ * default is a measure of contention rather than of the game. Raised here only, so a genuine
+ * hang elsewhere still trips it.
  */
 test.setTimeout(300_000)
 
@@ -151,6 +152,7 @@ test('a whole playthrough: new save, tutorial, one lock a tier, everything banke
     'lesson-pressure',
     'lesson-3',
     'lesson-serrated',
+    'lesson-wheels',
   ]) {
     await page.evaluate((l) => globalThis.__shearline?.startLesson(l), id)
     expect(await openIt(page, 0.45), `${id} could not be finished`).toBe(true)
@@ -164,6 +166,7 @@ test('a whole playthrough: new save, tutorial, one lock a tier, everything banke
     'lesson-pressure',
     'lesson-rotate',
     'lesson-serrated',
+    'lesson-wheels',
   ])
   expect(Object.keys(taught.records), 'lessons must not leave records').toEqual([])
 
@@ -204,6 +207,12 @@ test('a whole playthrough: new save, tutorial, one lock a tier, everything banke
       )
     }
   }
+
+  // ── The second family (D-167) ─────────────────────────────────────────────────────────
+  // One wheel lock through the same walk: the tier loop's slices happen to stop before the
+  // wheels, and the family must not ship on solver proofs alone — this is a hand playing it.
+  await play(page, 39, seed, 0.45)
+  played += 1
 
   // ── What landed ───────────────────────────────────────────────────────────────────────
   const end = await save(page)

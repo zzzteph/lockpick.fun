@@ -99,6 +99,15 @@ const SCREENS: { name: string; arrange: (page: Page) => Promise<void> }[] = [
     },
   },
   { name: 'bench', arrange: async (p) => goto(p, 'bench') },
+  {
+    // The wheels shelf — the bench's fifth page (D-167). Same card geometry as a tier page,
+    // but its own strip button, its own note, and cards whose stats say "wheels".
+    name: 'bench-wheels',
+    arrange: async (p) => {
+      await p.evaluate(() => globalThis.__shearline?.benchTier(0))
+      await goto(p, 'bench')
+    },
+  },
   { name: 'tutorial', arrange: async (p) => goto(p, 'tutorial') },
   { name: 'trophies', arrange: async (p) => goto(p, 'trophies') },
   { name: 'codes', arrange: async (p) => goto(p, 'codes') },
@@ -139,6 +148,43 @@ const SCREENS: { name: string; arrange: (page: Page) => Promise<void> }[] = [
     },
   },
   { name: 'editor', arrange: async (p) => goto(p, 'editor') },
+  // The Lock dungeon's briefing, and a live floor mid-crawl — the crawler's two big layouts
+  // (docs/DUNGEON.md). The end screens are audited by dungeon.spec.ts, which actually plays.
+  { name: 'gauntlet', arrange: async (p) => goto(p, 'gauntlet') },
+  {
+    // The guide page: the goal and the bestiary at reading size (D-173).
+    name: 'gauntlet-guide',
+    arrange: async (p) => {
+      await goto(p, 'gauntlet')
+      await p.evaluate(() => globalThis.__shearline!.dungeonGuide(true))
+      await renderOnce(p)
+    },
+  },
+  {
+    // The key-or-pick choice over a live crawl (D-177).
+    name: 'gauntlet-unlock',
+    arrange: async (p) => {
+      await p.evaluate(() => globalThis.__shearline!.startDungeonRun(4242, 'easy'))
+      await p.evaluate(() => globalThis.__shearline!.dungeonForceUnlock())
+      await renderOnce(p)
+    },
+  },
+  {
+    name: 'gauntlet-crawl',
+    arrange: async (p) => {
+      await p.evaluate(() => globalThis.__shearline!.startDungeonRun(4242, 'easy'))
+      await p.evaluate(() => {
+        const h = globalThis.__shearline!
+        h.dungeonMove(1, 0)
+        h.dungeonMove(0, 1)
+        // The ticker at its longest — the widest sighting the bestiary can produce plus
+        // the fight hint, so the sweep audits the column's bounds on every device.
+        h.dungeonLog('the skeleton sees you — 4hp, hits 2')
+        h.dungeonLog('walk into it to swing')
+      })
+      await renderOnce(p)
+    },
+  },
   { name: 'settings', arrange: async (p) => goto(p, 'settings') },
   { name: 'help', arrange: async (p) => goto(p, 'help') },
   {
@@ -148,6 +194,30 @@ const SCREENS: { name: string; arrange: (page: Page) => Promise<void> }[] = [
       await loadLock(p, 22, 5)
       await setInput(p, { chamber: 2, liftTarget: 1.2, tensionHeld: true, tensionLevel: 0.45 })
       await stepTicks(p, 90)
+      await renderOnce(p)
+    },
+  },
+  {
+    // The wheel pack's pick screen (D-167): the padlock view, the shackle labels in the
+    // footer, and the wheel key legend — none of which the cutaway pick audits.
+    name: 'pick-wheels',
+    arrange: async (p) => {
+      await setManual(p, true)
+      await loadLock(p, 39, 5)
+      await setInput(p, { chamber: 1, liftTarget: 0.45, tensionHeld: true, tensionLevel: 0.4 })
+      await stepTicks(p, 90)
+      await renderOnce(p)
+    },
+  },
+  {
+    // …and the same screen the way every attempt actually STARTS: wrench off, so the rank
+    // band's "hold Q" hints are drawn. The shackle ran through them for a whole version
+    // because the fixture above holds tension and the band never showed (D-169).
+    name: 'pick-wheels-start',
+    arrange: async (p) => {
+      await setManual(p, true)
+      await loadLock(p, 39, 5)
+      await stepTicks(p, 30)
       await renderOnce(p)
     },
   },

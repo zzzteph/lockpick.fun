@@ -187,6 +187,12 @@ export interface HudOptions {
    */
   readonly heldHint?: string
   /**
+   * Combination locks: the tension is a shackle pull, not a wrench, and every label that names
+   * the control has to say so — the same rule that renamed the slider for touch (D-107): a
+   * caption naming a tool the player is not holding is worse than no caption at all.
+   */
+  readonly shackle?: boolean
+  /**
    * True when the player holds the lock right-handed, which mirrors the whole screen (D-130).
    *
    * The readouts move with the controls. If they did not, the wrench would land on top of them the
@@ -591,12 +597,22 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
       color: readable.amber,
       align: 'center',
     })
-    label(ctx, 'nothing in the lock moves until it is under tension', LOGICAL_WIDTH / 2, RANK_BAND_Y + 100, {
-      font: font(ts(TYPE.body)),
-      size: ts(TYPE.body),
-      color: p.inkLight,
-      align: 'center',
-    })
+    // Spaced by the second line's own height, not the literal 34px it shipped with — at the
+    // compact face the two lines were drawn through each other (the D-129 rule, in the one
+    // block that kept its literals; found the day a fixture finally arranged the wrench-off
+    // state, D-169).
+    label(
+      ctx,
+      'nothing in the lock moves until it is under tension',
+      LOGICAL_WIDTH / 2,
+      RANK_BAND_Y + 66 + ts(TYPE.body) + 12,
+      {
+        font: font(ts(TYPE.body)),
+        size: ts(TYPE.body),
+        color: p.inkLight,
+        align: 'center',
+      },
+    )
   } else if (opts.inspecting) {
     // No letter, because there is no rank to earn — and the word has to be unmissable, or a player
     // will spend ten good minutes on a run that was never going to count (D-092).
@@ -693,15 +709,23 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
    * The keyboard never sends 0 here, so this costs the flat layout nothing.
    */
   const off = opts.pressureStep <= 0
+  const noun = opts.shackle === true ? 'shackle' : 'wrench'
   label(
     ctx,
     off
       ? compact
-        ? 'wrench off'
-        : 'tension wrench — off'
+        ? `${noun} off`
+        : opts.shackle === true
+          ? 'shackle — released'
+          : 'tension wrench — off'
       : compact
-        ? `wrench ${opts.pressureStep} of 10`
-        : `tension wrench — pressure ${opts.pressureStep} of 10`,
+        ? opts.shackle === true
+          ? 'shackle pulled'
+          : `${noun} ${opts.pressureStep} of 10`
+        : opts.shackle === true
+          ? // No strength steps on a wheel pack (D-169): a hand pulls a shackle or it does not.
+            'shackle — pulled'
+          : `tension wrench — pressure ${opts.pressureStep} of 10`,
     leftX,
     footerY + FOOTER_PAD,
     {
@@ -710,46 +734,52 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
       color: p.inkLight,
     },
   )
-  meter(
-    vp,
-    p,
-    leftX,
-    footerY + FOOTER_PAD + 14,
-    meterW,
-    state.tension,
-    state.tension >= T_MIN_HOLD ? p.amber : p.rule,
-    { height: BAR_H },
-  )
-  // The same em dash the slider's own header uses for off, so the two readouts speak one language.
-  label(ctx, off ? '—' : String(opts.pressureStep), leftX + meterW + 20, footerY + FOOTER_PAD + 38, {
-    font: font(ts(TYPE.heading), 'bold'),
-    size: ts(TYPE.heading),
-    color: off ? p.inkLight : p.ink,
-  })
-  text(ctx, state.tension.toFixed(2), leftX + meterW + 58, footerY + FOOTER_PAD + 38, {
-    font: font(ts(TYPE.dimension)),
-    color: p.inkLight,
-  })
-  /**
-   * The pressure the pins you have already set need, marked on the meter you set pressure with.
-   *
-   * The wrench used to be a thing you turned on; since D-098 it is a thing you have to get *right*,
-   * and the meter said nothing about which part of its range was which. A number between 0 and 1
-   * cannot tell you that 0.21 loses pins and 0.31 does not — so the threshold is drawn where it
-   * actually is, as the same notch the plug bar uses for the same job: a line the fill has to reach.
-   *
-   * Below it, leaning on one chamber shakes the drivers off the others. Above it, they stay. That is
-   * the whole of the tension decision and it is now visible rather than deducible. See D-100.
-   */
-  const holdX = leftX + meterW * clamp01(T_SET_HOLD * DISTURB_FACTOR)
-  ctx.save()
-  ctx.strokeStyle = state.tension >= T_SET_HOLD * DISTURB_FACTOR ? p.ink : readableAccents(p).crimson
-  ctx.lineWidth = STROKE.standard
-  ctx.beginPath()
-  ctx.moveTo(snapX(vp, holdX, STROKE.standard), footerY + FOOTER_PAD + 6)
-  ctx.lineTo(snapX(vp, holdX, STROKE.standard), footerY + FOOTER_PAD + 14)
-  ctx.stroke()
-  ctx.restore()
+  // A wheel pack draws no tension instrumentation at all — the pull is one strength, so a
+  // strength meter, a step number and a hold-notch would be three gauges measuring a constant
+  // (the owner: "we do not need shackle measure and force measure for the wheels"). The word
+  // above ("shackle — pulled / released") is the whole readout.
+  if (opts.shackle !== true) {
+    meter(
+      vp,
+      p,
+      leftX,
+      footerY + FOOTER_PAD + 14,
+      meterW,
+      state.tension,
+      state.tension >= T_MIN_HOLD ? p.amber : p.rule,
+      { height: BAR_H },
+    )
+    // The same em dash the slider's own header uses for off, so the two readouts speak one language.
+    label(ctx, off ? '—' : String(opts.pressureStep), leftX + meterW + 20, footerY + FOOTER_PAD + 38, {
+      font: font(ts(TYPE.heading), 'bold'),
+      size: ts(TYPE.heading),
+      color: off ? p.inkLight : p.ink,
+    })
+    text(ctx, state.tension.toFixed(2), leftX + meterW + 58, footerY + FOOTER_PAD + 38, {
+      font: font(ts(TYPE.dimension)),
+      color: p.inkLight,
+    })
+    /**
+     * The pressure the pins you have already set need, marked on the meter you set pressure with.
+     *
+     * The wrench used to be a thing you turned on; since D-098 it is a thing you have to get *right*,
+     * and the meter said nothing about which part of its range was which. A number between 0 and 1
+     * cannot tell you that 0.21 loses pins and 0.31 does not — so the threshold is drawn where it
+     * actually is, as the same notch the plug bar uses for the same job: a line the fill has to reach.
+     *
+     * Below it, leaning on one chamber shakes the drivers off the others. Above it, they stay. That is
+     * the whole of the tension decision and it is now visible rather than deducible. See D-100.
+     */
+    const holdX = leftX + meterW * clamp01(T_SET_HOLD * DISTURB_FACTOR)
+    ctx.save()
+    ctx.strokeStyle = state.tension >= T_SET_HOLD * DISTURB_FACTOR ? p.ink : readableAccents(p).crimson
+    ctx.lineWidth = STROKE.standard
+    ctx.beginPath()
+    ctx.moveTo(snapX(vp, holdX, STROKE.standard), footerY + FOOTER_PAD + 6)
+    ctx.lineTo(snapX(vp, holdX, STROKE.standard), footerY + FOOTER_PAD + 14)
+    ctx.stroke()
+    ctx.restore()
+  }
   /**
    * The caption's row belongs to whichever sentence is *currently* true.
    *
@@ -774,7 +804,13 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
    * pin, and letting go is the one move that undoes what they have. On a desktop, and on a phone
    * once they have done it, the notch explanation is the better use of the row.
    */
-  const held = opts.heldHint ?? 'past the notch, set pins hold while you work'
+  // The pin sentence would be a lie on a wheel pack — a seated wheel is pinned by the fence,
+  // notch or no notch. What the pull actually buys there is the family's whole tell.
+  const held =
+    opts.heldHint ??
+    (opts.shackle === true
+      ? 'the bound wheel drags under the pull — that drag is the tell'
+      : 'past the notch, set pins hold while you work')
   // On a phone the prompt survives and the explanation does not: 'hold the wrench' is the one
   // sentence a stuck player needs, and the notch is visible on the meter itself (D-122). A hint
   // the caller has gone out of its way to supply is a prompt, so it survives too.
@@ -866,7 +902,9 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
     // The pair is a *comparison* (D-064) and a phone has room for one bar. Resistance is the one
     // that survives: it is the simulation's only continuous channel back to the player, and force
     // is knowable from the hand that is making it (D-122).
-    if (!compact) {
+    // No force column on a wheel pack: nothing is pushed, so "how hard you push" is a gauge
+    // on a control the family does not have. Resistance alone is the tell.
+    if (!compact && opts.shackle !== true) {
       column(vp, p, forceX, colBottom, colH, state.pickForce, alpha(p.inkLight, 0.7), 10, colW)
     text(ctx, state.pickForce.toFixed(2), forceX + colW / 2, NUM_Y, {
       font: font(ts(TYPE.heading)),
@@ -942,7 +980,11 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
     // Not under touch either: the drag-to-lift strip lives in this gutter (D-129), and on the
     // full page with a finger down these two lines printed 42% and 52% across its edge (D-160).
     if (!compact && !opts.touchActive) {
-      for (const line of ['force — how hard you push', 'resistance — how hard it pushes back']) {
+      const captions =
+        opts.shackle === true
+          ? ['resistance — the bound wheel dragging under the pull']
+          : ['force — how hard you push', 'resistance — how hard it pushes back']
+      for (const line of captions) {
         cy += paragraph(ctx, line, captionX, cy, {
           font: font(ts(TYPE.dimension)),
           color: p.inkLight,
@@ -973,37 +1015,41 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
    * It goes crimson while θ is falling. A player who forces a spool and loses three pins needs the
    * cause on screen at the moment it happens, not a caption afterwards. See DECISIONS D-081.
    */
-  const turningBack = state.thetaVelocity < -1e-3
-  const plugX = LOGICAL_WIDTH / 2 + 40
-  const plugW = 300
-  label(ctx, turningBack ? 'plug — turning back' : 'plug', plugX, footerY + FOOTER_PAD, {
-    font: font(ts(TYPE.dimension)),
-    size: ts(TYPE.dimension),
-    color: turningBack ? readableAccents(p).crimson : p.inkLight,
-  })
-  const turned = clamp01(state.theta / THETA_OPEN)
-  meter(vp, p, plugX, footerY + FOOTER_PAD + 14, plugW, turned, turningBack ? readableAccents(p).crimson : p.ink, {
-    height: BAR_H,
-  })
-  // The opening threshold, drawn as a notch above the bar rather than a segment inside it: it is a
-  // line the fill has to reach, and a filled segment would read as progress rather than as a target.
-  const notchX = plugX + plugW * OPEN_THETA_FRACTION
-  ctx.save()
-  ctx.strokeStyle = p.ink
-  ctx.lineWidth = STROKE.standard
-  ctx.beginPath()
-  ctx.moveTo(snapX(vp, notchX, STROKE.standard), footerY + FOOTER_PAD + 6)
-  ctx.lineTo(snapX(vp, notchX, STROKE.standard), footerY + FOOTER_PAD + 14)
-  ctx.stroke()
-  ctx.restore()
-  // The bar was unlabelled beyond the word "plug", so the notch read as decoration. It is the
-  // finish line: fill past it and the lock is open (D-100).
-  if (!compact)
-  label(ctx, 'how far it has turned — past the notch it opens', plugX, footerY + FOOTER_PAD + 70, {
-    font: font(ts(TYPE.dimension)),
-    size: ts(TYPE.dimension),
-    color: p.inkLight,
-  })
+  // A padlock has no plug: the fence drops or it does not, and a rotation meter on a lock
+  // with nothing that rotates was the owner's third strike ("and plug measure").
+  if (opts.shackle !== true) {
+    const turningBack = state.thetaVelocity < -1e-3
+    const plugX = LOGICAL_WIDTH / 2 + 40
+    const plugW = 300
+    label(ctx, turningBack ? 'plug — turning back' : 'plug', plugX, footerY + FOOTER_PAD, {
+      font: font(ts(TYPE.dimension)),
+      size: ts(TYPE.dimension),
+      color: turningBack ? readableAccents(p).crimson : p.inkLight,
+    })
+    const turned = clamp01(state.theta / THETA_OPEN)
+    meter(vp, p, plugX, footerY + FOOTER_PAD + 14, plugW, turned, turningBack ? readableAccents(p).crimson : p.ink, {
+      height: BAR_H,
+    })
+    // The opening threshold, drawn as a notch above the bar rather than a segment inside it: it is a
+    // line the fill has to reach, and a filled segment would read as progress rather than as a target.
+    const notchX = plugX + plugW * OPEN_THETA_FRACTION
+    ctx.save()
+    ctx.strokeStyle = p.ink
+    ctx.lineWidth = STROKE.standard
+    ctx.beginPath()
+    ctx.moveTo(snapX(vp, notchX, STROKE.standard), footerY + FOOTER_PAD + 6)
+    ctx.lineTo(snapX(vp, notchX, STROKE.standard), footerY + FOOTER_PAD + 14)
+    ctx.stroke()
+    ctx.restore()
+    // The bar was unlabelled beyond the word "plug", so the notch read as decoration. It is the
+    // finish line: fill past it and the lock is open (D-100).
+    if (!compact)
+    label(ctx, 'how far it has turned — past the notch it opens', plugX, footerY + FOOTER_PAD + 70, {
+      font: font(ts(TYPE.dimension)),
+      size: ts(TYPE.dimension),
+      color: p.inkLight,
+    })
+  }
 
   if (!compact && opts.depthMm !== null && opts.depthMm !== undefined) {
     const dx = LOGICAL_WIDTH / 2 - 150
@@ -1026,7 +1072,8 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
    * next to tension is deliberate — leaning too hard is the cause and this is the cost.
    */
   const strain = opts.strain
-  if (strain && (strain.amount > 0.04 || strain.bent || strain.broken)) {
+  // No pick enters a wheel pack, so nothing can bend — the bar would gauge an absent tool.
+  if (opts.shackle !== true && strain && (strain.amount > 0.04 || strain.bent || strain.broken)) {
     // +230, not +90. The caption under the tension meter is 430px wide at the larger face and this
     // block used to start at 466 — the two shared 20px of row (D-102).
     const sx = leftX + meterW + 230

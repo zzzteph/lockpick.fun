@@ -327,6 +327,19 @@ export const DISC_FALSE_GATE_DEPTH = 0.3
 /** A false gate's bevel. Shallower than a spool's — a sidebar tip is a blunter wedge. */
 export const DISC_FALSE_GATE_TAPER = 0.2
 
+// ── Combination wheels — a disc with detents ────────────────────────────────────────────
+
+/** Digits on a combination wheel: the dial face every suitcase and bike lock shares. */
+export const COMBO_DIGITS = 10
+/**
+ * One detent's span of disc travel. A combination wheel is a disc that clicks: the turner's
+ * target quantizes to detent centres (`digit × COMBO_DETENT + COMBO_DETENT/2`), so a wheel
+ * always parks dead-centre on a digit and hand wobble cannot smear it off one. The gates are
+ * authored on the same centres, which is why `gateWidth ≤ COMBO_DETENT/2` keeps every digit
+ * inside `validateDiscs`' reachable range and every neighbouring detent reading SOLID.
+ */
+export const COMBO_DETENT = DISC_TRAVEL / COMBO_DIGITS
+
 /**
  * How far the plug can turn while a sidebar is still up. Enough to feel like progress and to
  * make the stall unmistakable, nowhere near enough to open.

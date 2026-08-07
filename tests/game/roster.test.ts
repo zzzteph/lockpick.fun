@@ -18,17 +18,18 @@ import type { Viewport } from '../../src/render/viewport'
 const ROOT = path.resolve(__dirname, '../..')
 
 describe('the roster is data — CONTENT.md §1', () => {
-  it('is cylinders, in four tiers (D-088, D-104)', () => {
+  it('is cylinders and wheel packs, in four tiers (D-088, D-104, D-167)', () => {
     // The roster used to be 36 locks across six tiers and six families. It was cut twice, both
     // times deliberately: D-088 dropped wafer, dimple, tubular and radial-slider locks and spread
     // the pin tumblers over four tiers with the disc detainers as a fifth, and D-104 dropped the
-    // disc detainers too — a family the game never taught. What is left is one family and one
-    // idea, told four tiers deep. The ids are no longer contiguous, and that is fine: an id is an
-    // identity, not a position.
+    // disc detainers too — a family the game never taught. D-167 brought a second family back
+    // through the door D-104 left open: combination wheels ride the surviving disc machinery,
+    // and this time the binding-order hunt IS the teaching. Two families, one idea, four tiers.
+    // The ids are no longer contiguous, and that is fine: an id is an identity, not a position.
     const tiers = [...new Set(ALL_LOCKS.map((d) => d.tier))].sort((a, b) => a - b)
     expect(tiers).toEqual([1, 2, 3, 4])
-    const families = new Set(ALL_LOCKS.map((d) => d.family))
-    expect([...families]).toEqual(['pin-tumbler'])
+    const families = [...new Set(ALL_LOCKS.map((d) => d.family))].sort()
+    expect(families).toEqual(['combination', 'pin-tumbler'])
     // Every id is unique, and nothing is both authored and deferred.
     expect(new Set(ALL_LOCKS.map((d) => d.id)).size).toBe(ALL_LOCKS.length)
     const deferred = new Set(DEFERRED_LOCKS.map((d) => d.id))

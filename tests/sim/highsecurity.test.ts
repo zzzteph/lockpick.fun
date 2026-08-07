@@ -308,10 +308,15 @@ describe('sidebar locks', () => {
 })
 
 describe('the top of the roster', () => {
-  it('ends at Tier 4, all cylinders, since the disc detainers were cut (D-104)', () => {
+  it('ends at Tier 4 — cylinders and wheel packs, since D-167 brought a second family', () => {
+    // The disc detainers were cut in D-104; the combination wheels ride the same surviving
+    // machinery back in. The tier ceiling is unchanged: Tier 4 is still the top, as the store
+    // page says.
     const tiers = [...new Set(ALL_LOCKS.map((d) => d.tier))].sort((a, b) => a - b)
     expect(tiers).toEqual([1, 2, 3, 4])
-    expect(ALL_LOCKS.every((d) => d.family === 'pin-tumbler')).toBe(true)
+    expect(ALL_LOCKS.every((d) => d.family === 'pin-tumbler' || d.family === 'combination')).toBe(
+      true,
+    )
   })
 
   it(

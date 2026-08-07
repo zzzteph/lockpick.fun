@@ -331,6 +331,52 @@ export interface DevHook {
    * counts are a coincidence, not a claim.
    */
   layoutState(): { compact: boolean; interfaceMode: string; scale: number }
+
+  // ── The Lock dungeon (docs/DUNGEON.md) ──
+  /** Begin a run on a known floor — determinism is what makes the clearing e2e honest. */
+  startDungeonRun(seed: number, difficulty: 'training' | 'easy' | 'medium' | 'hard'): void
+  /** Open or close the dungeon guide page — the layout sweep's way onto it. */
+  dungeonGuide(open: boolean): void
+  /** Spend a skeleton key on the lock being offered the choice. */
+  dungeonUseKey(): void
+  /** Choose the pick at the key-or-pick choice — the lock screen takes over. */
+  dungeonPickLock(): void
+  /** Step back from the key-or-pick choice. */
+  dungeonStepBack(): void
+  /** Test-only: pose the key-or-pick choice so the layout sweep can audit the panel. */
+  dungeonForceUnlock(): void
+  /** One step or bump, exactly as the arrows and the tile taps do. */
+  dungeonMove(dx: number, dy: number): void
+  /** Stand still for a turn. */
+  dungeonWait(): void
+  /** Push a ticker line into the live run — the layout sweep audits a full ticker with it. */
+  dungeonLog(line: string): void
+  /** The run as data — null when no run stands (the briefing state). */
+  dungeonState(): {
+    phase: string
+    turn: number
+    x: number
+    y: number
+    picks: number
+    keys: number
+    tracker: boolean
+    seed: number
+    score: number
+    picking: { kind: 'chest' | 'door' | 'gate'; id: number } | null
+    /** The living, for scripted agents — the clearing proof plans with these. */
+    enemies: { kind: string; x: number; y: number; awake: boolean }[]
+  } | null
+  /**
+   * Open the live session by replaying the real solver's tape through it — the whole open
+   * pipeline (events, loot, the dungeon's own banking) fires as if a very good hand played it.
+   */
+  solveCurrentLock(): boolean
+
+  /**
+   * Select a bench page — a tier number, or 0 for the wheels shelf (D-167). Exists so the
+   * layout sweep can audit the shelf without hunting the button's rect on nineteen devices.
+   */
+  benchTier(tier: number): void
 }
 
 declare global {

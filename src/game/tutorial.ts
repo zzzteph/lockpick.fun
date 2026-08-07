@@ -170,6 +170,33 @@ export const LESSON_SERRATED_LOCK: LockDef = {
   note: 'One serrated pin, in the middle. Count the lies.',
 }
 
+/**
+ * The wheel-pack lock: three wheels, honest gates, the widest detents the grid allows.
+ *
+ * The second family gets a lesson because D-104 cut the first face-on family for exactly the
+ * lack of one — "a family the game never taught". No false gates here: the decode itself is
+ * the whole curriculum (pull, find the drag, dial until it moves on), and the lies are
+ * introduced by the Tier 3 roster lock the way spools are introduced after plain pins.
+ */
+export const LESSON_WHEEL_LOCK: LockDef = {
+  id: 907,
+  slug: 'lesson-the-wheel-pack',
+  name: 'Lesson 7 — The Wheel Pack',
+  tier: 1,
+  family: 'combination',
+  bitting: [3, 3, 3],
+  pins: ['standard', 'standard', 'standard'],
+  discs: {
+    trueGates: [0.75, 1.95, 1.35],
+    falseGates: [[], [], []],
+    gateWidth: 0.15,
+  },
+  toleranceQuality: 1.3,
+  keyway: 'standard',
+  par: 60,
+  note: 'Three wheels and a shackle. The other family, from the first pull.',
+}
+
 export const TUTORIAL_LOCKS: readonly LockDef[] = [
   LESSON_TURN_LOCK,
   LESSON_TENSION_LOCK,
@@ -177,6 +204,7 @@ export const TUTORIAL_LOCKS: readonly LockDef[] = [
   LESSON_PRESSURE_LOCK,
   LESSON_SPOOL_LOCK,
   LESSON_SERRATED_LOCK,
+  LESSON_WHEEL_LOCK,
 ]
 
 // ── Predicates ──────────────────────────────────────────────────────────────────────────
@@ -450,6 +478,54 @@ export const LESSONS: readonly Lesson[] = [
       {
         id: 'open',
         line: 'Four lies, one truth: the real set is the one where the plug moves. Turn it.',
+        done: (s) => s.opened,
+      },
+    ],
+  },
+  {
+    /**
+     * The second family's lesson, taught the way the first family's were: by a lock with
+     * nothing on it but the one idea. The idea is the owner's own sentence — *"pull the
+     * shackle and rotate the first wheel, it will stuck… if we correct with the first one —
+     * the second will be slow"* — which is real decoding, and exactly the binding-order hunt
+     * the player already knows, rotated ninety degrees.
+     */
+    id: 'lesson-wheels',
+    title: 'The wheel pack',
+    teaches: 'The second family: pull the shackle, find the dragging wheel, dial it.',
+    lock: LESSON_WHEEL_LOCK,
+    steps: [
+      {
+        id: 'pull',
+        line: 'A different animal: no keyway, three wheels on a shackle. Hold Q and pull.',
+        done: holdingTension,
+        hint: 'Q is the shackle now. Wheels only speak under load — pull and keep pulling.',
+        hintAfter: 6,
+      },
+      {
+        id: 'find',
+        line: 'One wheel drags under the pull. Arrows move between wheels — find the stiff one.',
+        done: (s) => holdingTension(s) && s.pickChamber >= 0 && s.pickChamber === s.bindingChamber,
+        hint: 'Cross the pack slowly. The bound wheel turns heavy; free ones spin light.',
+        hintAfter: 8,
+      },
+      {
+        id: 'dial',
+        line: 'Hold Space: the wheel rolls digit to digit. At one digit the drag lets go.',
+        done: anySet,
+        hint: 'Let go of Space and the wheel stays put. Roll on — the dial wraps past 9.',
+        hintAfter: 10,
+      },
+      {
+        id: 'transfer',
+        line: 'The drag has moved to another wheel: the pack gives its wheels up in order.',
+        done: (s) => anySet(s) && s.bindingChamber >= 0 && s.pickChamber === s.bindingChamber,
+        hint: 'Same hunt. Find the wheel that drags now — the seated one is done for good.',
+        hintAfter: 8,
+      },
+      {
+        id: 'open',
+        line: 'Seat all three and nothing holds the fence. Keep pulling and it opens.',
         done: (s) => s.opened,
       },
     ],

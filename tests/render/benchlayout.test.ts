@@ -28,17 +28,27 @@ describe('the bench', () => {
   const tiers = [...new Set(ALL_LOCKS.map((d) => d.tier))]
   const floor = LOGICAL_HEIGHT - MARGIN - STATUS_BAND
 
-  it('fits the roster that actually ships', () => {
-    const h = benchHeight(ALL_LOCKS.length, tiers.length)
+  /**
+   * The bench's pages, exactly as `drawBench` deals them since D-167: each tier page holds its
+   * *cylinders*, and the wheel locks are a page of their own. What bounds the layout is the
+   * biggest single page — a page is what is on screen at once (D-102).
+   */
+  const pages = [
+    ...tiers.map((t) => ALL_LOCKS.filter((d) => d.tier === t && d.family !== 'combination').length),
+    ALL_LOCKS.filter((d) => d.family === 'combination').length,
+  ]
+  const biggest = Math.max(...pages)
+
+  it('fits every page the roster actually deals — tier pages and the wheels shelf', () => {
+    const h = benchHeight(biggest * tiers.length, tiers.length)
     expect(h, `bench runs to y=${h}, past the status line at ${floor}`).toBeLessThanOrEqual(floor)
   })
 
-  it('fits the biggest tier, which is what actually bounds the page', () => {
-    // The bench draws one tier at a time (D-102), so the page is bounded by the largest tier and
-    // not by the total. Asked directly, so a roster that grew one tier is caught.
-    const biggest = Math.max(...tiers.map((t) => ALL_LOCKS.filter((d) => d.tier === t).length))
-    const h = benchHeight(biggest * tiers.length, tiers.length)
-    expect(h).toBeLessThanOrEqual(floor)
+  it('holds the page size the card was designed for — a tier page never exceeds six', () => {
+    // The D-097 card is sized so that six cards fit and seven do not. A lock added to a tier
+    // must go to a new page (the wheels shelf is that, for the second family) — this is what
+    // fails first when someone drops a 26th lock into a tier instead.
+    expect(biggest).toBeLessThanOrEqual(6)
   })
 
   it('would catch a tier that grew too large — the check is not vacuous', () => {
@@ -49,10 +59,10 @@ describe('the bench', () => {
 
   /**
    * The compact bench is a different shape, and it is the one that nearly did not fit — D-123.
-   * Two columns turns a six-lock tier into three rows of taller-typed cards.
+   * Two columns turns a six-lock page into three rows of taller-typed cards.
    */
   it('fits on a phone, where it is two columns and three rows', () => {
-    const h = benchHeight(ALL_LOCKS.length, tiers.length, true)
+    const h = benchHeight(biggest * tiers.length, tiers.length, true)
     expect(h, `compact bench runs to y=${h}, past the status line at ${floor}`).toBeLessThanOrEqual(
       floor,
     )

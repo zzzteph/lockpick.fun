@@ -74,6 +74,11 @@ export interface CutawayOptions {
    * drag-to-lift strip lives where the key's column lands on a six-chamber lock (D-160).
    */
   readonly touchActive?: boolean
+  /**
+   * D-166's Easy: every pin drawn honestly, and every *state* painted as free — hue, pattern
+   * and the overset crimson all silenced. The geometry keeps talking; the narration stops.
+   */
+  readonly plainStates?: boolean
 }
 
 /** In blind mode, only the chamber under the tip is drawn at all. */
@@ -208,11 +213,13 @@ function paintPattern(
   chamber: Chamber,
   p: Palette,
   showBinding: boolean,
+  plainStates = false,
 ): void {
   // Through `stateKey`, so the fill *pattern* hides a binding chamber outside Guided mode as
   // well as the fill colour. Leaking it through the pattern channel would give it straight back
-  // to a colourblind player and to anyone reading the greyscale view.
-  const pattern = STATE_PATTERN[stateKey(chamber, showBinding)]
+  // to a colourblind player and to anyone reading the greyscale view. `plainStates` (D-166's
+  // Easy) silences the channel entirely — the pattern is a state tell exactly like the hue.
+  const pattern = STATE_PATTERN[plainStates ? 'free' : stateKey(chamber, showBinding)]
   const inkOnFill = alpha(p.ink, 0.55)
   switch (pattern) {
     case 'hatch':
@@ -254,7 +261,13 @@ function paintPattern(
  * The colour a driver is drawn with, including the set flash.
  * ART_DIRECTION.md §5: a one-frame flash to Highlight, then a 180ms ease to the state hue.
  */
-export function driverFill(p: Palette, c: Chamber, fx: Fx, showBinding = true): string {
+export function driverFill(
+  p: Palette,
+  c: Chamber,
+  fx: Fx,
+  showBinding = true,
+  plainStates = false,
+): string {
   /**
    * An overset driver is drawn as an ordinary one, because it *is* one.
    *
@@ -263,7 +276,9 @@ export function driverFill(p: Palette, c: Chamber, fx: Fx, showBinding = true): 
    * crimson pointed at the wrong pin, and it pointed at it in the loudest way the drawing has.
    * The key pin keeps the crimson (see `drawKeyPin`). See DECISIONS D-094.
    */
-  const key = c.state === 'OVERSET' ? 'free' : stateKey(c, showBinding)
+  // `plainStates` (D-166's Easy) paints every state as free: the geometry stays honest, the
+  // lock stops narrating. Transient flashes below survive — a click is a moment, not a state.
+  const key = c.state === 'OVERSET' || plainStates ? 'free' : stateKey(c, showBinding)
   const base = stateColor(p, key)
   const flash = flashAmount(fx, c.index)
   const pulse = falseSetPulse(fx, c.index)
@@ -330,9 +345,10 @@ function drawDriver(
   recessed = false,
   showBinding = true,
   plain = false,
+  plainStates = false,
 ): void {
   const { ctx } = vp
-  const fill = driverFill(p, c, fx, showBinding)
+  const fill = driverFill(p, c, fx, showBinding, plainStates)
   // `plain` is blind mode: draw the driver as an unshaped stack whatever it really is, so a
   // spool's waist and a serrated pin's steps have to be *deduced* rather than read (D-041).
   const rects = plain ? [driverPinRect(layout, c)] : bandRects(layout, c)
@@ -377,7 +393,7 @@ function drawDriver(
   ctx.save()
   tracePath()
   ctx.clip()
-  for (const r of rects) paintPattern(ctx, r, c, p, showBinding)
+  for (const r of rects) paintPattern(ctx, r, c, p, showBinding, plainStates)
   ctx.restore()
 
   ctx.save()
@@ -460,7 +476,7 @@ function outlineBands(
 }
 
 /** The key pin: narrower, chamfered top, and it rides with the plug. */
-function drawKeyPin(vp: Viewport, p: Palette, layout: CutawayLayout, c: Chamber): void {
+function drawKeyPin(vp: Viewport, p: Palette, layout: CutawayLayout, c: Chamber, plainStates = false): void {
   const { ctx } = vp
   const r = keyPinRect(layout, c)
   const chamfer = Math.min(6, r.w * 0.22)
@@ -476,7 +492,7 @@ function drawKeyPin(vp: Viewport, p: Palette, layout: CutawayLayout, c: Chamber)
   // Slightly lighter than the driver above it, so the junction reads even where the two
   // are the same width at a glance.
   ctx.fillStyle =
-    c.state === 'OVERSET' ? mix(p.steel, p.crimson, 0.55) : mix(p.steel, p.paper, 0.32)
+    c.state === 'OVERSET' && !plainStates ? mix(p.steel, p.crimson, 0.55) : mix(p.steel, p.paper, 0.32)
   ctx.fill()
   ctx.lineWidth = STROKE.standard
   ctx.strokeStyle = p.ink
@@ -761,8 +777,8 @@ export function drawCutaway(
     if (c.kind === 'wafer') {
       drawWafer(vp, p, layout, c, opts.fx, recessed, opts.showTargets)
     } else {
-      drawDriver(vp, p, layout, c, opts.fx, recessed, opts.showTargets, opts.felt !== undefined)
-      drawKeyPin(vp, p, layout, c)
+      drawDriver(vp, p, layout, c, opts.fx, recessed, opts.showTargets, opts.felt !== undefined, opts.plainStates ?? false)
+      drawKeyPin(vp, p, layout, c, opts.plainStates ?? false)
     }
     ctx.restore()
   }

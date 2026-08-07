@@ -26,11 +26,14 @@ export { ASSIST_PAR_SCALE as ASSIST_MULTIPLIER } from './ranks'
 export const ASSIST_MODES: readonly AssistMode[] = ['training', 'easy', 'medium', 'hard']
 
 /** What each level actually takes away, for the settings screen to say out loud. */
+// Re-rung by the owner in D-166: each level one step gentler than the D-046 ladder, and the
+// pick stays visible on every rung. Easy's rung is new — the whole cutaway with the state
+// narration switched off.
 export const ASSIST_BLURB: Record<AssistMode, string> = {
   training: 'Everything visible: pin types, the binding pin, the target window.',
-  easy: 'Only the pin under your pick, and not what kind it is.',
-  medium: 'No pins at all. You see where your pick is; read the meter.',
-  hard: 'Not even the pick. A depth readout and the meter, nothing else.',
+  easy: 'Every pin, honestly drawn — but no state colours, no state word. The lock stops narrating.',
+  medium: 'Only the pin under your pick, and not what kind it is.',
+  hard: 'No pins at all. Your pick, a depth readout, and the meter.',
 }
 
 export interface ChallengeDef {

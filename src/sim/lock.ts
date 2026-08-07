@@ -6,8 +6,11 @@
  * *instance*, so the same lock binds in a different order every time you sit down with it.
  */
 
+import { detentCentre } from './classify'
 import {
   CAPTURE_WINDOW,
+  COMBO_DETENT,
+  COMBO_DIGITS,
   DIMPLE_MAX_OVERLIFT,
   CONDITION_SPREAD,
   DISC_TRAVEL,
@@ -73,7 +76,10 @@ export function validateLockDef(def: LockDef): void {
     fail(`pins has ${def.pins.length} entries but bitting has ${n}`)
   }
 
-  if (def.family === 'disc-detainer') {
+  if (def.family === 'disc-detainer' || def.family === 'combination') {
+    // Grid first: a combination author who fattens a gate should hear about the detent rule,
+    // not the downstream reachable-travel arithmetic it happens to break for digit 0 and 9.
+    if (def.family === 'combination') validateDetentGrid(def, fail)
     validateDiscs(def, n, fail)
     return
   }
@@ -214,6 +220,39 @@ function validateDiscs(def: LockDef, n: number, fail: (msg: string) => never): v
 }
 
 /**
+ * A combination lock's gates must live on the detent grid the turner snaps to.
+ *
+ * The wheel can only ever park on a centre, so a gate authored anywhere else is a gate no
+ * input can reach — the lock would validate, instantiate, and be unopenable. The width cap is
+ * the same fact from the other side: at `COMBO_DETENT/2` the first digit's centre sits exactly
+ * `gateWidth` up the travel, so every digit passes `validateDiscs`' reachable-range check, and
+ * a neighbouring detent (one full `COMBO_DETENT` away) can never read inside the window.
+ */
+function validateDetentGrid(def: LockDef, fail: (msg: string) => never): void {
+  const discs = def.discs
+  if (!discs) return // validateDiscs has already failed this
+  if (discs.gateWidth > COMBO_DETENT / 2) {
+    fail(
+      `combination gateWidth ${discs.gateWidth} exceeds half a detent ` +
+        `(${(COMBO_DETENT / 2).toFixed(2)}) — digit 0 would sit outside the reachable travel`,
+    )
+  }
+  const onCentre = (g: number): boolean => {
+    const digit = Math.round(g / COMBO_DETENT - 0.5)
+    return digit >= 0 && digit < COMBO_DIGITS && Math.abs(g - detentCentre(digit)) < 1e-6
+  }
+  for (let i = 0; i < discs.trueGates.length; i += 1) {
+    const t = discs.trueGates[i] as number
+    if (!onCentre(t)) {
+      fail(`wheel ${i} true gate ${t} is off the detent grid — use digit·${COMBO_DETENT}+${COMBO_DETENT / 2}`)
+    }
+    for (const f of discs.falseGates[i] ?? []) {
+      if (!onCentre(f)) fail(`wheel ${i} false gate ${f} is off the detent grid`)
+    }
+  }
+}
+
+/**
  * Generate `n` tolerance offsets in `[0, spread]`, every pair at least `MIN_DELTA_GAP` apart.
  *
  * The spec suggested rejection sampling ("regenerating if not"), which has no upper bound on
@@ -293,7 +332,7 @@ export function createSimState(def: LockDef, seed: number, config: SimConfig): S
 
   const chambers: Chamber[] = []
   const rows = def.rows ?? 1
-  const isDisc = def.family === 'disc-detainer'
+  const isDisc = def.family === 'disc-detainer' || def.family === 'combination'
   for (let i = 0; i < n; i += 1) {
     const keyPinLength = def.bitting[i] as number
     const profileName = def.pins[i] as PinTypeName
@@ -408,6 +447,7 @@ export function createSimState(def: LockDef, seed: number, config: SimConfig): S
     pickChamber: -1,
     pickPosition: -1,
     resistance: 0,
+    wheelTurn: 0,
     pickForce: 0,
     pickContact: 0,
     pickStrain: 0,

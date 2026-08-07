@@ -9,8 +9,9 @@
  */
 
 import type { Chamber, SimInput } from '../sim'
-import { clamp, clamp01 } from '../sim'
+import { COMBO_DETENT, COMBO_DIGITS, clamp, clamp01 } from '../sim'
 import { type FaceLayout } from '../render/faceon'
+import { wheelAtPoint, type PadlockLayout } from '../render/padlock'
 import { chamberAtX, yToMm, type CutawayLayout } from '../render/layout'
 import { clientToLogical, type Viewport } from '../render/viewport'
 import {
@@ -37,6 +38,14 @@ import {
  * *dev hook* reports positions in, so a test can say "put the tip 1.4mm up" and get a coordinate.
  */
 export const LIFT_PX_PER_MM = 144
+
+/**
+ * The one strength a shackle is ever pulled at (D-169): a hand pulls or it does not, so the
+ * ten wrench steps collapse to this on a wheel pack. 0.45 is the middle of the wrench's
+ * range — comfortably above `T_MIN_HOLD`, a readable drag on the bound wheel, and light
+ * enough that the false gates' counter-push stays a texture rather than a wall.
+ */
+export const WHEEL_PULL = 0.45
 
 /**
  * Rotation pressure as ten discrete steps, 1 to 10.
@@ -355,10 +364,12 @@ export class InputController {
           this.stepChamber(this.settings.mirrored ? -1 : 1)
           break
         case 'ArrowUp':
-          this.nudgeLift(KEY_LIFT_NUDGE)
+          if (this.padlockLayout) this.wheelStep(1)
+          else this.nudgeLift(KEY_LIFT_NUDGE)
           break
         case 'ArrowDown':
-          this.nudgeLift(-KEY_LIFT_NUDGE)
+          if (this.padlockLayout) this.wheelStep(-1)
+          else this.nudgeLift(-KEY_LIFT_NUDGE)
           break
         case 'Digit1':
         case 'Digit2':
@@ -412,12 +423,21 @@ export class InputController {
    * the pause pad's rectangle would sit invisibly over the tier-1 lock cards. The controls are drawn
    * only while picking, so they must only *listen* while picking.
    */
-  setPlayScreen(playing: boolean, layout: CutawayLayout | null): void {
+  setPlayScreen(
+    playing: boolean,
+    layout: CutawayLayout | null,
+    padlock: PadlockLayout | null = null,
+  ): void {
     this.playing = playing
     this.layout = layout
+    this.padlockLayout = padlock
   }
 
   private playing = false
+  /** The padlock view's geometry while a combination lock is on the bench (D-167). */
+  private padlockLayout: PadlockLayout | null = null
+  /** Set on a wheel grab; `readPadlock` re-origins the drag at the wheel's real angle. */
+  private padlockGrab = false
 
   /**
    * Was this pointer-up the end of a horizontal swipe? Records it if so.
@@ -477,6 +497,27 @@ export class InputController {
       if (this.touch.liftPointer !== null) this.usedBothThumbs = true
       return
     }
+    /**
+     * A wheel — the padlock view's whole gesture (D-167).
+     *
+     * A tap selects it; a vertical drag rolls it, **from the angle it is actually parked at**,
+     * which is the part a pin's scheme would get wrong: a pin drag starts from a dropped pick,
+     * but a wheel has no spring and a grab must continue the dial, not yank it to zero. The
+     * origin is re-synced to the wheel's real lift by `readPadlock` on the grab frame. Off the
+     * wheels, the drag rolls whichever wheel is already held — the `LIFT_PAD` rule unchanged.
+     * Letting go takes the hand off the lock entirely, and a springless wheel simply stays.
+     */
+    if (this.padlockLayout) {
+      const wheel = wheelAtPoint(this.padlockLayout, x, y)
+      if (wheel < 0 && this.touchChamber < 0) return
+      if (wheel >= 0) this.touchChamber = wheel
+      this.padlockGrab = true
+      this.touch.liftPointer = id
+      this.touch.liftOriginY = y
+      this.touch.liftOriginMm = this.touchLift
+      if (this.touch.wrenchPointer !== null) this.usedBothThumbs = true
+      return
+    }
     // A pin. Selecting is *all* this does — the tip arrives at rest, exactly as an arrow press
     // does, so tapping along a row of pins can never shove one of them (D-051, D-059).
     const layout = this.layout
@@ -531,8 +572,11 @@ export class InputController {
      * raised, and the pins it passes get shoved aside (D-138). The lift is **kept**, which is the
      * entire point — letting go of it is what the safe version of this gesture already does.
      */
+    // Not on the padlock: a wheel drag is vertical and stays on its wheel — crossing another
+    // wheel mid-roll must not switch the hand to it the way carrying a hook along the keyway
+    // deliberately does (D-138).
     const layout = this.layout
-    if (layout) {
+    if (layout && !this.padlockLayout) {
       const over = chamberAtX(layout, x)
       if (over >= 0 && over !== this.touchChamber) this.touchChamber = over
     }
@@ -559,6 +603,12 @@ export class InputController {
     }
     if (id !== this.touch.liftPointer) return
     this.touch.liftPointer = null
+    if (this.padlockLayout) {
+      // The thumb comes off the wheel: the hand leaves the lock and a springless wheel
+      // simply stays where it was rolled to. Selecting nothing is what parks it.
+      this.touchChamber = -1
+      return
+    }
     // The pick comes off the pin. Whatever the springs want to do now, they do.
     this.touchLift = 0
   }
@@ -622,6 +672,8 @@ export class InputController {
       if (!this.spaceDown) this.keyLift = 0
       this.keyTrim = 0
     }
+    // A pending wheel click belongs to the wheel it was pressed on; moving hands drops it.
+    this.wheelTarget = null
     this.keyChamber = next
   }
 
@@ -637,6 +689,27 @@ export class InputController {
     if (this.keyChamber < 0) this.keyChamber = 0
     this.keyTrim = clamp(this.keyTrim + delta, -this.liftCeiling, this.liftCeiling)
   }
+
+  /**
+   * One detent click, up or down — the arrows on a wheel (owner's ask, with Space kept).
+   *
+   * A pending click lives in `wheelTarget` rather than in `keyLift`, because the park-sync in
+   * `readPadlock` re-writes `keyLift` from the wheel every frame — a one-shot assignment would
+   * be stomped before the wheel had crossed a single detent. The digit is derived from
+   * `keyLift`, which the sync keeps equal to the wheel's angle (or to the target mid-click),
+   * so held-key repeats stack clicks cleanly. Works at every assist: a detent click is how
+   * the object is operated, not a training aid — and stepping down from 0 wraps to 9 through
+   * the seam, one click, exactly as the sim's short-way turner promises.
+   */
+  private wheelStep(dir: 1 | -1): void {
+    if (this.keyChamber < 0) this.keyChamber = 0
+    const digit = Math.round(this.keyLift / COMBO_DETENT - 0.5)
+    const next = (((digit + dir) % COMBO_DIGITS) + COMBO_DIGITS) % COMBO_DIGITS
+    this.wheelTarget = (next + 0.5) * COMBO_DETENT
+  }
+
+  /** The detent a pending arrow-click is rolling toward, or null. */
+  private wheelTarget: number | null = null
 
   /** What the pick is actually asking for: the held lift plus the trim, never below the floor. */
   private get requestedLift(): number {
@@ -714,14 +787,89 @@ export class InputController {
    * coordinates about the middle of the face, a second control scheme layered on the first, and
    * both are now just "which chamber" and "how far in" like everything else.
    */
+  /**
+   * A disc has no spring, and the keyboard's held-lift model was written for springs.
+   *
+   * `tick()` decays `keyLift` whenever Space is up — correct for a pin, which falls anyway —
+   * but a released wheel must *park*, and the decaying command would wind it back down as
+   * long as the tip stayed on it. So while Space is up the command re-syncs to where the
+   * wheel actually is, every frame, and the decay never gets a word in. While Space is held
+   * the ramp turns the wheel through its digits — and past the top it *wraps*, because a
+   * dial has no stop and an up-only command would otherwise dead-end on the last digit.
+   * One verb: hold Space and the wheel rolls, let go and it stays.
+   */
+  private wheelKeySync(c: Chamber): void {
+    if (this.spaceDown) {
+      if (this.keyLift > c.maxLift) this.keyLift -= c.maxLift
+    } else {
+      this.keyLift = c.lift
+      this.keyTrim = 0
+    }
+  }
+
   readFace(_layout: FaceLayout, chambers: readonly Chamber[]): SimInput {
     const index = this.touch.active ? this.touchChamber : this.keyChamber
-    const lift = this.touch.active ? this.touchLift : this.requestedLift
     const c = index >= 0 ? chambers[index] : undefined
+    if (!this.touch.active && c && c.kind === 'disc') this.wheelKeySync(c)
+    const lift = this.touch.active ? this.touchLift : this.requestedLift
     return {
       chamber: index,
       liftTarget: c ? clamp(lift, 0, c.maxLift) : 0,
       ...this.hands(),
+    }
+  }
+
+  /**
+   * The combination padlock — D-167's second picture, one read for both hands.
+   *
+   * Keyboard: `wheelKeySync`, exactly as the face view. Touch: while no drag pointer is down
+   * the command *follows the wheel* (the park, mirrored from the keyboard), and the frame a
+   * wheel is grabbed the drag re-origins at the wheel's real angle — a grab must continue the
+   * dial from where it stands, never yank it to a stale command or to zero.
+   *
+   * The pull has no strength steps on a wheel pack (owner's rule): a hand pulls a shackle or
+   * it does not, so any held tension maps to one honest default. The 1-0 keys and the
+   * slider's bands still *hold* the pull; they just cannot calibrate it.
+   */
+  readPadlock(_layout: PadlockLayout, chambers: readonly Chamber[]): SimInput {
+    const index = this.touch.active ? this.touchChamber : this.keyChamber
+    const c = index >= 0 ? chambers[index] : undefined
+    const hands = this.hands()
+    const pull = { tensionHeld: hands.tensionHeld, tensionLevel: hands.tensionHeld ? WHEEL_PULL : 0 }
+    if (this.touch.active) {
+      if (c && this.padlockGrab) {
+        this.touchLift = c.lift
+        this.touch.liftOriginMm = c.lift
+        this.padlockGrab = false
+      } else if (c && this.touch.liftPointer === null) {
+        this.touchLift = c.lift
+      }
+      return {
+        chamber: index,
+        liftTarget: c ? clamp(this.touchLift, 0, c.maxLift) : 0,
+        ...pull,
+      }
+    }
+    if (c && c.kind === 'disc') {
+      if (this.spaceDown) {
+        // Space is the continuous roll and it owns the command while held.
+        this.wheelTarget = null
+        this.wheelKeySync(c)
+      } else if (this.wheelTarget !== null) {
+        // A pending arrow-click: hold the command on the clicked detent until the wheel
+        // arrives, then hand back to the park-sync. Without this the sync would stomp the
+        // click the same frame it was pressed.
+        this.keyLift = this.wheelTarget
+        this.keyTrim = 0
+        if (Math.abs(c.lift - this.wheelTarget) < 1e-3) this.wheelTarget = null
+      } else {
+        this.wheelKeySync(c)
+      }
+    }
+    return {
+      chamber: index,
+      liftTarget: c ? clamp(this.requestedLift, 0, c.maxLift) : 0,
+      ...pull,
     }
   }
 

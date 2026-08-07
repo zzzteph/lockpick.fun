@@ -16,6 +16,8 @@ export type LockFamily =
   | 'tubular'
   | 'safe-dial'
   | 'radial-slider'
+  /** A wheel combination padlock: discs with detents, decoded under shackle tension. */
+  | 'combination'
 
 export type KeywayGrade = 'standard' | 'tight'
 
@@ -56,7 +58,10 @@ export interface LockDef {
   readonly rows?: number
   /** Wafer locks where alternate wafers bite from the other side of the keyway. */
   readonly doubleSided?: boolean
-  /** Disc detainer geometry. Required for `family: 'disc-detainer'`. */
+  /**
+   * Disc geometry. Required for `family: 'disc-detainer'` and `'combination'` — a combination
+   * wheel is a disc whose gates sit on detent centres and whose turner clicks digit to digit.
+   */
   readonly discs?: DiscDef
   /** Sidebar locks need gate alignment on top of pin setting. */
   readonly sidebar?: SidebarDef
@@ -146,9 +151,9 @@ export interface ToolStats {
  * | | what you see |
  * |---|---|
  * | `training` | Everything. Pin types, the binding pin, the target window, the overset zone. |
- * | `easy` | One pin — the one under the tip — drawn plain, so its *type* stays hidden. |
- * | `medium` | No pins at all. You see where the pick is, and you read the meter. |
- * | `hard` | Not even the pick. A depth readout in millimetres, and the meter. |
+ * | `easy` | Every pin, honestly drawn, with the state narration off — no colours, no word. |
+ * | `medium` | Only the pin under the pick, drawn plain — its type stays hidden. |
+ * | `hard` | No pins at all. The pick, a depth readout in millimetres, and the meter. |
  *
  * Replaces the old `guided | standard | expert | blind`, which took things away in a different
  * order and never took away the picture of where your own hand was. See DECISIONS D-046.
@@ -447,6 +452,13 @@ export interface SimState {
   pickPosition: number
   /** §8 — the resistance readout for the chamber under the tip. */
   resistance: number
+  /**
+   * Combination wheels only: 1 while the picked wheel is actually turning, decaying to 0
+   * about 180ms after it stops. A wheel speaks only under motion — a static hand feels
+   * nothing on a real one, and the drag-probe *is* the family's decode — so this is the
+   * pressure term the resistance reading scales by on a wheel (D-169). Always 0 elsewhere.
+   */
+  wheelTurn: number
   /**
    * How hard you are **leaning**, 0..1 — the *cause* of which `resistance` is the effect (D-064).
    *

@@ -13,6 +13,7 @@
 
 import { captureRange, targetLiftFor } from './classify'
 import {
+  COMBO_DETENT,
   DT,
   FEATHER_WINDOW,
   RESIST_PRESSURE_MM,
@@ -171,6 +172,31 @@ function probeForHeaviest(rec: Recorder, tension: number, reach: number): number
      * to remove — it found the binding pin without touching it, which is what a player could do
      * too, and was the complaint.
      */
+    /**
+     * A combination wheel speaks only under motion (D-169): parked, its reading decays to the
+     * floor in a fifth of a second, so probing at rest — which is what the disc case below
+     * does — reads nothing at all. The honest probe is the player's own: wiggle the wheel one
+     * detent out and back, reading mid-turn, and leave it parked exactly where it stood. The
+     * hops are three ticks so the peak is sampled *while* the wheel moves rather than after
+     * it has arrived and gone quiet.
+     */
+    if (c.kind === 'disc' && s.instance.def.family === 'combination') {
+      const here = c.lift
+      const out = (here + COMBO_DETENT) % c.maxLift
+      travelTo(rec, c.index, here, tension)
+      let peak = 0
+      for (const target of [out, here]) {
+        for (let hop = 0; hop < 8; hop += 1) {
+          rec.run(input(c.index, target, tension), 3)
+          if (s.resistance > peak) peak = s.resistance
+        }
+      }
+      if (peak > bestResistance) {
+        bestResistance = peak
+        best = c.index
+      }
+      continue
+    }
     const probeAt =
       c.kind === 'disc'
         ? c.lift
@@ -197,7 +223,7 @@ function probeForHeaviest(rec: Recorder, tension: number, reach: number): number
  * is genuinely hunting for the truth. Each position tried is one `searchStep`.
  */
 function needsBlindSweep(family: string): boolean {
-  return family === 'disc-detainer' || family === 'radial-slider'
+  return family === 'disc-detainer' || family === 'radial-slider' || family === 'combination'
 }
 
 /**
@@ -438,8 +464,9 @@ export function solveLock(
 
     rounds += 1
     if (needsBlindSweep(def.family)) {
-      // Nothing to aim at — work it along until it catches.
-      sweepBlind(rec, target, tension, Math.round(12 / DT), def.family === 'disc-detainer')
+      // Nothing to aim at — work it along until it catches. Discs and combination wheels
+      // wrap (a dial has no stop); only the slider runs out of travel.
+      sweepBlind(rec, target, tension, Math.round(12 / DT), def.family !== 'radial-slider')
       continue
     }
     const result = workChamber(rec, target, tension, minTension, Math.round(3.5 / DT), gates)

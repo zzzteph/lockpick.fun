@@ -59,8 +59,21 @@ function allOpened(save: SaveData, locks: readonly LockDef[]): boolean {
   return locks.length > 0 && locks.every((d) => opened(save, d.slug))
 }
 
+/**
+ * The tier plates count cylinders only — D-167.
+ *
+ * The Steam rows for Apprentice through Specialist are entered and name the counts ("Open all
+ * five Tier 1 locks."), and the bench presents the wheel locks on their own shelf rather than
+ * inside the tier pages. Both say the same thing: a "tier" in trophy language is the tier page,
+ * and the wheel locks belong to *Master of the Bench* (every lock in the game), which is the
+ * one plate whose published count changes with the roster.
+ */
+function tierCylinders(tier: number): readonly LockDef[] {
+  return locksInTier(tier).filter((d) => d.family !== 'combination')
+}
+
 function tierComplete(save: SaveData, tier: number): boolean {
-  return allOpened(save, locksInTier(tier))
+  return allOpened(save, tierCylinders(tier))
 }
 
 function records(save: SaveData): LockRecord[] {
@@ -95,33 +108,33 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
   {
     id: 'apprentice',
     name: 'Apprentice',
-    condition: 'Open every Tier 1 lock',
+    condition: 'Open every Tier 1 cylinder',
     group: 'progression',
-    reachable: () => locksInTier(1).length > 0,
+    reachable: () => tierCylinders(1).length > 0,
     test: ({ save }) => tierComplete(save, 1),
   },
   {
     id: 'journeyman',
     name: 'Journeyman',
-    condition: 'Open every Tier 2 lock',
+    condition: 'Open every Tier 2 cylinder',
     group: 'progression',
-    reachable: () => locksInTier(2).length > 0,
+    reachable: () => tierCylinders(2).length > 0,
     test: ({ save }) => tierComplete(save, 2),
   },
   {
     id: 'locksmith',
     name: 'Locksmith',
-    condition: 'Open every Tier 3 lock',
+    condition: 'Open every Tier 3 cylinder',
     group: 'progression',
-    reachable: () => locksInTier(3).length > 0,
+    reachable: () => tierCylinders(3).length > 0,
     test: ({ save }) => tierComplete(save, 3),
   },
   {
     id: 'specialist',
     name: 'Specialist',
-    condition: 'Open every Tier 4 lock',
+    condition: 'Open every Tier 4 cylinder',
     group: 'progression',
-    reachable: () => locksInTier(4).length > 0,
+    reachable: () => tierCylinders(4).length > 0,
     test: ({ save }) => tierComplete(save, 4),
   },
   // *High Security* — "open every Tier 5 lock" — left with the disc detainers that were Tier 5
@@ -184,12 +197,14 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
      */
     id: 'flawless-tier',
     name: 'Flawless',
-    condition: 'Earn an S rank on every lock in a tier',
+    // Cylinders only, same scoping as the tier plates (D-167): a "tier" in trophy language is
+    // the tier page, and the three-lock wheels shelf must not become the cheapest Flawless.
+    condition: 'Earn an S rank on every cylinder in a tier',
     group: 'mastery',
-    reachable: () => [1, 2, 3, 4].some((t) => locksInTier(t).length > 0),
+    reachable: () => [1, 2, 3, 4].some((t) => tierCylinders(t).length > 0),
     test: ({ save }) =>
       [1, 2, 3, 4].some((t) => {
-        const locks = locksInTier(t)
+        const locks = tierCylinders(t)
         return locks.length > 0 && locks.every((d) => (save.records[d.slug]?.bestRank ?? 9) === 0)
       }),
   },
