@@ -181,7 +181,10 @@ describe('the decode', () => {
     // flatten the comparison, heavy because the drag scales with tension — that is the
     // punishing-a-heavy-hand thesis wearing wheel form. The target is mid-dial: past the
     // halfway point the turner would take the short way round the seam and arrive at once.
+    // Wheels start PARKED on seed-dealt digits since D-192, so the sprint measures from a
+    // KNOWN post: park the wheel on digit 0 (free, no tension) before the pull goes on.
     const sprint = (s: SimState, wheel: number): number => {
+      holdAt(s, wheel, detentCentre(0), 0, 1.5)
       holdFor(s, tensionOnly(0.6), 0.2)
       holdAt(s, wheel, detentCentre(4), 0.6, 0.04)
       return s.chambers[wheel]?.lift ?? 0

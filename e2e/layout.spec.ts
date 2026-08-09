@@ -152,11 +152,38 @@ const SCREENS: { name: string; arrange: (page: Page) => Promise<void> }[] = [
   // (docs/DUNGEON.md). The end screens are audited by dungeon.spec.ts, which actually plays.
   { name: 'gauntlet', arrange: async (p) => goto(p, 'gauntlet') },
   {
-    // The guide page: the goal and the bestiary at reading size (D-173).
+    // The guide's first page: the goal at reading size (D-173, paged by D-196).
     name: 'gauntlet-guide',
     arrange: async (p) => {
       await goto(p, 'gauntlet')
       await p.evaluate(() => globalThis.__shearline!.dungeonGuide(true))
+      await renderOnce(p)
+    },
+  },
+  {
+    // The bestiary page — 2×2 rows of portrait + grim story (D-194/196).
+    name: 'gauntlet-guide-bestiary',
+    arrange: async (p) => {
+      await goto(p, 'gauntlet')
+      await p.evaluate(() => globalThis.__shearline!.dungeonGuide(true, 1))
+      await renderOnce(p)
+    },
+  },
+  {
+    // Sound & vision — every sense measured in words (D-196).
+    name: 'gauntlet-guide-senses',
+    arrange: async (p) => {
+      await goto(p, 'gauntlet')
+      await p.evaluate(() => globalThis.__shearline!.dungeonGuide(true, 2))
+      await renderOnce(p)
+    },
+  },
+  {
+    // The kit — nine finds, one line each (D-196).
+    name: 'gauntlet-guide-kit',
+    arrange: async (p) => {
+      await goto(p, 'gauntlet')
+      await p.evaluate(() => globalThis.__shearline!.dungeonGuide(true, 3))
       await renderOnce(p)
     },
   },
@@ -175,12 +202,17 @@ const SCREENS: { name: string; arrange: (page: Page) => Promise<void> }[] = [
       await p.evaluate(() => globalThis.__shearline!.startDungeonRun(4242, 'easy'))
       await p.evaluate(() => {
         const h = globalThis.__shearline!
+        // Frozen and hand-clocked: strides are cadence-gated in real time (D-180), so
+        // each move buys its clock before the next.
+        h.dungeonFreeze(true)
         h.dungeonMove(1, 0)
+        h.dungeonAdvance(0.25)
         h.dungeonMove(0, 1)
+        h.dungeonAdvance(0.25)
         // The ticker at its longest — the widest sighting the bestiary can produce plus
-        // the fight hint, so the sweep audits the column's bounds on every device.
-        h.dungeonLog('the skeleton sees you — 4hp, hits 2')
-        h.dungeonLog('walk into it to swing')
+        // the escape hint, so the sweep audits the column's bounds on every device.
+        h.dungeonLog('the sentry sees you — RUN')
+        h.dungeonLog('lose it: 15 tiles away, or 3.5s unseen')
       })
       await renderOnce(p)
     },

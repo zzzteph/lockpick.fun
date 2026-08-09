@@ -25,11 +25,25 @@ import {
   DUNGEON_DIFFICULTY_FACTOR,
   ENEMY_ORDER,
   ENEMY_STATS,
+  LISTEN_RADIUS,
+  NOISE_RADIUS,
+  PLAYER_STEP_S,
+  TRACKER_RADIUS,
+  VISION_RADIUS,
+  enemyStepSeconds,
   type DungeonRunState,
 } from '../game/dungeonRun'
 import { LESSONS } from '../game/tutorial'
-import { adjacentTiles, drawDungeonMap, tileRect, visibleNow } from '../render/dungeonmap'
+import {
+  adjacentTiles,
+  drawCreatureGlyph,
+  drawDungeonMap,
+  drawDungeonPad,
+  padRects,
+  visibleNow,
+} from '../render/dungeonmap'
 import { hatchRect, label, paragraph, text } from '../render/draw'
+import { drawGauntletArt, drawGauntletSprite, type GauntletArtId } from '../render/gauntletart'
 import { drawTrophyArt } from '../render/trophyart'
 import { STROKE, TYPE, alpha, font, readableAccents, type Palette } from '../render/palette'
 import {
@@ -94,12 +108,14 @@ export interface ShellActions {
   gauntletSelectDifficulty(difficulty: SettingsData['assist']): void
   /** Begin a fresh run at this difficulty. The seed is the app's to roll. */
   gauntletStart(difficulty: SettingsData['assist']): void
-  /** Open or close the dungeon guide — the big-type goal and bestiary page. */
-  gauntletGuide(open: boolean): void
+  /** Open or close the dungeon guide; `page` picks a TOPIC page (D-196), first by default. */
+  gauntletGuide(open: boolean, page?: number): void
+  /** Focus the briefing's seed box — digits typed land in the draft (D-187). */
+  gauntletSeedFocus(on: boolean): void
+  /** Back to a rolled seed. */
+  gauntletSeedClear(): void
   /** One step or bump on the floor — the crawler's whole verb (docs/DUNGEON.md). */
   dungeonMove(dx: number, dy: number): void
-  /** Stand still for a turn. */
-  dungeonWait(): void
   /** Spend a skeleton key at the key-or-pick choice. */
   dungeonUseKey(): void
   /** Choose to pick it properly — the lock screen takes over. */
@@ -186,8 +202,10 @@ export interface GauntletScreenView {
   phase: 'briefing' | 'crawl' | 'unlock' | 'caught' | 'won'
   /** Selected on the briefing; the run's own everywhere else. */
   difficulty: SettingsData['assist']
-  /** True while the guide page (goal + big bestiary) covers the screen. */
+  /** True while the guide covers the screen. */
   guide?: boolean
+  /** Which of the guide's topic pages is open (D-196). */
+  guidePage?: number
   /** The live run, handed whole to the map renderer. Absent on the briefing. */
   run?: DungeonRunState
   /** Banked score on the summary screens, difficulty factor already applied. */
@@ -196,12 +214,18 @@ export interface GauntletScreenView {
   best?: number
   /** True when the score just beat it. */
   newBest?: boolean
+  /** The briefing's typed seed, '' meaning "roll one" (D-187). */
+  seedDraft: string
+  /** True while the seed box eats the keyboard's digits. */
+  seedFocus: boolean
 }
 
 export interface ShellContext {
   vp: Viewport
   p: Palette
   ui: Ui
+  /** True while a dungeon run stands un-ended — the menu's Continue goes back to it. */
+  dungeonLive?: boolean
   progress: Progress
   actions: ShellActions
   /** Filled in on the results screen. */
@@ -438,10 +462,28 @@ function creditLine(progress: Progress): string {
 
 // ── Menu ────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The text bands' guarantee under a full-stage art plate (D-183): the title band and the
+ * status band get a translucent paper wash, so the D-135 contrast rule holds no matter
+ * what the generated art put beneath them. The art stays loud everywhere else.
+ */
+function artWash(ctx: CanvasRenderingContext2D, p: Palette): void {
+  ctx.save()
+  // The title band carries the compact 2.4× title in the SECONDARY tone — it needs the
+  // strongest guarantee of all (the sweep found it at 4.39:1 under a 0.72 wash).
+  ctx.fillStyle = alpha(p.paper, 0.88)
+  ctx.fillRect(0, 0, LOGICAL_WIDTH, 132)
+  ctx.fillStyle = alpha(p.paper, 0.72)
+  ctx.fillRect(0, 984, LOGICAL_WIDTH, 1080 - 984)
+  ctx.restore()
+}
+
 export function drawMenu(c: ShellContext): void {
   const { vp, p, ui, progress, actions } = c
-  screenFrame(c, 'Shear line', c.status ?? creditLine(progress))
   const { ctx } = vp
+  // No plate here — the owner's call: "background should only be in the game section,
+  // not in the menu." The title screen stays plain drafting paper.
+  screenFrame(c, 'Shear line', c.status ?? creditLine(progress))
 
   /**
    * The subtitle clears the title by its **own ascent**, not by a literal 32px — DECISIONS D-146.
@@ -534,9 +576,19 @@ export function drawMenu(c: ShellContext): void {
   // course — four cards, in order — before the first line of it starts talking.
   const taught = progress.data.tutorial.length > 0
   const hasProgress = progress.totalOpens > 0
-  const primaryCaption = !taught ? 'Start the tutorial' : hasProgress ? 'Continue' : 'Start picking'
+  // A live dungeon run owns the primary button OUTRIGHT (D-187/188): "click menu →
+  // continue → I suddenly end in the bench, but not in the game." It beats even the
+  // tutorial nudge — nothing on this screen matters more than the run you left standing.
+  const backToRun = c.dungeonLive === true
+  const primaryCaption = backToRun
+    ? 'Back to the dungeon'
+    : !taught
+      ? 'Start the tutorial'
+      : hasProgress
+        ? 'Continue'
+        : 'Start picking'
   if (button(vp, p, ui, { x, y, w, h }, primaryCaption, { primary: true })) {
-    actions.goto(taught ? 'bench' : 'tutorial')
+    actions.goto(backToRun ? 'gauntlet' : !taught ? 'tutorial' : 'bench')
   }
   /**
    * Beside the button it is about — on the **left**, which is the side with nothing on it.
@@ -2252,6 +2304,32 @@ export function drawPause(c: ShellContext): void {
 /** The four difficulties, briefing order — the same ladder Settings offers, reused verbatim. */
 const GAUNTLET_DIFFICULTIES = ['training', 'easy', 'medium', 'hard'] as const
 
+/** The guide's topic pages (D-196) — one subject each, "relaxed" by the owner's word. */
+export const GUIDE_PAGE_COUNT = 4
+const GUIDE_TITLES = ['the goal', 'the bestiary', 'sound & vision', 'the kit'] as const
+
+const ENEMY_ART: Record<(typeof ENEMY_ORDER)[number], GauntletArtId> = {
+  warden: 'warden',
+  sentry: 'sentry',
+  listener: 'listener',
+  hunter: 'hunter',
+}
+
+type EnemySpriteId = Extract<GauntletArtId, `sprite-${string}`>
+
+const ENEMY_SPRITE: Record<(typeof ENEMY_ORDER)[number], EnemySpriteId> = {
+  warden: 'sprite-warden',
+  sentry: 'sprite-sentry',
+  listener: 'sprite-listener',
+  hunter: 'sprite-hunter',
+}
+
+/** m:ss for the run clock — the score is speed, and speed reads as a stopwatch. */
+export function runClock(t: number): string {
+  const s = Math.max(0, Math.floor(t))
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+
 /**
  * One screen, four states — briefing, between locks, fallen, survived — because they are one
  * place: the table the run is laid out on. The pick screen itself is untouched by the mode; a
@@ -2273,54 +2351,57 @@ export function drawGauntlet(c: ShellContext): void {
   const primaryW = compact ? 760 : 420
   const readable = readableAccents(p)
 
+  const backdrop: GauntletArtId | null =
+    g?.phase === 'briefing'
+      ? 'briefing-labyrinth-prison'
+      : g?.phase === 'caught'
+        ? 'caught'
+        : g?.phase === 'won'
+          ? 'escaped'
+          : null
+  if (backdrop) {
+    // The briefing is wall-to-wall text columns; 0.1 is the strongest plate its grounds
+    // can carry with the secondary tone at 4.5:1 (measured by the sweep, not taste).
+    drawGauntletArt(
+      ctx,
+      backdrop,
+      0,
+      0,
+      LOGICAL_WIDTH,
+      LOGICAL_HEIGHT,
+      p,
+      g?.phase === 'briefing' ? 0.1 : 0.3,
+    )
+    artWash(ctx, p)
+  }
+
   screenFrame(
     c,
     'Lock dungeon',
     c.status ??
       (g?.phase === 'crawl' || g?.phase === 'unlock'
-        ? compact
-          ? // Nothing: the strip's own inventory line owns this band at compact type, and a
-            // movement hint duplicates what tapping a tile already teaches (D-134). The
-            // shop shares the rule — its panel explains itself, and the briefing line here
-            // printed through the compact ticker (caught by the D-173 sweep).
-            ''
-          : 'arrows move · bump a lock to kneel · seen means chased — RUN'
+        ? // Nothing at either size since D-188: the STATUS BOARD owns this band outright,
+          // and the old hint line just peeked out from under its left corner.
+          ''
         : compact
-          ? 'find the exit — every turn counts'
-          : 'one labyrinth, one gate out, and every turn on the clock'),
+          ? 'find the exit — the clock is running'
+          : 'one labyrinth, one gate out — and the clock never stops'),
   )
   navBar(c, [['Menu', () => actions.goto('menu')]])
 
   if (!g) return
 
   if (g.phase === 'briefing') {
-    label(ctx, compact ? 'Escape the labyrinth.' : 'Escape the labyrinth. Fast, and unseen.', left, 220, {
+    // Lean since D-187 — "here only title is really needed": the deal lives in the GUIDE,
+    // one press away; this page is the title, the two choices, and the door.
+    label(ctx, 'Escape the labyrinth.', left, 220, {
       font: font(typeFor(vp, TYPE.title)),
       size: typeFor(vp, TYPE.title),
       color: p.ink,
     })
-    /*
-     * The rules, dry and complete, before the button — this mode confiscates things the rest
-     * of the game hands out, and a player must read the deal before their health is on the
-     * line, not discover it when a warden's beat reaches the locker they knelt at.
-     */
-    const rules = compact
-      ? 'A labyrinth under real locks — nobody dies in it. Guards see in CONES ahead; behind them is blind. Seen = CHASED; shake it past 1.5× its sight. Chests hold picks, keys, the tracker. Find THE GATE. Fewer turns, more score.'
-      : 'A labyrinth under real locks, and nobody dies in it. Guards walk their beats — steady warden, fast hound, far-sighted sentry — each seeing in a CONE ahead; behind their backs is blind. Seen means CHASED, and a hand on you ends the run — but past one-and-a-half times its sight a chaser gives up, and the maze loops for that. Doors bar the halls; the maze keeps moving while you pick; a snapped pick RINGS. Chests hold spare picks, SKELETON KEYS that skip any lock, and the MOTION TRACKER that whispers when guards are near. Find THE GATE on the far border — the score is speed.'
-    paragraph(ctx, rules, left, 270, {
-      font: font(typeFor(vp, TYPE.body)),
-      color: p.ink,
-      maxWidth: compact ? 1700 : 1100,
-      lineHeight: compact ? 44 : 30,
-      maxLines: 8,
-    })
-
-    // The two pickers stacked, then three dim lines — every gap derived from the control
-    // heights, because fixed offsets under 2.4× compact type are how the D-173 sweep found
-    // the class blurb printed across the Go down button.
     const segH = Math.max(compact ? 64 : 40, minControlH(vp, typeFor(vp, TYPE.body)))
     const segLead = compact ? 18 : 10
-    const segY = compact ? 545 : 490
+    const segY = compact ? 330 : 320
     label(ctx, 'difficulty', left, segY, {
       font: font(typeFor(vp, TYPE.dimension)),
       size: typeFor(vp, TYPE.dimension),
@@ -2351,64 +2432,62 @@ export function drawGauntlet(c: ShellContext): void {
     const next = GAUNTLET_DIFFICULTIES[idx]
     if (next !== undefined && next !== g.difficulty) actions.gauntletSelectDifficulty(next)
 
+    // The SEED (D-187): type one to replay a maze; leave it random and each descent is
+    // new. The draft resets to random the moment a run begins.
+    const seedY = segY + segLead + segH + (compact ? 56 : 44)
+    label(ctx, 'seed', left, seedY, {
+      font: font(typeFor(vp, TYPE.dimension)),
+      size: typeFor(vp, TYPE.dimension),
+      color: p.ink,
+    })
+    const seedBoxW = compact ? 460 : 320
+    const seedCaption =
+      g.seedDraft !== ''
+        ? g.seedDraft + (g.seedFocus ? '_' : '')
+        : g.seedFocus
+          ? '_'
+          : 'random'
+    if (
+      button(vp, p, ui, { x: left, y: seedY + segLead, w: seedBoxW, h: segH }, seedCaption)
+    ) {
+      actions.gauntletSeedFocus(true)
+    }
+    if (
+      g.seedDraft !== '' &&
+      button(
+        vp,
+        p,
+        ui,
+        { x: left + seedBoxW + 16, y: seedY + segLead, w: compact ? 260 : 180, h: segH },
+        'random',
+      )
+    ) {
+      actions.gauntletSeedClear()
+    }
+
     const lineStep = compact ? 40 : 28
-    const linesY = segY + segLead + segH + (compact ? 44 : 34)
+    const linesY = seedY + segLead + segH + (compact ? 60 : 48)
     text(
       ctx,
-      compact
-        ? `the escape score pays ×${DUNGEON_DIFFICULTY_FACTOR[g.difficulty]} at this level`
-        : `the level sets what you may see inside the locks — and the stake: the escape score pays ×${DUNGEON_DIFFICULTY_FACTOR[g.difficulty]}`,
+      `the escape score pays ×${DUNGEON_DIFFICULTY_FACTOR[g.difficulty]} at this level`,
       left,
       linesY,
       { font: font(typeFor(vp, TYPE.dimension)), color: p.inkLight },
     )
-    // The one hero's kit, stated plainly — no classes to weigh, just what your coat holds.
-    text(ctx, 'you carry two picks and quick feet — nothing else', left, linesY + lineStep, {
-      font: font(typeFor(vp, TYPE.dimension)),
-      color: p.inkLight,
-    })
     text(
       ctx,
       g.best !== undefined && g.best > 0
         ? `best ${g.difficulty} run — ${g.best}`
         : 'no run has come back yet',
       left,
-      linesY + lineStep * 2,
+      linesY + lineStep,
       { font: font(typeFor(vp, TYPE.dimension)), color: readable.amber },
     )
 
-    /*
-     * The bestiary — its own column, every kind the floor can wake with its LETTER, flat
-     * numbers and its quirk, before the button. The letter is drawn exactly as the map draws
-     * it, which is what makes this a legend rather than a paragraph: what you read here is
-     * what you will meet. Derived from ENEMY_STATS so this table cannot drift from the
-     * machine ("I could not understand the enemies, and their stats" — never again).
-     */
-    const bx = left + (compact ? 1080 : 1180)
-    const by0 = compact ? 560 : 470
-    const bLine = compact ? 44 : 30
-    label(ctx, 'the bestiary', bx, by0, {
-      font: font(typeFor(vp, TYPE.dimension)),
-      size: typeFor(vp, TYPE.dimension),
-      color: p.ink,
-    })
-    ENEMY_ORDER.forEach((kind, i) => {
-      const st = ENEMY_STATS[kind]
-      const y = by0 + (compact ? 52 : 34) + i * bLine
-      text(ctx, st.letter, bx, y, {
-        font: font(typeFor(vp, TYPE.body), 'bold'),
-        color: readable.crimson,
-      })
-      const row = compact
-        ? `${st.name} · sight ${st.vision} · ${st.quirk}`
-        : `${st.name} — sight ${st.vision} · ${st.lore}`
-      text(ctx, row, bx + (compact ? 52 : 34), y, {
-        font: font(typeFor(vp, TYPE.dimension)),
-        color: p.inkLight,
-      })
-    })
-
-    const startY = compact ? 930 : 800
+    // The bestiary left this page for the GUIDE (D-187) — "the bestiary is SUPER SMALL
+    // and not readable" at briefing scale; the guide hangs it at reading size. The door
+    // row hangs off the lines above it, because compact control heights grow with type.
+    const startY = Math.max(compact ? 700 : 620, linesY + lineStep + (compact ? 84 : 60))
     if (
       button(vp, p, ui, { x: left, y: startY, w: primaryW, h: btnH }, 'Go down', {
         primary: true,
@@ -2438,27 +2517,26 @@ export function drawGauntlet(c: ShellContext): void {
     drawDungeonMap(vp, p, run, visible)
 
     /**
-     * The floor is the control surface: a tap on any neighbouring cell is a step or a bump,
-     * a tap on your own cell is a wait — hit-tested against the raw pointer, deliberately
-     * NOT widgets. Widgets join the keyboard focus ring, and the first self-playtest caught
-     * what that means: arrow keys walked the invisible focus across the tile zones and Space
-     * "clicked" one — a wait that teleport-stepped the player, once straight out the door.
+     * The floor is the control surface: a tap on any neighbouring cell is a step or a bump
+     * — hit-tested against the raw pointer, deliberately NOT widgets. Widgets join the
+     * keyboard focus ring, and the first self-playtest caught what that means: arrow keys
+     * walked the invisible focus across the tile zones and Space "clicked" one. Standing
+     * still is simply not tapping — real time has no wait verb (D-180).
      */
     const f = ui.input
     if (g.phase === 'crawl' && f.clicked) {
       const inside = (r: { x: number; y: number; w: number; h: number }): boolean =>
         f.pointerX >= r.x && f.pointerX < r.x + r.w && f.pointerY >= r.y && f.pointerY < r.y + r.h
-      let handled = false
-      for (const zone of adjacentTiles(run)) {
-        if (inside(zone)) {
-          actions.dungeonMove(zone.dx, zone.dy)
-          handled = true
+      // A press on the PAD is the pad's alone (the app walks it held) — never also a tile tap.
+      const onPad = compact && padRects().some(inside)
+      if (!onPad) {
+        for (const zone of adjacentTiles(run)) {
+          if (inside(zone)) actions.dungeonMove(zone.dx, zone.dy)
         }
       }
-      if (!handled && inside(tileRect(run.player.x, run.player.y))) {
-        actions.dungeonWait()
-      }
     }
+    // The walk PAD (D-185): phones hold a button to walk — taps stay for the reachy.
+    if (g.phase === 'crawl' && compact) drawDungeonPad(vp, p)
     // The verbs that are not steps, as real buttons — above the report link's corner,
     // which the first draft sat them straight on top of.
     const btnW = compact ? 300 : 220
@@ -2472,21 +2550,23 @@ export function drawGauntlet(c: ShellContext): void {
           p,
           ui,
           { x: LOGICAL_WIDTH - MARGIN - 28 - btnW, y: by, w: btnW, h: bh },
-          'Wait',
+          'Guide',
         )
       ) {
-        actions.dungeonWait()
+        actions.gauntletGuide(true)
       }
+      // The way out that is not the gate (D-187): abandon banks nothing and asks nothing.
+      // Stacked ABOVE Guide in the right gutter (D-188) — beside it, it sat on the board.
       if (
         button(
           vp,
           p,
           ui,
-          { x: LOGICAL_WIDTH - MARGIN - 28 - btnW * 2 - 16, y: by, w: btnW, h: bh },
-          'Guide',
+          { x: LOGICAL_WIDTH - MARGIN - 28 - btnW, y: by - bh - 12, w: btnW, h: bh },
+          'Abandon',
         )
       ) {
-        actions.gauntletGuide(true)
+        actions.gauntletReset()
       }
     }
 
@@ -2497,6 +2577,9 @@ export function drawGauntlet(c: ShellContext): void {
       const ph = 150 + 3 * (rowH + 14) + 40
       const px = LOGICAL_WIDTH / 2 - pw / 2
       const py = 1080 / 2 - ph / 2 - 30
+      if (run.picking?.kind === 'gate') {
+        drawGauntletArt(ctx, 'the-gate', LOGICAL_WIDTH / 2 - 260, 190, 520, 520, p, 0.16, 'contain')
+      }
       ctx.save()
       ctx.fillStyle = alpha(p.paper, 0.72)
       ctx.fillRect(0, 0, LOGICAL_WIDTH, 1080)
@@ -2513,7 +2596,7 @@ export function drawGauntlet(c: ShellContext): void {
         size: typeFor(vp, TYPE.heading),
         color: p.ink,
       })
-      text(ctx, compact ? 'each choice costs a turn' : 'browsing is free — each choice costs its turn', px + 32, py + 100, {
+      text(ctx, compact ? 'the wing holds its breath' : 'the wing holds its breath while you work', px + 32, py + 100, {
         font: font(typeFor(vp, TYPE.dimension)),
         color: p.inkLight,
       })
@@ -2565,12 +2648,20 @@ export function drawGauntlet(c: ShellContext): void {
   })
   const lines: string[] = []
   if (g.run) {
-    lines.push(`${g.run.turn} turns — speed is the whole score`)
+    lines.push(
+      g.phase === 'caught'
+        ? `caught at ${runClock(g.run.time)}`
+        : `out in ${runClock(g.run.time)} — speed is the whole score`,
+    )
   }
   if (g.phase === 'caught') {
     lines.push('banked: nothing. they walk you back in.')
   } else {
     lines.push(`banked: ${g.score ?? 0}`)
+  }
+  if (g.run) {
+    // The maze's number (D-187): type it into the briefing's seed box to walk it again.
+    lines.push(`seed ${g.run.floor.seed} — type it on the briefing to replay this maze`)
   }
   lines.forEach((line, i) => {
     text(ctx, line, left, 330 + i * (compact ? 48 : 36), {
@@ -2614,87 +2705,245 @@ function drawDungeonGuide(c: ShellContext): void {
   const readable = readableAccents(p)
   const left = MARGIN + 60
 
-  // No status line on compact: the bottom band belongs to the seventh bestiary row there.
-  screenFrame(c, 'Dungeon guide', compact ? '' : 'walk back out alive, or not at all')
-  // Back rides the nav row: the page's height budget belongs to the bestiary, and a bottom
-  // button under 2.4× compact type is what the D-173 sweep watched the verbs column hit.
-  navBar(c, [
-    ['Back', () => actions.gauntletGuide(false)],
-    ['Menu', () => actions.goto('menu')],
-  ])
+  // One TOPIC per page since D-196 — the owner: "the guide should be on several pages
+  // to make it more ... relaxed and each page for the specific topic."
+  const page = Math.max(0, Math.min(GUIDE_PAGE_COUNT - 1, c.gauntlet?.guidePage ?? 0))
+  const title = GUIDE_TITLES[page] as string
+  // No status line on compact: the bottom band belongs to the reading matter there.
+  screenFrame(c, 'Dungeon guide', compact ? '' : `${title} — page ${page + 1} of ${GUIDE_PAGE_COUNT}`)
+  // The paging buttons NAME their destination (D-198 — "the buttons left and right are
+  // not clear"): '‹ The goal' beats a bare Prev on a page you have not read yet.
+  const cap = (t: string): string => t.charAt(0).toUpperCase() + t.slice(1)
+  const nav: [string, () => void][] = [['Back', () => actions.gauntletGuide(false)]]
+  if (page > 0) {
+    nav.push([`‹ ${cap(GUIDE_TITLES[page - 1] as string)}`, () => actions.gauntletGuide(true, page - 1)])
+  }
+  if (page < GUIDE_PAGE_COUNT - 1) {
+    nav.push([`${cap(GUIDE_TITLES[page + 1] as string)} ›`, () => actions.gauntletGuide(true, page + 1)])
+  }
+  if (!compact) nav.push(['Menu', () => actions.goto('menu')])
+  navBar(c, nav)
+
+  // The reading pages carry a PLATE (D-198 — "I want to have more artistic there") in a
+  // right-hand column the text never enters; compact keeps its full measure.
+  const PAGE_ART: Partial<Record<number, GauntletArtId>> = { 0: 'the-gate', 2: 'briefing-labyrinth-prison' }
+  const plate = PAGE_ART[page]
+  const artColumn = !compact && plate !== undefined
+  if (artColumn && plate) drawGauntletArt(ctx, plate, 1210, 250, 560, 640, p, 0.92, 'contain')
 
   const bodySize = typeFor(vp, TYPE.body)
-  label(ctx, 'THE GOAL', left, 216, {
-    font: font(typeFor(vp, TYPE.dimension), 'bold'),
-    size: typeFor(vp, TYPE.dimension),
-    color: readable.amber,
-  })
-  // The paragraph reports the height it used — every block below hangs off that, so no
-  // device's type scale can push one section through the next.
-  const goalH = paragraph(
-    ctx,
-    compact
-      ? 'Nobody dies here. Guards chase on sight; a hand on you ends the run. Outrun them past 1.5× their sight. Find THE GATE and get out in as few turns as you can.'
-      : 'Nobody dies in this labyrinth — not them, not you. The guards walk fixed beats; if one sees you it CHASES, and one hand on your collar ends the run. Break a chase by distance: past one-and-a-half times its sight it gives up and walks back to its round. Somewhere on the far border is THE GATE — the only way out, behind the hardest lock they own. The score is SPEED: every turn spent costs it, and only an escape banks anything. Quiet hands matter — a snapped pick rings, and every guard in earshot turns your way.',
-    left,
-    216 + (compact ? 44 : 32),
-    {
-      font: font(bodySize),
+  const dim = typeFor(vp, TYPE.dimension)
+  const lineH = Math.round(bodySize * 1.4)
+  /**
+   * A labelled reading section; returns the y where the next section starts. Compact
+   * takes its own SHORT body when one is given — five full-size sections ran 565px off
+   * the small phones' stage (the sweep's catch) — and reads at dimension size, the way
+   * the kit page does.
+   */
+  const section = (heading: string, body: string, y: number, compactBody?: string): number => {
+    label(ctx, heading, left, y, { font: font(dim, 'bold'), size: dim, color: readable.amber })
+    const size = compact ? dim : bodySize
+    const h = paragraph(ctx, compact ? (compactBody ?? body) : body, left, y + (compact ? 40 : 34), {
+      font: font(size),
       color: p.ink,
-      maxWidth: compact ? 1700 : 1500,
-      lineHeight: Math.round(bodySize * 1.35),
-      maxLines: 6,
-    },
-  )
+      maxWidth: compact ? 1700 : artColumn ? 1000 : 1520,
+      lineHeight: compact ? Math.round(dim * 1.3) : lineH,
+      maxLines: compact ? 3 : 5,
+    })
+    return y + (compact ? 40 : 34) + h + (compact ? 30 : 38)
+  }
 
-  const bestY = 216 + (compact ? 44 : 32) + goalH + (compact ? 56 : 44)
+  if (page === 0) {
+    // THE GOAL — three breaths, nothing else on the page.
+    let y = 216
+    y = section(
+      'THE WAY OUT',
+      'THE GATE waits on the far border, inside the GATEHOUSE, behind its locked door. The score is SPEED — plus whatever valuables ride in your coat — and only an escape banks it.',
+      y,
+      'THE GATE waits in the GATEHOUSE on the far border. The score is speed plus your valuables — escape only.',
+    )
+    y = section(
+      'THE WING',
+      'Guards chase on sight. Break their line of sight and their memory cools; outrun one-and-a-half times its sight and the leash snaps. The wing holds its breath while you work a lock.',
+      y,
+      'Guards chase on sight; break their line and they cool. The wing holds its breath while you work a lock.',
+    )
+    section(
+      'THE ROOMS',
+      'Every room wears a theme, and its chests match it: maps in the library, lamp oil in the stores, silver in the chapel. The deeper the wing, the harder its locks — and the richer.',
+      y,
+      'Themed rooms, themed chests: maps in the library, oil in the stores, silver in the chapel.',
+    )
+    return
+  }
+
+  if (page === 2) {
+    // SOUND & VISION — every sense in the wing, measured. Full-size copy runs TIGHT:
+    // the plate owns the right column, and five sections must clear the nav row.
+    let y = 216
+    y = section(
+      'LIGHT',
+      `Your lamp reaches ${VISION_RADIUS} tiles, never through walls; oil adds one, twice. The wing's TORCHES light their own pools — light carries as far as your eye has a clear line.`,
+      y,
+      `Lamp: ${VISION_RADIUS} tiles, oil adds one, twice. Torch pools are lit for you from any clear line.`,
+    )
+    y = section(
+      'THEIR EYES',
+      'A guard sees its painted cone and nothing else — behind it you are safe. Alerted, it sees all round until its memory cools.',
+      y,
+      'Only the painted cone — behind it you are safe. Alerted: all round, until the memory cools.',
+    )
+    y = section(
+      'EARS AND NOISE',
+      `The listener hears strides within ${LISTEN_RADIUS} tiles, walls no bar — boots halve it, stillness is silence. A snapped pick rings ${NOISE_RADIUS} tiles through every wall.`,
+      y,
+      `The listener hears strides within ${LISTEN_RADIUS} — boots halve it, stillness is silence. A snap rings ${NOISE_RADIUS} through walls.`,
+    )
+    y = section(
+      'THE BELL',
+      'A seen warden runs for the nearest unrung bell. Rung: twelve seconds of the whole wing, unshakable.',
+      y,
+      'A seen warden runs for it. Rung: twelve seconds of the whole wing, unshakable.',
+    )
+    section(
+      'THE TRACKER',
+      `Every guard within ${TRACKER_RADIUS} tiles lands as a pulsing red dot — walls or not, pinned to the window's edge beyond the camera.`,
+      y,
+      `Red dots for every guard within ${TRACKER_RADIUS} tiles, walls or not.`,
+    )
+    return
+  }
+
+  if (page === 3) {
+    // THE KIT — every find, one line each.
+    const items: [string, string][] = [
+      ['SPARE PICK', 'one more try at any lock — a snapped pick is gone for good'],
+      ['SKELETON KEY', 'skips one lock outright; the gate counts'],
+      ['MOTION TRACKER', `red dots for every guard within ${TRACKER_RADIUS} tiles, walls or not`],
+      ['LAMP OIL', 'the lamp reaches a tile further; stacks twice'],
+      ['SOFT BOOTS', 'your strides carry half as far to listening ears'],
+      ['MAP OF THE WING', 'inks every wall on the plan — never the guards'],
+      ['TONIC', 'one grab will not hold you; the guard reels, the alarm stands'],
+      ['VALUABLES', 'candlesticks, coin, grave rings — banked on top of speed, escape only'],
+    ]
+    let y = 216
+    for (const [name, line] of items) {
+      if (compact) {
+        text(ctx, name, left, y, { font: font(dim, 'bold'), color: readable.amber })
+        const h = paragraph(ctx, line, left + 520, y, {
+          font: font(dim),
+          color: p.ink,
+          maxWidth: 1180,
+          lineHeight: Math.round(dim * 1.25),
+          maxLines: 2,
+        })
+        y += Math.max(Math.round(dim * 1.6), h + 10)
+      } else {
+        text(ctx, name, left, y, { font: font(bodySize, 'bold'), color: readable.amber })
+        text(ctx, line, left + 460, y, { font: font(bodySize), color: p.ink })
+        y += 78
+      }
+    }
+    return
+  }
+
+  // Page 1 — THE BESTIARY, alone on its page since D-196: the rows breathe.
+  const bestY = 216
   label(ctx, 'THE BESTIARY', left, bestY, {
     font: font(typeFor(vp, TYPE.dimension), 'bold'),
     size: typeFor(vp, TYPE.dimension),
     color: readable.amber,
   })
-  const rowStep = Math.round(bodySize * (compact ? 1.12 : 1.55))
-  ENEMY_ORDER.forEach((kind, i) => {
-    const st = ENEMY_STATS[kind]
-    const y = bestY + (compact ? 54 : 44) + i * rowStep
-    text(ctx, st.letter, left + 8, y, {
-      font: font(typeFor(vp, TYPE.heading), 'bold'),
-      color: readable.crimson,
-    })
-    text(
-      ctx,
-      `${st.name} — sight ${st.vision} · ${st.lore}`,
-      left + (compact ? 76 : 64),
-      y,
-      { font: font(typeFor(vp, TYPE.body)), color: p.ink },
-    )
-  })
-
-  // The verbs — full page only: at compact type the column cannot fit under the bestiary
-  // (the D-173 sweep watched it run 200px off the stage into the Back button), and on a
-  // phone the tap zones and the shop panel already teach every verb in place.
+  // Structured like the PIN cards (D-187): every creature is a portrait with three
+  // labelled facts under it — SIGHT, PACE, WAY — no prose to squint through. The verbs
+  // column is gone with the same stroke ("VERB something useless").
+  const paceLabel = (kind: (typeof ENEMY_ORDER)[number]): string => {
+    const r = Math.round(enemyStepSeconds(kind) / PLAYER_STEP_S)
+    return `pace 1/${r} of yours`
+  }
   if (!compact) {
-    const verbX = left + 1060
-    const verbY = bestY
-    label(ctx, 'THE VERBS', verbX, verbY, {
-      font: font(typeFor(vp, TYPE.dimension), 'bold'),
-      size: typeFor(vp, TYPE.dimension),
-      color: readable.amber,
-    })
-    const verbs = [
-      'walk into an enemy to swing',
-      'walk into a chest or a door to open it',
-      '— locked means picking, and the wing',
-      'keeps taking turns while you pick',
-      'a snapped pick rings for 8 tiles',
-      'walk into the awning to spend gold',
-      'P drinks a potion · Space waits',
-    ]
-    verbs.forEach((line, i) => {
-      text(ctx, line, verbX, verbY + 44 + i * 34, {
-        font: font(typeFor(vp, TYPE.body)),
+    // A 2×2 of ROWS since D-194 — the owner: "make it bigger - and you can put them
+    // vertically - right now they looks super tall." The old strip stacked portrait,
+    // facts and story into 270px towers; now each creature reads sideways: the
+    // portrait roughly doubled, its name, facts and grim story beside it.
+    const cellW = 850
+    const availH = 1005 - (bestY + 24)
+    const cellH = Math.floor(availH / 2)
+    const artW = 250
+    const artH = cellH - 14
+    ENEMY_ORDER.forEach((kind, i) => {
+      const st = ENEMY_STATS[kind]
+      const px2 = left + (i % 2) * cellW
+      const py2 = bestY + 24 + Math.floor(i / 2) * cellH
+      if (!drawGauntletArt(ctx, ENEMY_ART[kind], px2, py2, artW, artH, p, 0.92, 'contain')) {
+        drawCreatureGlyph(
+          ctx,
+          kind,
+          px2 + artW / 2,
+          py2 + artH / 2,
+          5,
+          readable.crimson,
+          readable.amber,
+        )
+      }
+      const fx = px2 + artW + 34
+      let fy = py2 + 46
+      text(ctx, st.name.toUpperCase(), fx, fy, {
+        font: font(typeFor(vp, TYPE.body), 'bold'),
         color: p.ink,
       })
+      fy += 34
+      // The listener's card carries its EARS where the others carry sight (D-190):
+      // "it's not obvious how to measure your footsteps" — here is the number.
+      const senseLine =
+        kind === 'listener'
+          ? `ears ${LISTEN_RADIUS} tiles, walls or not`
+          : st.vision > 0
+            ? `sight ${st.vision} tiles`
+            : 'sight none — blind'
+      text(ctx, `${senseLine} · ${paceLabel(kind)}`, fx, fy, {
+        font: font(typeFor(vp, TYPE.dimension)),
+        color: p.inkLight,
+      })
+      fy += 28
+      text(ctx, st.quirk, fx, fy, {
+        font: font(typeFor(vp, TYPE.dimension)),
+        color: readable.crimson,
+      })
+      // The GRIM STORY (D-192) beside the portrait, full ink (the contrast audit's
+      // ruling), line-capped by the cell's own remaining room.
+      const storySize = typeFor(vp, TYPE.dimension)
+      const storyTop = fy + 38
+      const lineH = Math.round(storySize * 1.3)
+      const maxLines = Math.max(2, Math.floor((py2 + cellH - 16 - storyTop) / lineH))
+      paragraph(ctx, st.story, fx, storyTop, {
+        font: font(storySize),
+        color: p.ink,
+        maxWidth: cellW - artW - 90,
+        lineHeight: lineH,
+        maxLines,
+      })
+    })
+  } else {
+    // Compact: one card per row — plate left, the three labelled facts stacked right.
+    const rowH = Math.round(bodySize * 2.4)
+    ENEMY_ORDER.forEach((kind, i) => {
+      const st = ENEMY_STATS[kind]
+      const y = bestY + 54 + i * rowH
+      if (!drawGauntletArt(ctx, ENEMY_ART[kind], left - 8, y - 40, 84, 116, p, 0.9, 'contain')) {
+        drawGauntletSprite(ctx, ENEMY_SPRITE[kind], left + 34, y + 10, 76, readable.crimson)
+      }
+      text(ctx, st.name.toUpperCase(), left + 110, y, {
+        font: font(typeFor(vp, TYPE.dimension), 'bold'),
+        color: p.ink,
+      })
+      text(
+        ctx,
+        `${kind === 'listener' ? `ears ${LISTEN_RADIUS}` : st.vision > 0 ? `sight ${st.vision}` : 'blind'} · ${paceLabel(kind)} · ${st.quirk}`,
+        left + 110,
+        y + Math.round(typeFor(vp, TYPE.dimension) * 1.15),
+        { font: font(typeFor(vp, TYPE.dimension)), color: p.inkLight },
+      )
     })
   }
 }

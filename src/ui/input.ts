@@ -11,7 +11,7 @@
 import type { Chamber, SimInput } from '../sim'
 import { COMBO_DETENT, COMBO_DIGITS, clamp, clamp01 } from '../sim'
 import { type FaceLayout } from '../render/faceon'
-import { wheelAtPoint, type PadlockLayout } from '../render/padlock'
+import { shackleGrabRect, wheelAtPoint, type PadlockLayout } from '../render/padlock'
 import { chamberAtX, yToMm, type CutawayLayout } from '../render/layout'
 import { clientToLogical, type Viewport } from '../render/viewport'
 import {
@@ -28,6 +28,7 @@ import {
   stepForDrag,
   targetAt,
   tensionForTouchStep,
+  wheelLiftForDrag,
   type TouchState,
 } from './touch'
 
@@ -290,6 +291,15 @@ export class InputController {
       const p = clientToLogical(this.vp, e.clientX, e.clientY)
       this.pointerX = p.x
       this.pointerY = p.y
+      // The shackle press (D-188): any pointer, mouse included. A press that lands on the
+      // hook is the PULL and nothing else — it must not also grab a wheel or the wrench.
+      if (this.playing && this.padlockLayout) {
+        const r = shackleGrabRect(this.padlockLayout)
+        if (p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h) {
+          this.shacklePressed = true
+          return
+        }
+      }
       if (e.pointerType === 'touch') {
         this.swipeId = e.pointerId
         this.swipeFromX = p.x
@@ -298,6 +308,7 @@ export class InputController {
       }
     })
     this.on(window, 'pointerup', (e) => {
+      this.shacklePressed = false
       /**
        * A horizontal swipe pages the reference screens — DECISIONS D-131.
        *
@@ -332,6 +343,7 @@ export class InputController {
       }
     })
     this.on(window, 'pointercancel', (e) => {
+      this.shacklePressed = false
       // A cancelled pointer is not a tap. The system took the gesture — a browser scroll, a call
       // arriving — and finishing it as a press would set a tension the player never chose.
       this.touchUp(e.pointerId, this.touch.wrenchOriginY, true)
@@ -438,6 +450,12 @@ export class InputController {
   private padlockLayout: PadlockLayout | null = null
   /** Set on a wheel grab; `readPadlock` re-origins the drag at the wheel's real angle. */
   private padlockGrab = false
+  /**
+   * True while a pointer holds the SHACKLE (D-188): press-and-hold the hook is the pull,
+   * mouse and finger alike — the wheels' second control finally answers the hand that
+   * reaches for it ("when you pull the shackle…" had no pointer story at all).
+   */
+  private shacklePressed = false
 
   /**
    * Was this pointer-up the end of a horizontal swipe? Records it if so.
@@ -580,7 +598,10 @@ export class InputController {
       const over = chamberAtX(layout, x)
       if (over >= 0 && over !== this.touchChamber) this.touchChamber = over
     }
-    this.touchLift = liftForDrag(this.touch, y, this.liftCeiling)
+    // A wheel WRAPS through the seam under the thumb (D-193); a pin stops at its ends.
+    this.touchLift = this.padlockLayout
+      ? wheelLiftForDrag(this.touch, y, this.liftCeiling)
+      : liftForDrag(this.touch, y, this.liftCeiling)
   }
 
   private touchUp(id: number, y: number, cancelled = false): void {
@@ -835,7 +856,9 @@ export class InputController {
     const index = this.touch.active ? this.touchChamber : this.keyChamber
     const c = index >= 0 ? chambers[index] : undefined
     const hands = this.hands()
-    const pull = { tensionHeld: hands.tensionHeld, tensionLevel: hands.tensionHeld ? WHEEL_PULL : 0 }
+    // Q, the touch slider, or a pointer holding the hook (D-188) — any of them is the pull.
+    const pulled = hands.tensionHeld || this.shacklePressed
+    const pull = { tensionHeld: pulled, tensionLevel: pulled ? WHEEL_PULL : 0 }
     if (this.touch.active) {
       if (c && this.padlockGrab) {
         this.touchLift = c.lift

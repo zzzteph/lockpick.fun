@@ -389,6 +389,32 @@ export function scheduleOpen(
   return springStart - when + 0.22
 }
 
+/**
+ * One heartbeat thump — a soft low sine knock that pitches down as it dies (D-181).
+ * The engine strings two of these into a lub-dub; alone it is just a dull pressure.
+ */
+export function scheduleThump(
+  ctx: BaseAudioContext,
+  dest: AudioNode,
+  when: number,
+  hz: number,
+  gain = 1,
+): number {
+  const duration = 0.16
+  const osc = ctx.createOscillator()
+  osc.type = 'sine'
+  osc.frequency.setValueAtTime(hz, when)
+  osc.frequency.exponentialRampToValueAtTime(Math.max(30, hz * 0.72), when + duration)
+  const g = ctx.createGain()
+  g.gain.setValueAtTime(0, when)
+  g.gain.linearRampToValueAtTime(0.5 * gain, when + 0.012)
+  g.gain.exponentialRampToValueAtTime(0.0001, when + duration)
+  osc.connect(g).connect(dest)
+  osc.start(when)
+  osc.stop(when + duration + 0.01)
+  return duration
+}
+
 /** UI: a tiny mechanical detent. Nothing musical, nothing cute. */
 export function scheduleUiTick(
   ctx: BaseAudioContext,

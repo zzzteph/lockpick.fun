@@ -33,6 +33,7 @@ import {
   schedulePickStrain,
   schedulePlugFree,
   scheduleReset,
+  scheduleThump,
   scheduleUiTick,
 } from './synth'
 
@@ -365,6 +366,32 @@ export class AudioEngine {
     if (!ctx || !this.ready) return
     const g = this.voice('ui', 0.02)
     if (g) scheduleUiTick(ctx, g, ctx.currentTime, 0.8 + index * 0.12)
+  }
+
+  /** Seconds accumulated toward the next heartbeat — the labyrinth's pulse (D-181). */
+  private pulseClock = 0
+
+  /**
+   * The labyrinth's heartbeat: fed every frame by the crawl with a threat level 0..1 —
+   * 0 is silence (and resets the pulse), 1 is a guard breathing on your neck. The pulse
+   * quickens with the level; each beat is a lub-dub of two low thumps on the ambient bus.
+   */
+  heartbeat(level: number, seconds: number): void {
+    const ctx = this.ctx
+    if (!ctx || !this.ready || level <= 0.01) {
+      this.pulseClock = 0
+      return
+    }
+    this.pulseClock += seconds
+    const period = 1.15 - 0.82 * Math.min(1, level)
+    if (this.pulseClock < period) return
+    this.pulseClock = 0
+    const g = this.voice('ambient', 0.35)
+    if (!g) return
+    const now = ctx.currentTime
+    const punch = 0.35 + 0.5 * Math.min(1, level)
+    scheduleThump(ctx, g, now, 52, punch)
+    scheduleThump(ctx, g, now + 0.13, 60, punch * 0.55)
   }
 
   /** Push the continuous parameters. Called once per rendered frame. */

@@ -297,6 +297,19 @@ export function liftForDrag(state: TouchState, y: number, maxLift: number): numb
 }
 
 /**
+ * A WHEEL drag (D-193): the dial is a circle, so the drag never clamps — it wraps
+ * through the 9/0 seam in either direction, exactly as the keyboard's click and the
+ * sim's short-way turner already do. The clamp was invisible while every wheel began
+ * at zero; D-192 parked them anywhere, and a wheel dealt near nine hit an invisible
+ * wall under the thumb.
+ */
+export function wheelLiftForDrag(state: TouchState, y: number, travel: number): number {
+  const dragged = (state.liftOriginY - y) / LIFT_DRAG_PX
+  const mm = state.liftOriginMm + dragged * travel
+  return ((mm % travel) + travel) % travel
+}
+
+/**
  * Where a touch that goes down at (x, y) should go.
  *
  * The wrench wins over everything, because it is the control you reach for in a hurry. Anything

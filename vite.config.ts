@@ -149,10 +149,10 @@ export default defineConfig({
      * locked variants are built with) would throw for anyone who opened the game by
      * double-clicking. 20KB covers the whole set; nothing else the game ships is in that range.
      */
-    assetsInlineLimit: 20480,
-    // 588KB, deliberately: the trophy art rides the bundle as data URIs (D-159), and one file
-    // that opens from a double-click beats a small file plus thirty-four requests that do not.
-    chunkSizeWarningLimit: 700,
+    assetsInlineLimit: 300000,
+    // The trophy art and generated dungeon plates ride the bundle as data URIs. One file that
+    // opens from a double-click beats a small file plus canvas-tainting image requests.
+    chunkSizeWarningLimit: 3400,
     rollupOptions: {
       // The game, and only the game. `dev/audio-debug.html` is a bench instrument — the dev
       // server serves it from `dev/`, and it has no business in a shipped bundle. It also

@@ -107,6 +107,7 @@ import {
   LOGICAL_HEIGHT,
   LOGICAL_WIDTH,
   beginFrame,
+  clientToLogical,
   clipToStage,
   createViewport,
   isCompact,
@@ -114,6 +115,7 @@ import {
   touchFloorFor,
   typeFor,
 } from './render/viewport'
+import { padRects } from './render/dungeonmap'
 import {
   KEYWAY_FLOOR,
   STARTER_TOOLS,
@@ -180,6 +182,7 @@ import {
   drawGauntlet,
   drawTrophies,
   drawTutorial,
+  GUIDE_PAGE_COUNT,
   codesPageCount,
   codesRoster,
   trophyPageCount,
@@ -196,7 +199,7 @@ import { generateDungeonLock } from './game/gauntlet'
 import { solveLock } from './sim/solver'
 import {
   DUNGEON_DIFFICULTY_FACTOR,
-  PICK_TURN_SECONDS,
+  advance as advanceDungeon,
   canPick,
   dungeonScore,
   logLine,
@@ -205,11 +208,9 @@ import {
   pickOpened,
   pickSnapped,
   pickTheLock,
-  pickTick,
   startDungeon,
   stepBack,
   useKey,
-  waitTurn,
   type DungeonRunState,
 } from './game/dungeonRun'
 import { HELP_PAGE_COUNT, drawHelp } from './ui/help'
@@ -466,13 +467,25 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   let gauntletDifficulty = progress.data.settings.assist
   /** True while the dungeon guide page covers the gauntlet screen. */
   let guideOpen = false
+  /** Which of the guide's topic pages is open (D-196) — goal, bestiary, senses, kit, traps. */
+  let guidePage = 0
   let gauntletNewBest = false
   /** Score banked when the run ended upright, difficulty factor applied. For the summary. */
   let dungeonBankedScore = 0
   /** True once this run's end has been settled into the save — banking must fire once. */
   let dungeonSettled = false
-  /** Seconds accumulated inside a dungeon pick: every `PICK_TURN_SECONDS`, the floor turns. */
-  let pickClock = 0
+  /**
+   * The e2e harness's determinism switch: frozen, the frame loop stops feeding the
+   * labyrinth wall seconds and the dev hooks drive its clock by hand.
+   */
+  let dungeonFrozen = false
+  /** Movement keys currently held, newest last — the real-time walk reads the tail. */
+  const heldDirs: { key: string; dx: number; dy: number }[] = []
+  /** The walk PAD's held direction (D-185) — phones hold a button instead of a key. */
+  let padHeld: { dx: number; dy: number } | null = null
+  /** The briefing's typed seed, '' = roll one; resets the moment a run begins (D-187). */
+  let gauntletSeedDraft = ''
+  let gauntletSeedFocus = false
 
   /**
    * The assist level the current pick is actually played at. The dungeon's chosen difficulty
@@ -536,7 +549,6 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     }
     const salt = target.kind === 'gate' ? 400 : target.kind === 'chest' ? target.id : 200 + target.id
     const def = generateDungeonLock(dungeonRun.floor.seed, salt, thing.lockTier, thing.wheel)
-    pickClock = 0
     startLock(def, ((dungeonRun.floor.seed + salt * 104729) >>> 0) || 1)
   }
 
@@ -607,8 +619,11 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     gauntletSelectDifficulty: (difficulty) => {
       gauntletDifficulty = difficulty
     },
-    gauntletGuide: (open) => {
+    gauntletGuide: (open, page) => {
       guideOpen = open
+      // Fresh from the crawl the guide opens on its first page; the ‹ › arrows pass an
+      // explicit one (D-196 — "each page for the specific topic").
+      guidePage = open ? Math.max(0, Math.min(GUIDE_PAGE_COUNT - 1, page ?? 0)) : 0
     },
     gauntletStart: (difficulty) => {
       gauntletDifficulty = difficulty
@@ -616,10 +631,22 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       dungeonSettled = false
       dungeonBankedScore = 0
       guideOpen = false
-      // Math.random is fine in the game layer (the sim's lint rule owns the sim); `|| 1` keeps a
-      // zero seed — legal but a degenerate xorshift seed-story — out of circulation.
-      dungeonRun = startDungeon(((Math.random() * 0xffffffff) >>> 0) || 1)
+      // A typed seed replays its maze; otherwise roll one. Math.random is fine in the game
+      // layer (the sim's lint rule owns the sim); `|| 1` keeps a zero seed — legal but a
+      // degenerate xorshift seed-story — out of circulation. The draft resets either way:
+      // "once opened, random" (D-187).
+      const typed = gauntletSeedDraft !== '' ? parseInt(gauntletSeedDraft, 10) >>> 0 : 0
+      dungeonRun = startDungeon(typed || ((Math.random() * 0xffffffff) >>> 0) || 1)
+      gauntletSeedDraft = ''
+      gauntletSeedFocus = false
       status = ''
+    },
+    gauntletSeedFocus: (on) => {
+      gauntletSeedFocus = on
+    },
+    gauntletSeedClear: () => {
+      gauntletSeedDraft = ''
+      gauntletSeedFocus = false
     },
     dungeonMove: (dx, dy) => {
       if (!dungeonRun) return
@@ -639,11 +666,6 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     dungeonStepBack: () => {
       if (!dungeonRun) return
       stepBack(dungeonRun)
-    },
-    dungeonWait: () => {
-      if (!dungeonRun) return
-      waitTurn(dungeonRun)
-      settleDungeon()
     },
     gauntletReset: () => {
       dungeonRun = null
@@ -1064,18 +1086,24 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
 
   function absorb(events: readonly SimEvent[]): void {
     if (events.length === 0 || !session) return
-    // A wheel seating is training's tell alone (owner's rule): above training the seat makes
-    // no sound, no buzz, no caption — the drag moving to the next wheel is the only
-    // announcement, the same family-scoped silence the no-dimple visuals keep (D-169).
-    const silentSeat = session.def.family === 'combination' && activeAssist() !== 'training'
-    const heard = silentSeat ? events.filter((e) => e.type !== 'PIN_SET') : events
+    // A wheel seating is SILENT at every assist since D-191 — the owner closed training's
+    // last remnant too: "when the correctly setted the number - there should be no click
+    // or something." And since D-197 the FALSE gate's thunk is silent with it: once the
+    // truth went quiet, the lie's click was the only sound a wheel pack ever made, and
+    // it read as "correct" — "EVEN if I hear the sound - lock not opens." No sound, no
+    // buzz, no caption, true or false; the drag under the pull is the only announcement.
+    const silentSeat = session.def.family === 'combination'
+    const MUTE_ON_WHEELS = new Set(['PIN_SET', 'FALSE_SET_ENTERED'])
+    const heard = silentSeat ? events.filter((e) => !MUTE_ON_WHEELS.has(e.type)) : events
     audio.handleEvents(heard, session.state)
     haptics.handleEvents(heard)
     if (progress.data.settings.subtitles) pushSubtitleEvents(subtitles, heard)
     eventLog.push(...events)
     if (eventLog.length > 512) eventLog.splice(0, eventLog.length - 512)
+    // FX ride the same filter (D-191): a flash and a screen shake on the right digit is
+    // a CLICK for the eyes — "no click or something" covers all of it.
+    for (const e of heard) pushFxEvent(fx, e)
     for (const e of events) {
-      pushFxEvent(fx, e)
       if (e.type === 'LOCK_OPENED') finishAttempt()
       for (let i = eventWaiters.length - 1; i >= 0; i -= 1) {
         const w = eventWaiters[i]
@@ -1095,6 +1123,9 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         phase: 'briefing',
         difficulty: gauntletDifficulty,
         guide: guideOpen,
+        guidePage,
+        seedDraft: gauntletSeedDraft,
+        seedFocus: gauntletSeedFocus,
         ...(best !== undefined ? { best } : {}),
       }
     }
@@ -1106,8 +1137,11 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       phase,
       difficulty: gauntletDifficulty,
       guide: guideOpen,
+      guidePage,
       run: dungeonRun,
       score: dungeonBankedScore,
+      seedDraft: gauntletSeedDraft,
+      seedFocus: false,
       ...(best !== undefined ? { best } : {}),
       newBest: gauntletNewBest,
     }
@@ -1264,10 +1298,54 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       keys: uiKeys,
     }
 
+    /**
+     * The labyrinth runs on the wall clock while you WALK it (D-187). Kneeling at a lock
+     * — the pick screen or the key choice — holds the whole wing: "the world and all
+     * enemies should be paused when I opening the lock" overruled D-180's always-on
+     * clock after two deaths mid-pick. `dungeonFrozen` is the e2e determinism switch.
+     */
+    if (
+      dungeonRun &&
+      !dungeonFrozen &&
+      !guideOpen &&
+      screen === 'gauntlet' &&
+      dungeonRun.phase === 'crawl'
+    ) {
+      const run: DungeonRunState = dungeonRun
+      advanceDungeon(run, seconds)
+      // Held walking — keyboard tail or the PAD's thumb; the sim's stride cadence
+      // decides which frames actually step.
+      const held = padHeld ?? heldDirs[heldDirs.length - 1]
+      if (held && run.phase === 'crawl') {
+        actions.dungeonMove(held.dx, held.dy)
+      }
+      // The heartbeat (D-181): the nearest AWAKE guard sets the pulse — silence when
+      // nothing hunts, frantic at arm's reach, and never slower than a murmur mid-alarm.
+      let threat = 0
+      for (const e of run.enemies) {
+        if (!e.awake) continue
+        const d = Math.max(Math.abs(e.x - run.player.x), Math.abs(e.y - run.player.y))
+        threat = Math.max(threat, Math.min(1, Math.max(0, 1 - d / 10)))
+      }
+      if (run.time < run.alarmUntil) threat = Math.max(threat, 0.55)
+      audio.heartbeat(threat, seconds)
+    } else {
+      audio.heartbeat(0, seconds)
+    }
+
     // Typing a lock's name. Safe to consume keys wholesale here because picking is the keyboard's
     // job on exactly one screen and this is not it (D-059) — there is nothing to collide with.
     if (screen === 'editor' && editingName) typeIntoName(keys)
     if (screen === 'codes' && codeFocus) typeIntoCode(keys)
+    // The briefing's seed box (D-187): digits in, Backspace out, Enter/Escape done.
+    if (screen === 'gauntlet' && !dungeonRun && gauntletSeedFocus) {
+      for (const k of keys) {
+        const digit = /^(Digit|Numpad)(\d)$/.exec(k)
+        if (digit && gauntletSeedDraft.length < 9) gauntletSeedDraft += digit[2]
+        else if (k === 'Backspace') gauntletSeedDraft = gauntletSeedDraft.slice(0, -1)
+        else if (k === 'Enter' || k === 'NumpadEnter' || k === 'Escape') gauntletSeedFocus = false
+      }
+    }
 
     /**
      * Swipe across to turn a page — DECISIONS D-131.
@@ -1339,32 +1417,6 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         const ticks = updateOpenSequence(sequence, seconds)
         for (let i = 0; i < ticks; i += 1) audio.creditTick(i)
         if (canSkip(sequence) && wantsSkip(keys, clicked)) skipOpenSequence(sequence)
-      }
-      /**
-       * The dungeon's picking clock — the owner's chosen rule (docs/DUNGEON.md): every few
-       * seconds of real picking, the floor takes a turn around you. Enemies close in, an
-       * adjacent one hits you mid-kneel, and the floor can kill you with your hands still
-       * inside the lock — which ends the attempt on the spot.
-       */
-      if (dungeonRun && dungeonRun.phase === 'picking' && !view.opened) {
-        pickClock += seconds
-        const per = PICK_TURN_SECONDS[gauntletDifficulty]
-        // Re-read through the state type: `pickTick` mutates `phase` behind a function call,
-        // and the narrowing from the guard above would otherwise call this unreachable.
-        const run: DungeonRunState = dungeonRun
-        while (pickClock >= per && run.phase === 'picking') {
-          pickClock -= per
-          pickTick(run)
-        }
-        if (run.phase === 'caught') {
-          session = null
-          status = 'a hand on your collar — caught at the lock'
-          goto('gauntlet')
-          render(uiFrame, inp)
-          hook.framesRendered += 1
-          hook.ready = true
-          return
-        }
       }
       /**
        * A snapped pick inside the dungeon is a spent pick, not a death (docs/DUNGEON.md —
@@ -1442,6 +1494,8 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       // Mid-attempt only: an opened lock's session lingers for the results screen, and "back to
       // the lock" on a lock that is already open would be a door to a finished room.
       pickActive: session !== null && !session.state.opened,
+      dungeonLive:
+        dungeonRun !== null && dungeonRun.phase !== 'caught' && dungeonRun.phase !== 'won',
       ...(benchTier !== undefined ? { benchTier } : {}),
       ...(screen === 'gauntlet' ? { gauntlet: gauntletView() } : {}),
     }
@@ -1525,7 +1579,8 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         activeChamber: view.pickChamber,
         // No x-ray at ANY assist since D-173 — the owner: "there should be NO helping
         // wheels both in EASY or training modes". A wheel pack is a sealed object
-        // everywhere; training keeps only its seat *sound* (the earlier explicit ruling).
+        // everywhere — and since D-191 even training's seat sound is gone: the right
+        // digit is indistinguishable at rest, everywhere, and only the drag says so.
         showTargets: false,
         plainStates: true,
         fx,
@@ -2036,8 +2091,9 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   hook.dungeonStepBack = (): void => {
     actions.dungeonStepBack()
   }
-  hook.dungeonGuide = (open: boolean): void => {
+  hook.dungeonGuide = (open: boolean, page?: number): void => {
     guideOpen = open
+    guidePage = open ? Math.max(0, Math.min(GUIDE_PAGE_COUNT - 1, page ?? 0)) : 0
   }
   hook.dungeonForceUnlock = (): void => {
     // Test-only: pose the key-or-pick choice so the layout sweep can audit the panel
@@ -2051,8 +2107,19 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   hook.dungeonMove = (dx: number, dy: number): void => {
     actions.dungeonMove(dx, dy)
   }
-  hook.dungeonWait = (): void => {
-    actions.dungeonWait()
+  hook.dungeonFreeze = (on: boolean): void => {
+    dungeonFrozen = on
+  }
+  hook.dungeonAdvance = (seconds: number): void => {
+    if (!dungeonRun) return
+    advanceDungeon(dungeonRun, seconds)
+    // The same after-care a frame gives: a mid-pick grab must land back on the floor.
+    if (dungeonRun.phase === 'caught' && screen === 'pick') {
+      session = null
+      status = 'a hand on your collar — caught at the lock'
+      goto('gauntlet')
+    }
+    settleDungeon()
   }
   hook.dungeonLog = (line: string): void => {
     if (dungeonRun) logLine(dungeonRun, line)
@@ -2061,12 +2128,16 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     if (!dungeonRun) return null
     return {
       phase: dungeonRun.phase,
-      turn: dungeonRun.turn,
+      time: dungeonRun.time,
       x: dungeonRun.player.x,
       y: dungeonRun.player.y,
       picks: dungeonRun.player.picks,
       keys: dungeonRun.player.keys,
       tracker: dungeonRun.player.tracker,
+      lampBonus: dungeonRun.player.lampBonus,
+      quiet: dungeonRun.player.quiet,
+      tonics: dungeonRun.player.tonics,
+      treasure: dungeonRun.treasure,
       seed: dungeonRun.floor.seed,
       score: dungeonBankedScore,
       picking: dungeonRun.picking ? { ...dungeonRun.picking } : null,
@@ -2313,20 +2384,81 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   window.addEventListener('orientationchange', refit)
 
   /**
-   * The dungeon floor's keyboard — turn-based, so it wants key *events*, not held state.
-   * Repeats are allowed on purpose: holding an arrow walks. Only listening while the map is
-   * actually the screen keeps it from eating the pick screen's or the menus' keys.
+   * The dungeon floor's keyboard — real time wants HELD state, not key repeats: keydown
+   * strides at once and records the direction; the frame loop keeps calling the move while
+   * it stays held, and the sim's stride cadence decides which frames actually step. Only
+   * listening while the map is the screen keeps it from eating the pick screen's keys.
    */
+  const dirForKey = (k: string): { dx: number; dy: number } | null => {
+    if (k === 'ArrowUp' || k === 'w' || k === 'W') return { dx: 0, dy: -1 }
+    if (k === 'ArrowDown' || k === 's' || k === 'S') return { dx: 0, dy: 1 }
+    if (k === 'ArrowLeft' || k === 'a' || k === 'A') return { dx: -1, dy: 0 }
+    if (k === 'ArrowRight' || k === 'd' || k === 'D') return { dx: 1, dy: 0 }
+    return null
+  }
+  const dropHeld = (k: string): void => {
+    const lower = k.toLowerCase()
+    for (let i = heldDirs.length - 1; i >= 0; i -= 1) {
+      if ((heldDirs[i] as { key: string }).key === lower) heldDirs.splice(i, 1)
+    }
+  }
   window.addEventListener('keydown', (e) => {
     if (screen !== 'gauntlet' || !dungeonRun || dungeonRun.phase !== 'crawl') return
-    const k = e.key
-    if (k === 'ArrowUp' || k === 'w' || k === 'W') actions.dungeonMove(0, -1)
-    else if (k === 'ArrowDown' || k === 's' || k === 'S') actions.dungeonMove(0, 1)
-    else if (k === 'ArrowLeft' || k === 'a' || k === 'A') actions.dungeonMove(-1, 0)
-    else if (k === 'ArrowRight' || k === 'd' || k === 'D') actions.dungeonMove(1, 0)
-    else if (k === ' ') actions.dungeonWait()
-    else return
+    const dir = dirForKey(e.key)
+    if (!dir) return
+    if (!e.repeat) {
+      dropHeld(e.key)
+      heldDirs.push({ key: e.key.toLowerCase(), dx: dir.dx, dy: dir.dy })
+      actions.dungeonMove(dir.dx, dir.dy)
+    }
     e.preventDefault()
+  })
+  window.addEventListener('keyup', (e) => {
+    dropHeld(e.key)
+  })
+  // A blurred tab never gets its keyups — stop the walk rather than march into a cone.
+  window.addEventListener('blur', () => {
+    heldDirs.length = 0
+    padHeld = null
+  })
+
+  /**
+   * The walk PAD (D-185) — "you can not move the person in mobile": hold a pad button
+   * and the frame loop keeps walking that way; the sim's stride cadence does the pacing.
+   * Pointer events on the canvas, mapped through the same letterbox math as every other
+   * touch; sliding off a button (or losing the pointer) stops the walk.
+   */
+  const padDirAt = (x: number, y: number): { dx: number; dy: number } | null => {
+    for (const r of padRects()) {
+      if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return { dx: r.dx, dy: r.dy }
+    }
+    return null
+  }
+  const padLive = (): boolean =>
+    isCompact(vp) &&
+    screen === 'gauntlet' &&
+    dungeonRun !== null &&
+    dungeonRun.phase === 'crawl' &&
+    !guideOpen
+  canvas.addEventListener('pointerdown', (e) => {
+    if (!padLive()) return
+    const pt = clientToLogical(vp, e.clientX, e.clientY)
+    const dir = padDirAt(pt.x, pt.y)
+    if (dir) {
+      padHeld = dir
+      actions.dungeonMove(dir.dx, dir.dy)
+    }
+  })
+  canvas.addEventListener('pointermove', (e) => {
+    if (padHeld === null) return
+    const pt = clientToLogical(vp, e.clientX, e.clientY)
+    padHeld = padDirAt(pt.x, pt.y)
+  })
+  window.addEventListener('pointerup', () => {
+    padHeld = null
+  })
+  window.addEventListener('pointercancel', () => {
+    padHeld = null
   })
 
   return {

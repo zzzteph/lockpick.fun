@@ -363,6 +363,24 @@ export function createSimState(def: LockDef, seed: number, config: SimConfig): S
     // One roll, two consequences: what the chamber feels like and how fast it moves (D-069).
     const bias = (nextFloat(rng) * 2 - 1) * RESIST_PIN_BIAS
 
+    // A wheel pack starts PARKED (D-192): every wheel resting ON a digit, dealt from
+    // the lock's seed — never its own true one (nothing leaks, nothing seats for
+    // free), and never a LIE's either: dealt inside one of its own false notches, a
+    // wheel would pre-arm a false set and steal the bind from the delta order before
+    // the first touch. Lift 0 sat the window exactly on the 9/0 seam — the owner:
+    // "the lock, which start in the middle (wheels)".
+    const startDigit = (() => {
+      if (def.family !== 'combination') return null
+      // Never its true digit, never a lie's — and never the dial's very start or very
+      // end (D-197, the owner: "beginning wheel starts not from the very end or very
+      // start"): a pack opening on rows of 0s and 9s read as unset, not as parked.
+      const banned = new Set<number>([Math.floor(setLift / COMBO_DETENT), 0, COMBO_DIGITS - 1])
+      for (const g of def.discs?.falseGates[i] ?? []) banned.add(Math.floor(g / COMBO_DETENT))
+      const open: number[] = []
+      for (let d = 0; d < COMBO_DIGITS; d += 1) if (!banned.has(d)) open.push(d)
+      return open[Math.floor(nextFloat(rng) * open.length)] as number
+    })()
+
     const chamber: Chamber = {
       index: i,
       kind,
@@ -382,7 +400,7 @@ export function createSimState(def: LockDef, seed: number, config: SimConfig): S
       maxLift: isDisc
         ? DISC_TRAVEL
         : setLift + (def.family === 'dimple' ? DIMPLE_MAX_OVERLIFT : MAX_OVERLIFT),
-      lift: 0,
+      lift: startDigit === null ? 0 : detentCentre(startDigit),
       keyLift: 0,
       state: 'FREE',
       geometry: 'SOLID',

@@ -67,12 +67,17 @@ test('a wheel rolls under Space and parks where you leave it, on a digit', async
 
   // Real keys and real frames: this is the `readFace` seam the scripted input road bypasses.
   // No shackle yet — rolling a wheel on an unpulled shackle is free and cannot capture.
+  // A wheel STARTS parked on a digit since D-192, so movement is measured from there —
+  // an absolute floor would pass without Space doing anything.
+  const startAt = (await getState(page)).chambers[0]?.lift ?? 0
+  const startOff = Math.abs(((startAt / 0.3) % 1) - 0.5)
+  expect(startOff, `start lift ${startAt.toFixed(3)} sits off the digit grid`).toBeLessThan(0.05)
   await page.keyboard.down(' ')
   await page.waitForTimeout(450)
   await page.keyboard.up(' ')
   await page.waitForTimeout(150)
   const rolled = (await getState(page)).chambers[0]?.lift ?? 0
-  expect(rolled, 'holding Space must roll the wheel').toBeGreaterThan(0.1)
+  expect(Math.abs(rolled - startAt), 'holding Space must roll the wheel').toBeGreaterThan(0.1)
 
   // The park. A wheel has no spring, and the keyboard's held-lift decay — correct for pins —
   // must never unwind a dial: half a second later the wheel is exactly where it was left.
@@ -86,7 +91,9 @@ test('a wheel rolls under Space and parks where you leave it, on a digit', async
   expect(offCentre, `lift ${parked.toFixed(3)} sits off the digit grid`).toBeLessThan(0.05)
 
   // The arrows click one detent per press — up, and down through the wrap (D-169).
-  const digitOf = (lift: number): number => Math.round(lift / 0.3 - 0.5)
+  // +10 then %10: wrap-safe, and it launders Math.round's -0 (a park a hair under
+  // digit 0's centre reads as -0, and toBe is Object.is — -0 !== 0 to it).
+  const digitOf = (lift: number): number => (Math.round(lift / 0.3 - 0.5) + 10) % 10
   const before = digitOf(parked)
   await page.keyboard.press('ArrowUp')
   await page.waitForTimeout(350)
@@ -111,6 +118,17 @@ test('a thumb rolls a wheel, it parks where the thumb leaves it, and a regrab co
   const cx = r.x + r.w / 2
   const cy = r.y + r.h / 2
 
+  // The dial is a circle and the wheel starts PARKED on a seed-dealt digit (D-192), so
+  // every "did it move" reading is the signed short-way displacement — an absolute lift
+  // floor lies the moment an upward roll wraps 9 across the seam to 0.
+  const fwd = (from: number, to: number): number => {
+    let d = (to - from) % 3.0
+    if (d < -1.5) d += 3.0
+    else if (d > 1.5) d -= 3.0
+    return d
+  }
+  const start1 = (await getState(page)).chambers[1]?.lift ?? 0
+
   // Grab the wheel and drag up: the strip follows the thumb.
   await touch(page, 'pointerdown', cx, cy)
   await advanceSeconds(page, 0.1)
@@ -122,7 +140,7 @@ test('a thumb rolls a wheel, it parks where the thumb leaves it, and a regrab co
   await advanceSeconds(page, 0.3)
 
   const rolled = (await getState(page)).chambers[1]?.lift ?? 0
-  expect(rolled, 'the drag must roll the wheel').toBeGreaterThan(0.2)
+  expect(fwd(start1, rolled), 'the drag must roll the wheel upward').toBeGreaterThan(0.2)
 
   // The park: no spring, no decay — half a second later it has not moved.
   await advanceSeconds(page, 0.5)
@@ -138,7 +156,7 @@ test('a thumb rolls a wheel, it parks where the thumb leaves it, and a regrab co
   await touch(page, 'pointerup', cx, cy - 60)
   await advanceSeconds(page, 0.3)
   const regrabbed = (await getState(page)).chambers[1]?.lift ?? 0
-  expect(regrabbed, 'a regrab must continue, not restart').toBeGreaterThan(parked + 0.1)
+  expect(fwd(parked, regrabbed), 'a regrab must continue upward, not restart').toBeGreaterThan(0.1)
   watcher.assertClean()
 })
 

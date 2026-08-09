@@ -113,6 +113,26 @@ export function padlockCentre(layout: PadlockLayout): { x: number; y: number } {
 }
 
 /**
+ * The hand-sized region that means "the shackle" to a pointer (D-188): press and hold
+ * anywhere on the hook to PULL. Generous on every side — it is the second-most important
+ * control on the screen and it had no pointer story at all ("when you pull the shackle…").
+ */
+export function shackleGrabRect(layout: PadlockLayout): {
+  x: number
+  y: number
+  w: number
+  h: number
+} {
+  const bodyRight = layout.bodyX + layout.bodyW
+  return {
+    x: bodyRight - 110,
+    y: layout.bodyY + 20,
+    w: SHACKLE_REACH + 140,
+    h: layout.bodyH - 40,
+  }
+}
+
+/**
  * The audit's lock box: the sealed metal above the wheel row, hook included. The digits
  * themselves are the *interface*, exactly as the cutaway's pins are the drawing — chrome must
  * stay off the clean metal, but text on the wheels is the wheels working.
@@ -204,6 +224,22 @@ export function drawPadlock(
   ctx.closePath()
   ctx.fill()
   ctx.stroke()
+  // The pointer's invitation (D-188): while nothing pulls, two amber chevrons point the
+  // way out of the arch — press and hold the hook to pull. They vanish under any pull,
+  // because the give itself is the feedback then.
+  if (!state.opened && state.tension < 0.05) {
+    ctx.strokeStyle = readable.amber
+    ctx.lineWidth = STROKE.heavy
+    ctx.lineCap = 'round'
+    const chevX = arcX + rOut + 16
+    for (let k = 0; k < 2; k += 1) {
+      ctx.beginPath()
+      ctx.moveTo(chevX + k * 22, midY - 14)
+      ctx.lineTo(chevX + 14 + k * 22, midY)
+      ctx.lineTo(chevX + k * 22, midY + 14)
+      ctx.stroke()
+    }
+  }
   ctx.restore()
 
   // ── The body ──────────────────────────────────────────────────────────────────────────
@@ -255,10 +291,11 @@ export function drawPadlock(
       // The window shows three digits; anything further is clipped invisible by the canvas —
       // but the layout probe records every `text()` call regardless of clip, so a digit the
       // player can never see must not be drawn at all, or the audit reads it over the metal.
-      // One pixel of slack, because a parked neighbour sits at *exactly* one pitch and float
-      // error put it a hair past the line — which culled the digit below the window on half
-      // the detents ("when you see 0, upper is 9 but below nothing").
-      if (Math.abs(yOff) > pitch + 1) continue
+      // Slack out to 1.5 pitch (D-188): the old pitch+1 cull POPPED the incoming digit at
+      // the exact mid-drag frame it crossed the line — read in play as "the numbers on
+      // wheels disappear". The window's clip owns the real boundary; this only keeps the
+      // audit from reading text drawn fully outside it.
+      if (Math.abs(yOff) > pitch * 1.5 + 1) continue
       const centreish = Math.abs(yOff) < pitch * 0.5
       text(ctx, String(digit), r.x + r.w / 2, layout.rowY + yOff + (centreish ? centreSize : sideSize) * 0.36, {
         font: font(centreish ? centreSize : sideSize, centreish ? 'bold' : undefined),

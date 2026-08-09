@@ -335,8 +335,8 @@ export interface DevHook {
   // ── The Lock dungeon (docs/DUNGEON.md) ──
   /** Begin a run on a known floor — determinism is what makes the clearing e2e honest. */
   startDungeonRun(seed: number, difficulty: 'training' | 'easy' | 'medium' | 'hard'): void
-  /** Open or close the dungeon guide page — the layout sweep's way onto it. */
-  dungeonGuide(open: boolean): void
+  /** Open or close the dungeon guide; `page` picks a topic page (D-196) — the sweep's road. */
+  dungeonGuide(open: boolean, page?: number): void
   /** Spend a skeleton key on the lock being offered the choice. */
   dungeonUseKey(): void
   /** Choose the pick at the key-or-pick choice — the lock screen takes over. */
@@ -345,21 +345,31 @@ export interface DevHook {
   dungeonStepBack(): void
   /** Test-only: pose the key-or-pick choice so the layout sweep can audit the panel. */
   dungeonForceUnlock(): void
-  /** One step or bump, exactly as the arrows and the tile taps do. */
+  /** One step or bump, exactly as the arrows and the tile taps do. Stride-cadence gated. */
   dungeonMove(dx: number, dy: number): void
-  /** Stand still for a turn. */
-  dungeonWait(): void
+  /**
+   * Freeze the frame loop's wall-clock feed. The e2e determinism switch: frozen, only
+   * `dungeonAdvance` moves the labyrinth's time, so a scripted walk is exactly replayable.
+   */
+  dungeonFreeze(on: boolean): void
+  /** Hand the labyrinth seconds by hand — capped per call exactly as a frame would be. */
+  dungeonAdvance(seconds: number): void
   /** Push a ticker line into the live run — the layout sweep audits a full ticker with it. */
   dungeonLog(line: string): void
   /** The run as data — null when no run stands (the briefing state). */
   dungeonState(): {
     phase: string
-    turn: number
+    time: number
     x: number
     y: number
     picks: number
     keys: number
     tracker: boolean
+    /** The themed-room kit (D-189): oil burnt, boots worn, tonics held, loot banked. */
+    lampBonus: number
+    quiet: boolean
+    tonics: number
+    treasure: number
     seed: number
     score: number
     picking: { kind: 'chest' | 'door' | 'gate'; id: number } | null

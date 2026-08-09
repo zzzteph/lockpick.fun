@@ -1,15 +1,20 @@
 /**
  * The Lock dungeon, crawled in the live game — `docs/DUNGEON.md`.
  *
- * The unit suites prove the floor generator and the turn machine; what only a browser can
- * prove is the seams: that the map screen drives the machine through the same actions the
- * keys and taps use, that bumping a locked chest lands on the real pick screen, that the
- * picking clock turns the floor, and that the solver's open pays loot back into the crawl.
+ * The unit suites prove the floor generator and the real-time machine; what only a browser
+ * can prove is the seams: that the map screen drives the machine through the same actions
+ * the keys and taps use, that bumping a locked chest lands on the real pick screen, and
+ * that the solver's open pays back into the crawl.
+ *
+ * Real time is tamed for the drive (D-180): `dungeonFreeze(true)` cuts the frame loop's
+ * wall-clock feed, and the walk advances the labyrinth by hand — one PLAYER_STEP_S per
+ * stride, exactly the machine the Node dry-run walked. Same state machine, same policy,
+ * same seed, same clock: the dry-run's survival IS the browser's.
  */
 
 import { expect, test, type Page } from '@playwright/test'
 import { generateFloor, type DungeonFloor } from '../src/game/dungeon'
-import { movePlayer, startDungeon, waitTurn } from '../src/game/dungeonRun'
+import { PLAYER_STEP_S, advance, movePlayer, pickOpened, startDungeon } from '../src/game/dungeonRun'
 import { advanceSeconds, bootGame, captureStage, setManual } from './harness'
 
 const SEED = 4242
@@ -64,7 +69,7 @@ function pathTo(
 
 type DState = {
   phase: string
-  turn: number
+  time: number
   x: number
   y: number
   picks: number
@@ -80,30 +85,101 @@ async function dState(page: Page): Promise<DState | null> {
   return page.evaluate(() => globalThis.__shearline!.dungeonState())
 }
 
-async function move(page: Page, dx: number, dy: number): Promise<void> {
-  await page.evaluate(([mx, my]) => globalThis.__shearline!.dungeonMove(mx, my), [dx, dy] as [
-    number,
-    number,
-  ])
+/** Start a frozen, hand-clocked run — the only kind a deterministic drive can vouch for. */
+async function startFrozen(
+  page: Page,
+  seed: number,
+  difficulty: 'training' | 'easy' | 'medium' | 'hard',
+): Promise<void> {
+  await page.evaluate(
+    ({ s, d }) => {
+      const h = globalThis.__shearline!
+      h.startDungeonRun(s, d)
+      h.dungeonFreeze(true)
+    },
+    { s: seed, d: difficulty },
+  )
 }
 
+/**
+ * The walker's whole brain, ONE definition for Node and browser alike: head for each
+ * waypoint axis-first; a guard in the next cell means stand and let its stride pass, else
+ * step — and every try, stepped or stood, hands the clock one player stride. Nobody dies
+ * here, so the only tactics are patience and route.
+ */
+function policyStep(
+  s: { x: number; y: number },
+  tx: number,
+  ty: number,
+): { dx: number; dy: number; nx: number; ny: number } {
+  const dx = Math.sign(tx - s.x)
+  const dy = Math.sign(ty - s.y)
+  const mx = dx !== 0 ? dx : 0
+  const my = dx !== 0 ? 0 : dy
+  return { dx: mx, dy: my, nx: s.x + mx, ny: s.y + my }
+}
 
-test('the crawl runs through the live screen: moves, turns, fog, audit', async ({ page }) => {
+/** The dry-run: the policy through the real machine in Node. True = arrived, still crawling. */
+function dryWalk(run: ReturnType<typeof startDungeon>, steps: [number, number][]): boolean {
+  for (const [tx, ty] of steps) {
+    for (let tries = 0; tries < 16; tries += 1) {
+      if (run.phase !== 'crawl') return false
+      if (run.player.x === tx && run.player.y === ty) break
+      const m = policyStep(run.player, tx, ty)
+      if (!run.enemies.some((e) => e.x === m.nx && e.y === m.ny)) movePlayer(run, m.dx, m.dy)
+      advance(run, PLAYER_STEP_S)
+    }
+  }
+  return run.phase === 'crawl'
+}
+
+/** The same walk, driven through the live hooks — a mirror, not a sibling. */
+async function browserWalk(page: Page, steps: [number, number][]): Promise<string> {
+  return page.evaluate(
+    ({ steps: sts, stride }) => {
+      const h = globalThis.__shearline!
+      for (const [tx, ty] of sts) {
+        for (let tries = 0; tries < 16; tries += 1) {
+          const s = h.dungeonState()
+          if (!s || s.phase !== 'crawl') return s?.phase ?? 'gone'
+          if (s.x === tx && s.y === ty) break
+          const dx = Math.sign(tx - s.x)
+          const dy = Math.sign(ty - s.y)
+          const mx = dx !== 0 ? dx : 0
+          const my = dx !== 0 ? 0 : dy
+          if (!s.enemies.some((e) => e.x === s.x + mx && e.y === s.y + my)) h.dungeonMove(mx, my)
+          h.dungeonAdvance(stride)
+        }
+      }
+      return 'beside'
+    },
+    { steps, stride: PLAYER_STEP_S },
+  )
+}
+
+test('the crawl runs through the live screen: moves, clock, fog, audit', async ({ page }) => {
   const watcher = await bootGame(page, { frames: 3 })
   await setManual(page, true)
-  await page.evaluate((seed) => globalThis.__shearline!.startDungeonRun(seed, 'easy'), SEED)
+  await startFrozen(page, SEED, 'easy')
 
   const start = await dState(page)
   expect(start?.phase).toBe('crawl')
   expect(start?.picks, "the one hero's kit").toBe(2)
   expect(start?.keys).toBe(0)
 
-  // A few real steps: turns advance, position changes, nothing crashes.
-  await move(page, 1, 0)
-  await move(page, 0, 1)
-  await move(page, 1, 0)
+  // A few real strides: the clock runs, position changes, nothing crashes.
+  await page.evaluate((stride) => {
+    const h = globalThis.__shearline!
+    h.dungeonMove(1, 0)
+    h.dungeonAdvance(stride)
+    h.dungeonMove(0, 1)
+    h.dungeonAdvance(stride)
+    h.dungeonMove(1, 0)
+    h.dungeonAdvance(stride)
+  }, PLAYER_STEP_S)
   const later = await dState(page)
-  expect(later?.turn ?? 0).toBeGreaterThan(0)
+  expect(later?.time ?? 0).toBeGreaterThan(0)
+  expect([later?.x, later?.y]).not.toEqual([start?.x, start?.y])
 
   // The live map passes the layout rules and photographs cleanly.
   const audit = await page.evaluate(() => globalThis.__shearline!.auditScreen())
@@ -119,27 +195,9 @@ test('a locked thing routes to the real pick screen, and the open pays back into
   page,
 }) => {
   test.slow()
-  // Guards patrol from turn zero now, so the walk to the first lock is hunted the same way
-  // the gate run is: dry-run the exact wait-or-step policy through the real machine per
-  // seed, and only drive the browser down a route already proven to kneel unseen.
-  const walkPolicy = (
-    run: ReturnType<typeof startDungeon>,
-    steps: [number, number][],
-  ): boolean => {
-    for (const [tx, ty] of steps) {
-      for (let tries = 0; tries < 16; tries += 1) {
-        if (run.phase !== 'crawl') return false
-        if (run.player.x === tx && run.player.y === ty) break
-        const dx = Math.sign(tx - run.player.x)
-        const dy = Math.sign(ty - run.player.y)
-        const nx = run.player.x + (dx !== 0 ? dx : 0)
-        const ny = run.player.y + (dx !== 0 ? 0 : dy)
-        if (run.enemies.some((e) => e.x === nx && e.y === ny)) waitTurn(run)
-        else movePlayer(run, dx !== 0 ? dx : 0, dx !== 0 ? 0 : dy)
-      }
-    }
-    return run.phase === 'crawl'
-  }
+  // Guards patrol from second zero, so the walk to the first lock is hunted per seed: dry-run
+  // the exact policy through the real machine, and only drive the browser down a route
+  // already proven to kneel unseen.
   let seed = SEED
   let path: [number, number][] | null = null
   let target: { x: number; y: number } | null = null
@@ -163,7 +221,7 @@ test('a locked thing routes to the real pick screen, and the open pays back into
     const p = pathTo(floor, [floor.start.x, floor.start.y], (x, y) => beside.has(`${x},${y}`))
     if (!p) continue
     const dry = startDungeon(((SEED + probe) >>> 0) || 1)
-    if (!walkPolicy(dry, p)) continue
+    if (!dryWalk(dry, p)) continue
     const t = lockedThings.find(
       (c) => Math.abs(c.x - dry.player.x) + Math.abs(c.y - dry.player.y) === 1,
     )
@@ -178,30 +236,19 @@ test('a locked thing routes to the real pick screen, and the open pays back into
 
   const watcher = await bootGame(page, { frames: 3 })
   await setManual(page, true)
-  await page.evaluate((s) => globalThis.__shearline!.startDungeonRun(s, 'easy'), seed)
+  await startFrozen(page, seed, 'easy')
 
+  const walked = await browserWalk(page, path as [number, number][])
+  expect(walked).toBe('beside')
   const found = await page.evaluate(
-    ({ steps, aim }) => {
+    (aim) => {
       const h = globalThis.__shearline!
-      for (const [tx, ty] of steps) {
-        for (let tries = 0; tries < 16; tries += 1) {
-          const s = h.dungeonState()
-          if (!s || s.phase !== 'crawl') return s?.picking ?? null
-          if (s.x === tx && s.y === ty) break
-          const dx = Math.sign(tx - s.x)
-          const dy = Math.sign(ty - s.y)
-          const nx = s.x + (dx !== 0 ? dx : 0)
-          const ny = s.y + (dx !== 0 ? 0 : dy)
-          if (s.enemies.some((e) => e.x === nx && e.y === ny)) h.dungeonWait()
-          else h.dungeonMove(dx !== 0 ? dx : 0, dx !== 0 ? 0 : dy)
-        }
-      }
       const s = h.dungeonState()
       if (!s) return null
       h.dungeonMove(Math.sign(aim.x - s.x), Math.sign(aim.y - s.y))
       return h.dungeonState()?.picking ?? null
     },
-    { steps: path as [number, number][], aim: target as { x: number; y: number } },
+    target as { x: number; y: number },
   )
   expect(found, 'the walk must end kneeling at the first lock').not.toBeNull()
 
@@ -216,82 +263,145 @@ test('a locked thing routes to the real pick screen, and the open pays back into
   expect(after?.phase).toBe('crawl')
   expect(await page.evaluate(() => globalThis.__shearline!.getScreen())).toBe('gauntlet')
   // Chest loot (picks, keys, the tracker) is proven by the machine suite; here the open
-  // routing home is the point.
-  // The floor turned while the hands were inside the lock — the picking clock is real.
-  expect(after?.turn ?? 0).toBeGreaterThanOrEqual(before?.turn ?? 0)
+  // routing home is the point. Frozen, the clock only moves by the strides we fed it.
+  expect(after?.time ?? 0).toBeGreaterThanOrEqual(before?.time ?? 0)
   watcher.assertClean()
 })
 
-test('the GATE ends the run: kneel at it, open it, and the score banks', async ({ page }) => {
+test('the GATE ends the run: pick through its door, kneel at it, and the score banks', async ({
+  page,
+}) => {
   test.slow()
-  // Not every seed leaves the gate reachable without another lock first, and not every
-  // reachable walk SURVIVES the bestiary between here and there. So the hunt dry-runs the
-  // exact walk through the real machine, in Node, and only drives the browser down a route
-  // a body has already been proven to live through — determinism making the promise cheap.
-  // The walker's whole brain, mirrored EXACTLY in the browser drive below: wait out a guard
-  // standing in the next cell, else step toward the waypoint — nobody dies here, so the
-  // only tactics are patience and route. Same state machine, same policy, same seed — the dry-run's
-  // survival IS the browser's.
-  const dryRun = (s0: number, steps: [number, number][], gate: { x: number; y: number }): boolean => {
-    const run = startDungeon((s0 >>> 0) || 1)
-    for (const [tx, ty] of steps) {
-      for (let tries = 0; tries < 14; tries += 1) {
-        if (run.phase !== 'crawl') return false
-        if (run.player.x === tx && run.player.y === ty) break
-        const dx = Math.sign(tx - run.player.x)
-        const dy = Math.sign(ty - run.player.y)
-        const nx = run.player.x + (dx !== 0 ? dx : 0)
-        const ny = run.player.y + (dx !== 0 ? 0 : dy)
-        if (run.enemies.some((e) => e.x === nx && e.y === ny)) waitTurn(run)
-        else movePlayer(run, dx !== 0 ? dx : 0, dx !== 0 ? 0 : dy)
+  // The exit is GUARANTEED behind at least one locked door now (D-180) — a door-free walk
+  // to the gate no longer exists on any seed, so the plan is legged: walk to each barring
+  // door on the route, kneel, solve, walk on; the gate last. The dry-run walks the whole
+  // plan through the real machine — doors opened with the machine's own pickOpened, which
+  // is exactly what the browser's solver open does — and the browser only walks proven
+  // ground. Survival still does the winnowing: a leg that meets a cone fails the probe.
+  const planLegs = (
+    f: DungeonFloor,
+  ): { legs: [number, number][][]; doors: { x: number; y: number }[] } | null => {
+    // Route with locked doors PASSABLE — the legs split at each door crossed.
+    const chestCells = new Set(f.chests.map((c) => `${c.x},${c.y}`))
+    chestCells.add(`${f.gate.x},${f.gate.y}`)
+    const doorCells = new Map(f.doors.map((d) => [`${d.x},${d.y}`, { x: d.x, y: d.y }]))
+    const prev = new Map<string, string>()
+    const from: [number, number] = [f.start.x, f.start.y]
+    const queue: [number, number][] = [from]
+    const seen = new Set([`${from[0]},${from[1]}`])
+    let goalKey: string | null = null
+    while (queue.length > 0 && !goalKey) {
+      const [x, y] = queue.shift() as [number, number]
+      if (Math.abs(x - f.gate.x) + Math.abs(y - f.gate.y) === 1) {
+        goalKey = `${x},${y}`
+        break
+      }
+      for (const [dx, dy] of [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ] as const) {
+        const k = `${x + dx},${y + dy}`
+        if (seen.has(k) || !(f.walk[y + dy]?.[x + dx] ?? false) || chestCells.has(k)) continue
+        seen.add(k)
+        prev.set(k, `${x},${y}`)
+        queue.push([x + dx, y + dy])
       }
     }
-    if (run.phase !== 'crawl') return false
+    if (!goalKey) return null
+    const cells: [number, number][] = []
+    let k = goalKey
+    while (k !== `${from[0]},${from[1]}`) {
+      const [px, py] = k.split(',').map(Number) as [number, number]
+      cells.unshift([px, py])
+      k = prev.get(k) as string
+    }
+    const legs: [number, number][][] = []
+    const doors: { x: number; y: number }[] = []
+    let leg: [number, number][] = []
+    for (const cell of cells) {
+      const dc = doorCells.get(`${cell[0]},${cell[1]}`)
+      if (dc) {
+        legs.push(leg)
+        doors.push(dc)
+        // The next leg begins by stepping onto the now-open door cell itself.
+        leg = [cell]
+      } else {
+        leg.push(cell)
+      }
+    }
+    legs.push(leg)
+    return { legs, doors }
+  }
+  const dryPlan = (
+    s0: number,
+    plan: { legs: [number, number][][]; doors: { x: number; y: number }[] },
+    gate: { x: number; y: number },
+  ): boolean => {
+    const run = startDungeon((s0 >>> 0) || 1)
+    for (let i = 0; i < plan.legs.length; i += 1) {
+      if (!dryWalk(run, plan.legs[i] as [number, number][])) return false
+      const door = plan.doors[i]
+      if (door) {
+        movePlayer(run, Math.sign(door.x - run.player.x), Math.sign(door.y - run.player.y))
+        const ph: string = run.phase
+        if (ph !== 'picking' || run.picking?.kind !== 'door') return false
+        // The machine's own open — the browser's solver lands on this exact call.
+        pickOpened(run)
+        advance(run, PLAYER_STEP_S)
+        if ((run.phase as string) !== 'crawl') return false
+      }
+    }
     movePlayer(run, Math.sign(gate.x - run.player.x), Math.sign(gate.y - run.player.y))
-    // Re-read through a widened type: movePlayer mutates phase behind a call, and the
-    // narrowing from the guard above would otherwise call this comparison unreachable.
     const ph: string = run.phase
     return ph === 'picking' && run.picking?.kind === 'gate'
   }
   let seed = SEED
-  let path: [number, number][] | null = null
+  let plan: { legs: [number, number][][]; doors: { x: number; y: number }[] } | null = null
   let floor = generateFloor(seed)
-  for (let probe = 0; probe < 200; probe += 1) {
+  for (let probe = 0; probe < 400; probe += 1) {
     floor = generateFloor(SEED + probe)
-    const g = floor.gate
-    const p = pathTo(floor, [floor.start.x, floor.start.y], (x, y) =>
-      Math.abs(x - g.x) + Math.abs(y - g.y) === 1,
-    )
-    if (p && dryRun(SEED + probe, p, g)) {
+    const p = planLegs(floor)
+    if (p && dryPlan(SEED + probe, p, floor.gate)) {
       seed = SEED + probe
-      path = p
+      plan = p
       break
     }
   }
-  expect(path, 'some nearby seed must offer a survivable walk to the gate').not.toBeNull()
+  expect(plan, 'some nearby seed must offer a survivable, pickable road to the gate').not.toBeNull()
+  const legs = (plan as { legs: [number, number][][] }).legs
+  const doors = (plan as { doors: { x: number; y: number }[] }).doors
 
   const watcher = await bootGame(page, { frames: 3 })
   await setManual(page, true)
-  await page.evaluate((s) => globalThis.__shearline!.startDungeonRun(s, 'medium'), seed)
+  await startFrozen(page, seed, 'medium')
 
-  const walked = await page.evaluate((steps) => {
-    const h = globalThis.__shearline!
-    for (const [tx, ty] of steps) {
-      for (let tries = 0; tries < 14; tries += 1) {
+  for (let i = 0; i < legs.length; i += 1) {
+    const walked = await browserWalk(page, legs[i] as [number, number][])
+    expect(walked, `leg ${i} must end still crawling`).toBe('beside')
+    const door = doors[i]
+    if (!door) continue
+    const kneel = await page.evaluate(
+      (aim) => {
+        const h = globalThis.__shearline!
         const s = h.dungeonState()
-        if (!s || s.phase !== 'crawl') return s?.phase ?? 'gone'
-        if (s.x === tx && s.y === ty) break
-        const dx = Math.sign(tx - s.x)
-        const dy = Math.sign(ty - s.y)
-        const nx = s.x + (dx !== 0 ? dx : 0)
-        const ny = s.y + (dx !== 0 ? 0 : dy)
-        if (s.enemies.some((e) => e.x === nx && e.y === ny)) h.dungeonWait()
-        else h.dungeonMove(dx !== 0 ? dx : 0, dx !== 0 ? 0 : dy)
-      }
-    }
-    return 'beside'
-  }, path as [number, number][])
-  expect(walked).toBe('beside')
+        if (!s) return 'gone'
+        h.dungeonMove(Math.sign(aim.x - s.x), Math.sign(aim.y - s.y))
+        return h.dungeonState()?.picking?.kind ?? 'no-kneel'
+      },
+      door,
+    )
+    expect(kneel, `leg ${i} must end kneeling at its door`).toBe('door')
+    expect(await page.evaluate(() => globalThis.__shearline!.getScreen())).toBe('pick')
+    const doorOpened = await page.evaluate(() => globalThis.__shearline!.solveCurrentLock())
+    expect(doorOpened, `door ${i} must be openable in the live game`).toBe(true)
+    await advanceSeconds(page, 0.5)
+    expect(await page.evaluate(() => globalThis.__shearline!.getScreen())).toBe('gauntlet')
+    // Mirror the dry-run's post-open stride so the clocks stay in lockstep.
+    await page.evaluate((stride) => globalThis.__shearline!.dungeonAdvance(stride), PLAYER_STEP_S)
+  }
+
   // The gate stands lit one tile away — the canonical photograph of the whole mode.
   await advanceSeconds(page, 0.3)
   await captureStage(page, 'dungeon-gate')
