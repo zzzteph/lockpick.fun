@@ -161,7 +161,7 @@ describe('plug rotation — SIMULATION.md §4', () => {
     expect(ticks * DT).toBeGreaterThan(0.3)
   })
 
-  it('a fully false-set lock swings to 55-70% of θ_open and never opens', () => {
+  it('a fully false-set lock swings to a catch — 18-32% of θ_open — and never opens', () => {
     const fiveSpool = makeLock({
       slug: 'five-spool',
       bitting: [3.0, 3.1, 2.9, 3.2, 3.0],
@@ -186,9 +186,12 @@ describe('plug rotation — SIMULATION.md §4', () => {
     holdFor(s, tensionOnly(0.35), 1.0)
 
     expect(s.chambers.every((c) => c.state === 'FALSE_SET')).toBe(true)
+    // Was 55-70%, the spec's own band (D-009) — re-pinned by D-202 at the owner's word: "the
+    // cylinder turned and I have some feeling that it should be stuck in the thin part". A
+    // false set is a ledge wedging into a waist, and the give is now waist-sized.
     const fraction = s.theta / THETA_OPEN
-    expect(fraction).toBeGreaterThan(0.55)
-    expect(fraction).toBeLessThan(0.7)
+    expect(fraction).toBeGreaterThan(0.18)
+    expect(fraction).toBeLessThan(0.32)
     expect(s.opened).toBe(false)
 
     // It stays that way — that is the lie. Crank the tension and it still will not open.

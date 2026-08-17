@@ -66,9 +66,11 @@ describe('a spool at its waist', () => {
     holdAt(s, 0, waist, 0.3, 1.5)
 
     expect(c.state).toBe('FALSE_SET')
-    // §11: "produces θ > δ × 3". It produces vastly more than that.
+    // §11: "produces θ > δ × 3". It produces vastly more than that — a waist-sized catch
+    // since D-202, not the old open-sized sweep.
     expect(s.theta).toBeGreaterThan(c.delta * 3)
-    expect(s.theta / THETA_OPEN).toBeGreaterThan(0.5)
+    expect(s.theta / THETA_OPEN).toBeGreaterThan(0.18)
+    expect(s.theta / THETA_OPEN).toBeLessThan(0.32)
     expect(countEvents(drainEvents(s), 'FALSE_SET_ENTERED')).toBeGreaterThan(0)
   })
 
@@ -272,7 +274,7 @@ describe('a mushroom', () => {
 })
 
 describe('the false set is the whole game — SIMULATION.md §4', () => {
-  it('a fully false-set five-spool lock sits at 55-70% of θ_open and holds', () => {
+  it('a fully false-set five-spool lock sits at 18-32% of θ_open and holds', () => {
     const s = createSimState(FIVE_SPOOL, 11, PERFECT_CONFIG)
     holdFor(s, tensionOnly(0.35), 0.5)
 
@@ -289,14 +291,15 @@ describe('the false set is the whole game — SIMULATION.md §4', () => {
     holdFor(s, tensionOnly(0.35), 1.0)
 
     expect(s.chambers.every((c) => c.state === 'FALSE_SET')).toBe(true)
+    // Waist-sized since D-202 — the old 55-70% band read as the lock opening on the last pin.
     const fraction = s.theta / THETA_OPEN
-    expect(fraction).toBeGreaterThan(0.55)
-    expect(fraction).toBeLessThan(0.7)
+    expect(fraction).toBeGreaterThan(0.18)
+    expect(fraction).toBeLessThan(0.32)
 
     // It is stable — you can park four spools and go and find the fifth.
     holdFor(s, tensionOnly(0.35), 5.0)
     expect(s.chambers.every((c) => c.state === 'FALSE_SET')).toBe(true)
-    expect(s.theta / THETA_OPEN).toBeGreaterThan(0.55)
+    expect(s.theta / THETA_OPEN).toBeGreaterThan(0.18)
   })
 
   it('never opens however hard you turn it', () => {
@@ -323,7 +326,7 @@ describe('the false set is the whole game — SIMULATION.md §4', () => {
     holdFor(s, tensionOnly(0.3), 0.4)
     holdAt(s, 0, falseSetLifts(c)[0] ?? 0, 0.3, 1.5)
     const swung = s.theta
-    expect(swung / THETA_OPEN).toBeGreaterThan(0.5)
+    expect(swung / THETA_OPEN).toBeGreaterThan(0.18)
 
     // Push past the waist: the plug counter-rotates back to almost nothing.
     holdAt(s, 0, c.setLift - 0.05, 0.3, 1.5)
@@ -522,5 +525,62 @@ describe('mushroom against t-pin', () => {
     // The bevel is the shape *and* the force, so this is the same number the test above measures.
     expect(PROFILES.mushroom.bands.find((b) => b.reduced)?.taper).toBeGreaterThan(0.5)
     expect(PROFILES['t-pin'].bands.find((b) => b.reduced)?.taper).toBe(0)
+  })
+})
+
+describe('the tension economy — DECISIONS D-203', () => {
+  /** Set pins in binding order at a safe cruise until `n` stand. */
+  function stage(s: SimState, n: number, tension = 0.55): void {
+    for (let round = 0; round < 24; round += 1) {
+      if (s.chambers.filter((c) => c.state === 'SET').length >= n) return
+      const b = s.bindingChamber
+      const c = b >= 0 ? s.chambers[b] : undefined
+      if (!c) {
+        holdFor(s, tensionOnly(tension), 0.2)
+        continue
+      }
+      holdAt(s, b, c.setLift + 0.02, tension, 0.6)
+    }
+  }
+
+  it('camping light while working sheds sets; the default step holds them', () => {
+    // The report this answers: "you in general can set tension 3 and that's all." A two-second
+    // full-contact lean on the binding pin — the ordinary posture of working a lock — must
+    // bleed sets at the light steps and keep them at the default.
+    for (const [tension, keeps] of [
+      [0.304, false], // step 3 — the old forever-setting
+      [0.397, false], // step 4
+      [0.489, true], // step 5, the default: the working hold
+    ] as const) {
+      const s = createSimState(FIVE_PIN, 7, PERFECT_CONFIG)
+      stage(s, 3)
+      expect(s.chambers.filter((c) => c.state === 'SET').length).toBeGreaterThanOrEqual(3)
+      const b = s.bindingChamber
+      const c = b >= 0 ? s.chambers[b] : undefined
+      if (!c) throw new Error('nothing binding after staging')
+      holdAt(s, b, c.maxLift, tension, 2)
+      const kept = s.chambers.filter((ch) => ch.state === 'SET').length
+      if (keeps) expect(kept, `T=${tension}`).toBeGreaterThanOrEqual(3)
+      else expect(kept, `T=${tension}`).toBeLessThan(3)
+    }
+  })
+
+  it('the spool dip is exempt: easing to climb a lie costs no set pins', () => {
+    // D-098's exemption, now load-bearing: the chamber being climbed is FALSE_SET, and a
+    // false-set chamber never charges a disturbance — so the taught dip-and-climb survives
+    // the harsher economy untouched.
+    const s = createSimState(SPOOL_LOCK, 4, PERFECT_CONFIG)
+    stage(s, 2)
+    const spool = s.chambers.find((c) => c.profile.bands.some((band) => band.reduced))
+    if (!spool) throw new Error('no spool in the fixture')
+    // Lift at the default until the lie fires and walls, then dip to step 3 and climb.
+    holdAt(s, spool.index, spool.setLift + 0.02, 0.489, 1.2)
+    expect(spool.hasFalseSet).toBe(true)
+    holdAt(s, spool.index, spool.setLift + 0.02, 0.304, 3)
+    expect(spool.state).toBe('SET')
+    expect(
+      s.chambers.filter((c) => c.state === 'SET').length,
+      'the standards must survive the dip',
+    ).toBe(s.chambers.length)
   })
 })

@@ -384,6 +384,10 @@ export function solveLock(
 ): SolveResult {
   const maxSeconds = opts.maxSeconds ?? 90
   const tools = config.tools
+  // Still 0.42 under D-203, and deliberately: raising the cruise to the player's new home
+  // step (0.489) froze every wheel pack — a heavier pull is exactly what a caught wheel
+  // refuses to turn under — and the economy's long disturbance grace means the solver's
+  // brief sub-threshold leans never live long enough to shed what it has set.
   const startTension = clamp(opts.tension ?? 0.42, tools.tensionMin, tools.tensionMax)
   const minTension = clamp(
     opts.minTension ?? Math.max(T_MIN_HOLD + 0.03, tools.tensionMin),

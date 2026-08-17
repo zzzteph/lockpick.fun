@@ -88,6 +88,11 @@ async function openIt(page: Page, startTension = 0.45, rounds = 90): Promise<boo
     } else {
       stuckOn = c?.index ?? -1
       stuckFor = 0
+      // Back to cruise on every new target — D-203. The dip that ground through the last lie
+      // must not become the working tension: below the disturbed bar (0.432), a sustained
+      // lean on the next pin walks the banked sets off their ledges. Dip for the lie, come
+      // back up for the work — the same sentence the pressure lesson teaches.
+      tension = startTension
     }
     if (!c) {
       await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: 0.6 })
@@ -194,7 +199,10 @@ test('a whole playthrough: new save, tutorial, one lock a tier, everything banke
         ? 1
         : Math.min(locks.length, opensRequiredFor(tier + 1) || locks.length)
     for (const def of locks.slice(0, Math.max(1, need))) {
-      await play(page, def.id, seed, tier >= 3 ? 0.4 : 0.45)
+      // 0.45 for every tier since D-203: the old tier-3 cruise of 0.4 sits under the
+      // disturbed hold bar (0.432), and a hand living there sheds what it sets. The dips
+      // the deep tiers need still happen — openIt lowers on a stall and recovers per pin.
+      await play(page, def.id, seed, 0.45)
       played += 1
       seed += 1
     }

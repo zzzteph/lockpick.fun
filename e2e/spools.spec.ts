@@ -71,10 +71,14 @@ test('a spool produces a visible false set and pushes the pick back', async ({ p
   expect(spools.length).toBe(2)
   expect(spools.every((c) => c.state === 'FALSE_SET')).toBe(true)
 
-  // Visible: the plug has swung a long way past any single chamber's delta.
+  // Visible: the plug has swung clearly past any single chamber's delta — a catch, not an
+  // open-sized sweep, since D-202 cut the pin give to waist size.
   const maxDelta = Math.max(...state.chambers.map((c) => c.delta))
-  expect(state.theta).toBeGreaterThan(maxDelta * 10)
-  expect(state.theta).toBeGreaterThan(0.25)
+  expect(state.theta).toBeGreaterThan(maxDelta * 5)
+  expect(state.theta).toBeGreaterThan(0.1)
+  // Bounded above as well as below: the old open-sized sweep (61% of θ_open) must FAIL here,
+  // or a stale dev server quietly re-serves the pre-D-202 physics and this test still smiles.
+  expect(state.theta / 0.52).toBeLessThan(0.45)
 
   // The pick is pushed back: park it on a false-set spool and it ends up below the target.
   const victim = spools[0]
@@ -106,7 +110,8 @@ test('@screenshot phase-05 a full false set', async ({ page }) => {
 
   const state = await parkEveryGroove(page, 0.35)
   expect(state.chambers.some((c) => c.state === 'FALSE_SET')).toBe(true)
-  expect(state.theta / 0.52).toBeGreaterThan(0.5)
+  expect(state.theta / 0.52).toBeGreaterThan(0.18)
+  expect(state.theta / 0.52).toBeLessThan(0.45)
 
   // Put the pick on a false-set spool so the pushback is in shot too.
   const spool = state.chambers.find((c) => c.state === 'FALSE_SET')
@@ -220,9 +225,17 @@ test('heavy tension walls a spool that a light hand walks through', async ({ pag
   // reach, so give it the Medium Hook and take the tool noise out.
   await setTools(page, { tensionMin: 0.05, tensionPrecision: 0, liftJitter: 0, reach: 5 })
 
-  async function attempt(tension: number): Promise<StateSnapshot> {
+  /**
+   * The hand plays the taught style since D-203: cruise at the default for the honest pins,
+   * and take `grooveTension` only onto a chamber that is lying (or is a spool about to). The
+   * old version played the whole lock at the probe tension, which the economy now punishes —
+   * cruising at 0.3 walks your own sets off their ledges, which is the point of D-203, not a
+   * failure of the spool physics this test exists to pin.
+   */
+  async function attempt(grooveTension: number): Promise<StateSnapshot> {
+    const CRUISE = 0.489
     await loadLock(page, DEADBOLT, 3)
-    await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: tension })
+    await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: CRUISE })
     await stepTicks(page, 60)
     for (let round = 0; round < 40; round += 1) {
       const state = await getState(page)
@@ -234,7 +247,27 @@ test('heavy tension walls a spool that a light hand walks through', async ({ pag
         await stepTicks(page, 60)
         continue
       }
-      await scriptPin(page, target.index, target.setLift + target.captureWindow * 0.5, tension, 240)
+      const lying = target.state === 'FALSE_SET' || target.falseSetLifts.length > 0
+      // In slices with an early exit, not one fixed shove: a hand that keeps leaning on a pin
+      // for two seconds AFTER it clicks is the exact camping D-203 charges for, and the old
+      // fixed 240-tick push did precisely that once the spool captured.
+      for (let slice = 0; slice < 8; slice += 1) {
+        await scriptPin(
+          page,
+          target.index,
+          target.setLift + target.captureWindow * 0.5,
+          lying ? grooveTension : CRUISE,
+          30,
+        )
+        const now = await getState(page)
+        const worked = now.chambers[target.index]
+        if (now.opened || worked?.state === 'SET' || worked?.state === 'OVERSET') break
+      }
+      // A breath at cruise between rounds — the other half of the taught style. Back-to-back
+      // dips with no recovery are the one thing the disturbance clock is built to catch, and
+      // this lock is three spools in a row.
+      await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: CRUISE })
+      await stepTicks(page, 30)
     }
     return getState(page)
   }

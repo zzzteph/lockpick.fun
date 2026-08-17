@@ -367,9 +367,11 @@ export const LESSONS: readonly Lesson[] = [
         line: 'Keep the pressure up while you work it — too light and the pin you just set drops.',
         done: allSet,
         // Under 90 characters, which the lesson test enforces: a line has to *be* a line.
+        // "5 holds while you work" replaced "3 holds what you have caught" with D-203: at 3
+        // the sets only survive while your hand is still, and this hint fires mid-work.
         hint: {
-          kb: '1 to 0 are the pressure steps. 3 holds what you have caught; 1 and 2 will not.',
-          deck: 'L1 and R1 step the pressure. 3 holds what you have caught; 1 and 2 will not.',
+          kb: '1 to 0 are the pressure steps. 5 holds while you work; light is for the lies.',
+          deck: 'L1 and R1 step the pressure. 5 holds while you work; light is for the lies.',
         },
         hintAfter: 7,
       },
@@ -478,13 +480,15 @@ export const LESSONS: readonly Lesson[] = [
         hintAfter: 8,
       },
       {
+        // The copy moved with D-203: "set pins hold at 3" was true when light was free, and
+        // now holds only while the hand is still. The step teaches the dip as a VISIT.
         id: 'feather',
         line: {
-          kb: 'Ease back to 3. Set pins hold at 3 — and a fighting pin loosens its grip.',
-          deck: 'Ease back to 3 with L1. Set pins hold at 3 — and a fighting pin loosens its grip.',
+          kb: 'Ease back to 3 — the fighting pin frees up. Dip and climb, then come back to 5.',
+          deck: 'Ease to 3 with L1 — the fighting pin frees up. Dip and climb, then back to 5.',
         },
         done: (s) => anySet(s) && s.tension >= T_MIN_HOLD && s.tension <= 0.42,
-        hint: '1 and 2 drop everything; 3 is the lightest hold. Feathering lives between 3 and 5.',
+        hint: '1 and 2 drop everything. Camp light while you work and your set pins walk off.',
         hintAfter: 8,
       },
       {

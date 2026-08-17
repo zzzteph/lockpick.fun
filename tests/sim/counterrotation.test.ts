@@ -90,16 +90,17 @@ describe('a set pin ratchets the plug', () => {
 describe('the pin that is being lifted is the pin that is lost', () => {
   it('lifting a set driver clear lets the plug back under it, and it drops', () => {
     /**
-     * Step 3, where the rest of this file uses step 2 — and the difference is the point.
+     * The default step, where the rest of this file uses step 2 — and the difference is the point.
      *
      * This test needs a pin that is *still set* five seconds later so it can lift that one clear and
-     * watch the plug come back under it. At 0.212 it no longer has one: leaning on the spool that
-     * hard shakes every other captured driver off its ledge within the grace period (D-098), so the
-     * victim is already gone before the test gets to it and the counter-rotation path never runs.
-     * 0.3044 is the first pressure that holds set pins while you work another chamber, which makes
-     * it the tension at which this claim can be tested on its own.
+     * watch the plug come back under it. Leaning that long on another chamber at a light step
+     * shakes every other captured driver off its ledge within the grace period (D-098; the bar
+     * moved from step 2 to step 4 with D-203), so the victim would already be gone before the
+     * test gets to it and the counter-rotation path never runs. 0.489 — the default step — is
+     * the first pressure that holds set pins while you work another chamber, which makes it
+     * the tension at which this claim can be tested on its own.
      */
-    const T = 0.3044
+    const T = 0.489
     const s = createSimState(SPOOL_LOCK, 4242, PERFECT_CONFIG)
     pickAndSettle(s, T)
     const spool = s.chambers[1]

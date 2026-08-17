@@ -35,7 +35,9 @@ import {
   LEDGE_FULL_ENGAGE,
   LEDGE_RELEASE_MARGIN,
   ENGAGE_RAMP,
+  DISTURB_SLIP_GRACE,
   FALSE_SET_GAIN,
+  PIN_FALSE_SET_GAIN,
   FEATHER_WINDOW,
   FORCE_FULL_MM,
   FREE_LIFT_MULTIPLIER,
@@ -381,6 +383,16 @@ export function holdThreshold(c: Chamber, theta: number, disturbance = 0): numbe
   return base * (1 + (DISTURB_FACTOR - 1) * clamp01(disturbance))
 }
 
+/**
+ * Radians of give a groove at the shear line lends the plug. Discs keep the spec's original
+ * throw — the gate's drag travel is a silenced wheel's only tell (D-197) — while pins catch
+ * rather than sweep (D-202): a last-pin spool used to swing 61-89% of the way to open, which
+ * read as the lock turning, not as a ledge wedging into a waist.
+ */
+function falseSetGive(c: Chamber): number {
+  return grooveDepthAt(c) * (c.kind === 'disc' ? FALSE_SET_GAIN : PIN_FALSE_SET_GAIN)
+}
+
 /** §4 — how far the plug may rotate before this chamber stops it. */
 function constraintFor(c: Chamber): number {
   switch (c.state) {
@@ -390,7 +402,7 @@ function constraintFor(c: Chamber): number {
       return c.delta * OVERSET_THETA_FACTOR
     default:
       if (c.geometry === 'GROOVE') {
-        return c.delta + grooveDepthAt(c) * FALSE_SET_GAIN
+        return c.delta + falseSetGive(c)
       }
       return c.delta
   }
@@ -694,6 +706,24 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
    */
   const heldByWrench = (c: Chamber): boolean =>
     c.state === 'SET' || c.state === 'OVERSET' || c.state === 'FALSE_SET'
+  /**
+   * The grace a held chamber gets before a slip counts, by cause — D-203. Under the chamber's
+   * OWN bar (the wrench simply too light) the quarter-second grace applies as it always has.
+   * Over that bar but under the disturbed one — safe if your hand were still, slipping only
+   * because you are leaning on another pin — the grace is `DISTURB_SLIP_GRACE`: long enough
+   * that a transit shove or a probe touch never sheds banked work (the D-051 fairness the
+   * shaft suite asserts), and far shorter than a hand camped at light pressure to hunt.
+   *
+   * One function, used by the flag pass and the harvest pass alike, or a chamber is flagged
+   * by one rule and harvested by the other — which is how you get a pin dropping a tick after
+   * it was declared safe.
+   */
+  const worked = pick >= 0 ? chambers[pick] : undefined
+  const slipCutoff = (c: Chamber): number => {
+    if (T < T_MIN_HOLD) return grace
+    const own = c.state === 'SET' ? holdThreshold(c, state.theta, 0) : T_MIN_HOLD
+    return Math.max(grace, T < own ? SET_SLIP_GRACE : DISTURB_SLIP_GRACE)
+  }
   for (const c of chambers) {
     if (!heldByWrench(c)) {
       c.belowHoldFor = 0
@@ -722,9 +752,16 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
      * binding or free and will not move. `pickContact` measures how far past the pin the tip is
      * being asked to go, so the disturbance is exactly as big as the push that causes it.
      */
-    const worked = pick >= 0 ? chambers[pick] : undefined
+    /**
+     * Discs are exempt from the shake as well as from charging it (D-203). A seated wheel is
+     * captured by the fence spring in its gate — jiggling the next wheel does not lift it
+     * out — where a set pin's driver rests on a sliver of plug ledge that a shaken hand can
+     * genuinely walk off. The disturbance models the hand, and the hand cannot reach a gate.
+     */
     const shaken =
-      worked && worked.index !== c.index && worked.state !== 'FALSE_SET' ? state.pickContact : 0
+      worked && worked.index !== c.index && worked.state !== 'FALSE_SET' && c.kind !== 'disc'
+        ? state.pickContact
+        : 0
     const threshold = c.state === 'SET' ? holdThreshold(c, state.theta, shaken) : T_MIN_HOLD
     /**
      * A light hand gets its own, longer, forgiveness — and needs it (D-095).
@@ -741,19 +778,15 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
      * and you have a moment to notice and correct, which is what makes this a *technique* rather
      * than a trapdoor.
      */
-    const slipGrace = T >= T_MIN_HOLD ? Math.max(grace, SET_SLIP_GRACE) : grace
     if (T < threshold) {
       c.belowHoldFor += dt
-      if (c.belowHoldFor > slipGrace) anySlipped = true
+      if (c.belowHoldFor > slipCutoff(c)) anySlipped = true
     } else {
       c.belowHoldFor = 0
     }
   }
   if (state.engaged && anySlipped) {
-    // The same two graces as above, or a light hand would be flagged by one rule and harvested by
-    // the other — which is how you get a pin dropping a tick after it was declared safe.
-    const cutoff = T >= T_MIN_HOLD ? Math.max(grace, SET_SLIP_GRACE) : grace
-    const slipped = chambers.filter((c) => heldByWrench(c) && c.belowHoldFor > cutoff)
+    const slipped = chambers.filter((c) => heldByWrench(c) && c.belowHoldFor > slipCutoff(c))
     for (const c of slipped) {
       c.state = 'FREE'
       c.captureTimer = 0
@@ -1048,7 +1081,7 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
      * three thousandths of a radian, so a cap keyed to it would never release. See DECISIONS D-075.
      */
     if (c.state === 'FALSE_SET' && c.index === pick) {
-      const span = Math.max(1e-6, grooveDepthAt(c) * FALSE_SET_GAIN)
+      const span = Math.max(1e-6, falseSetGive(c))
       const entered = clamp01((state.theta - c.delta) / span)
       const ceilingNow =
         grooveCeilingLift(c) + (c.maxLift - grooveCeilingLift(c)) * (1 - entered)

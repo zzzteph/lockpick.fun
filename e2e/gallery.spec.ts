@@ -112,7 +112,10 @@ test('@screenshot phase-14 the open, in full', async ({ page }) => {
   await grant(page)
   await loadLock(page, 16, 5) // Halberd Deadbolt — five chambers, three spools.
 
-  await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: 0.4 })
+  // The taught hand since D-203: cruise at the default (0.4 sat under the disturbed hold bar,
+  // and a fixed two-second lean after each capture walked the earlier sets off their ledges),
+  // dip only onto a lying chamber, and stop pushing the moment a pin clicks.
+  await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: 0.489 })
   await stepTicks(page, 60)
   for (let i = 0; i < 20; i += 1) {
     const s = await getState(page)
@@ -124,13 +127,21 @@ test('@screenshot phase-14 the open, in full', async ({ page }) => {
       await stepTicks(page, 120)
       continue
     }
-    await setInput(page, {
-      chamber: c.index,
-      liftTarget: c.setLift + c.captureWindow * 0.5,
-      tensionHeld: true,
-      tensionLevel: 0.4,
-    })
-    await stepTicks(page, 240)
+    const lying = c.state === 'FALSE_SET' || c.falseSetLifts.length > 0
+    for (let slice = 0; slice < 8; slice += 1) {
+      await setInput(page, {
+        chamber: c.index,
+        liftTarget: c.setLift + c.captureWindow * 0.5,
+        tensionHeld: true,
+        tensionLevel: lying ? 0.35 : 0.489,
+      })
+      await stepTicks(page, 30)
+      const now = await getState(page)
+      const worked = now.chambers[c.index]
+      if (now.opened || worked?.state === 'SET' || worked?.state === 'OVERSET') break
+    }
+    await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: 0.489 })
+    await stepTicks(page, 30)
   }
   expect((await getState(page)).opened, 'the shot must be of an open lock').toBe(true)
   await advanceSeconds(page, 1.45)

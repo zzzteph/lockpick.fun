@@ -38,10 +38,27 @@ export const OPEN_THETA_FRACTION = 0.98
 export const OVERSET_THETA_FACTOR = 0.5
 /**
  * Radians of extra plug rotation per unit of groove depth (depth is a 0..1 fraction of the
- * pin radius). Tuned so a fully spool-false-set lock sits at ~61% of `THETA_OPEN`, inside
- * the 55-70% band the spec asks for. See DECISIONS D-009.
+ * pin radius) — for **disc chambers only** since D-202: the wheel packs and disc gates keep
+ * the spec's original throw, because since D-197 silenced their clicks the gate's drag
+ * travel is the only tell a wheel has left. Originally tuned so a fully spool-false-set
+ * lock sat at ~61% of `THETA_OPEN`, inside the 55-70% band the spec asked for (D-009).
  */
 export const FALSE_SET_GAIN = 1.05
+/**
+ * The pin (and wafer) chambers' gain, cut from the spec's 1.05 — DECISIONS D-202.
+ *
+ * The spec's band made a *last-pin* false set swing the plug 61% of the way to open (a deep
+ * spool: 89%), because with every other chamber set nothing else caps θ — and on screen that
+ * is not a catch, it is the lock opening. Reported from play as *"when you start turning the
+ * last spool pin, the cylinder turned and I have some feeling that it should be stuck in the
+ * thin part, but it does not."* The owner's sentence is the correct physics: the ledge drops
+ * into the waist and wedges. At 0.40 the swings read as catches and keep their family order —
+ * spool ~23% of θ_open, deep spool ~34% (still the long lie, D-079), mushroom ~22%, slim
+ * ~18%, serrated ~9% (tooth-sized clicks). Mid-pick false sets are unchanged in kind: other
+ * unset chambers were already capping those at their deltas. The push-through wall does not
+ * move — it is a force race (D-010/D-053), not a function of this throw.
+ */
+export const PIN_FALSE_SET_GAIN = 0.4
 /** Stiff spring: θ chases its target. */
 export const PLUG_TAKEUP_RATE = 24.0
 /**
@@ -181,6 +198,15 @@ export const T_SET_HOLD = 0.18
  * where the feather lives. See DECISIONS D-095.
  */
 export const SET_SLIP_GRACE = 0.25
+/**
+ * How long a set pin tolerates being *disturbed* — under its disturbed threshold while still
+ * over its own — before it walks off, in seconds. D-203's time shape: the economy punishes a
+ * hand that CAMPS at light pressure, not one that passes through. A transit shove across a
+ * long lock runs ~1.2s of contact (the shaft suite's crossing, which must stay free — D-051:
+ * travel never costs banked work) and a probe touch far less; a hand hunting pins while
+ * parked at step 3 leans well past this on every chamber it works.
+ */
+export const DISTURB_SLIP_GRACE = 1.5
 
 /**
  * How much more tension a captured driver needs while you are **leaning on another chamber**.
@@ -195,17 +221,23 @@ export const SET_SLIP_GRACE = 0.25
  * why a real picker's hand is *steady* rather than merely light, and why you feel a set pin go the
  * moment you lean on its neighbour.
  *
- * 1.4 places it deliberately: with `T_SET_HOLD` at 0.18 a disturbed fresh pin needs 0.252, so
- * **step 2 (0.212) is no longer free while you are working and step 3 (0.304) is**. Below 1.18 it
- * would change nothing; above 1.69 it would make step 3 unusable too, which is the mistake the
- * first pass at D-095 made.
+ * 1.4 placed it at D-098's target: step 2 risky while working, step 3 free. The owner has now
+ * judged that floor by play — *"the problem is that you in general can set tension 3 and
+ * that's all"* — and the probe agreed: at 1.4, a two-second full-contact lean on a binding pin
+ * sheds nothing from step 3 up, so the dial was a slider you set once. At 2.4 a disturbed
+ * fresh pin needs 0.432: **steps 3 and 4 (0.304, 0.397) bleed sets under sustained work and
+ * step 5 (0.489) — the default — is the working hold**. D-098's own note warned that going
+ * above 1.69 "would make step 3 unusable", and that is now the point rather than the mistake:
+ * light pressure is for riding through a lie, not for living at. See DECISIONS D-203.
  *
  * Applied in proportion to how hard the tip is actually pushing, and never for a chamber that is
  * false set — a false-set pin's shove at the plug is already carried by `COUNTER_ROTATION_FORCE`
- * and `PLUG_PUSHBACK`, and charging for it twice makes the spool technique impossible. See
- * DECISIONS D-098.
+ * and `PLUG_PUSHBACK`, and charging for it twice makes the spool technique impossible. That
+ * exemption is what keeps this liveable: the dip-and-climb is exactly as safe as it ever was,
+ * because the chamber you are climbing is the one chamber that never charges. See DECISIONS
+ * D-098, D-203.
  */
-export const DISTURB_FACTOR = 1.4
+export const DISTURB_FACTOR = 2.4
 /** Above this, grooves bite too hard to push a spool through comfortably. */
 export const T_SPOOL_MAX = 0.55
 /**
