@@ -399,8 +399,21 @@ export class InputController {
           this.setTensionLevel(tensionForStep(TENSION_STEPS))
           break
         // ── Everything else ──
+        /**
+         * One step along the ten-step dial, up on E and down on W — the bumper verb (D-200).
+         *
+         * E used to be a bare +0.05 trim: unadvertised, untested, and half a dial step, so a
+         * press only sometimes moved the number the footer prints. A Steam Input layout needs
+         * an incremental pair a bumper can wear, and the pair should speak the dial's own
+         * vocabulary — the same ten steps the digits select and the meter reads back. Gated on
+         * the play screen because W also walks the dungeon crawl (`MOVEMENT_KEYS`): without
+         * the gate, every stride north quietly wound the wrench toward step 1.
+         */
         case 'KeyE':
-          this.nudgeTension(0.05)
+          if (this.playing) this.stepTension(1)
+          break
+        case 'KeyW':
+          if (this.playing) this.stepTension(-1)
           break
         case 'KeyR':
           this.hooks.onRestart?.()
@@ -778,6 +791,16 @@ export class InputController {
 
   nudgeTension(delta: number): void {
     this.settings.tensionLevel = clamp01(this.settings.tensionLevel + delta)
+  }
+
+  /**
+   * One whole step along the pressure dial, snapping onto it from wherever the level sits.
+   * `stepForTension` rounds to the nearest step and `tensionForStep` clamps to 1..10, so the
+   * ends are walls rather than wrap-arounds — easing off past 1 stays at 1, which on a bumper
+   * is the difference between a dial and a roulette wheel.
+   */
+  stepTension(dir: 1 | -1): void {
+    this.setTensionLevel(tensionForStep(stepForTension(this.settings.tensionLevel) + dir))
   }
 
   setTensionLevel(level: number): void {

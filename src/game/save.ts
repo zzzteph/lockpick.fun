@@ -16,7 +16,8 @@ export const SAVE_KEY = 'shearline.save.v1'
 // declared here *as well*, which is how the two could have drifted apart silently.
 import type { AssistMode, LockDef } from '../sim'
 import { lockBySlug } from './locks'
-import { rankIndexFor } from './ranks'
+import { RANKS, rankIndexFor } from './ranks'
+import type { StreakChain } from './streak'
 
 export type { AssistMode }
 
@@ -187,6 +188,16 @@ export interface SaveData {
    * never persisted anywhere — that absence is what makes "no resume" true across a relaunch.
    */
   gauntletBest: Partial<Record<AssistMode, number>>
+  /**
+   * The Streak's two chains (D-199): the one standing and the best one ever captured.
+   *
+   * `current` survives a relaunch deliberately — closing the game is not failing a lock, and a
+   * chain that only lived for one sitting would punish exactly the long patient runs the mode
+   * exists to grow. Only a failed pick breaks one. `best` is written at the moment a chain
+   * breaks, which is the mode's whole ceremony; like `gauntletBest` it is a score, never a
+   * currency — nothing unlocks behind it.
+   */
+  streak: { current: StreakChain | null; best: StreakChain | null }
 }
 
 export function newSave(): SaveData {
@@ -199,6 +210,7 @@ export function newSave(): SaveData {
     playDays: {},
     customLocks: [],
     gauntletBest: {},
+    streak: { current: null, best: null },
     // Any odd 32-bit value; the mixer below does the work of spreading it.
     lockSalt: (Math.floor(Math.random() * 0xffffffff) | 1) >>> 0,
   }
@@ -340,6 +352,23 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
+/**
+ * A chain is a rank index and a positive count, or it is nothing — no half-remembered chains.
+ * The rank is clamped onto the ladder rather than trusted: a hand-edited save wearing rank 40
+ * would otherwise print as F while comparing as something worse than F.
+ */
+function coerceChain(raw: unknown): StreakChain | null {
+  if (!isRecord(raw)) return null
+  const rank = raw['rank']
+  const count = raw['count']
+  if (typeof rank !== 'number' || !Number.isFinite(rank)) return null
+  if (typeof count !== 'number' || !Number.isFinite(count) || count < 1) return null
+  return {
+    rank: Math.max(0, Math.min(RANKS.length - 1, Math.trunc(rank))),
+    count: Math.trunc(count),
+  }
+}
+
 function coerceRecord(raw: unknown): LockRecord {
   if (!isRecord(raw)) return emptyRecord()
   const bestTime = raw['bestTime']
@@ -413,6 +442,13 @@ export function migrate(raw: unknown): SaveData {
           ),
         )
       : {},
+    // The Streak's chains arrive by the same road (D-199): absent on an old save, both null.
+    streak: isRecord(data['streak'])
+      ? {
+          current: coerceChain(data['streak']['current']),
+          best: coerceChain(data['streak']['best']),
+        }
+      : { current: null, best: null },
     // A save from before D-073 has no salt; give it one rather than defaulting everybody to the
     // same bench, which would make every player's locks identical.
     lockSalt:

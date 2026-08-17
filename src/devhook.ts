@@ -330,7 +330,7 @@ export interface DevHook {
    * else honest to read — screenshots of the two menus differ by almost nothing, and widget
    * counts are a coincidence, not a claim.
    */
-  layoutState(): { compact: boolean; interfaceMode: string; scale: number }
+  layoutState(): { compact: boolean; interfaceMode: string; scale: number; deck: boolean }
 
   // ── The Lock dungeon (docs/DUNGEON.md) ──
   /** Begin a run on a known floor — determinism is what makes the clearing e2e honest. */
@@ -381,6 +381,16 @@ export interface DevHook {
    * pipeline (events, loot, the dungeon's own banking) fires as if a very good hand played it.
    */
   solveCurrentLock(): boolean
+
+  // ── The Streak (D-199) ──
+  /** Deal a Streak lock from a known seed at a known tier — determinism for the e2e. */
+  startStreakLock(seed: number, tier: 1 | 2 | 3 | 4): void
+  /** The chains as data, and whether the pick that is up right now feeds them. */
+  streakState(): {
+    live: boolean
+    current: { rank: number; count: number } | null
+    best: { rank: number; count: number } | null
+  }
 
   /**
    * Select a bench page — a tier number, or 0 for the wheels shelf (D-167). Exists so the

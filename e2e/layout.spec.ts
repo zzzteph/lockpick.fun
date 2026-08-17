@@ -217,6 +217,22 @@ const SCREENS: { name: string; arrange: (page: Page) => Promise<void> }[] = [
       await renderOnce(p)
     },
   },
+  // The Streak's tally (D-199): fresh, and with both chains standing at their widest — the
+  // figures scale to fit, the sub-lines and the teal "past your best" nudge all drawn at once.
+  { name: 'streak', arrange: async (p) => goto(p, 'streak') },
+  {
+    name: 'streak-with-chains',
+    arrange: async (p) => {
+      await p.evaluate(() => {
+        const h = globalThis.__shearline!
+        h.setSave({
+          ...h.getSave(),
+          streak: { current: { rank: 0, count: 999 }, best: { rank: 6, count: 998 } },
+        })
+      })
+      await goto(p, 'streak')
+    },
+  },
   { name: 'settings', arrange: async (p) => goto(p, 'settings') },
   { name: 'help', arrange: async (p) => goto(p, 'help') },
   {

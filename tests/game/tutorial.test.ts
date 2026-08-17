@@ -22,6 +22,7 @@ import {
   isTutorialLock,
   lessonById,
   lessonProgress,
+  speak,
   startLesson,
   updateLesson,
 } from '../../src/game/tutorial'
@@ -143,19 +144,44 @@ describe('the lessons', () => {
     expect(LESSONS.map((l) => l.lock.slug)).toEqual(TUTORIAL_LOCKS.map((d) => d.slug))
   })
 
-  it('teach in one line at a time, and every line is a line', () => {
+  it('teach in one line at a time, and every line is a line — in every voice', () => {
     for (const lesson of LESSONS) {
       expect(lesson.steps.length, lesson.id).toBeGreaterThan(2)
       for (const step of lesson.steps) {
-        // One sentence's worth. A step that needs a paragraph is a step that should have been
-        // designed into the lock instead (GAME_DESIGN.md §10).
-        expect(step.line.length, `${lesson.id}/${step.id}`).toBeLessThan(90)
-        expect(step.line.split('\n'), `${lesson.id}/${step.id}`).toHaveLength(1)
-        if (step.hint !== undefined) {
-          expect(step.hint.length, `${lesson.id}/${step.id} hint`).toBeLessThan(90)
+        for (const voice of ['kb', 'deck'] as const) {
+          // One sentence's worth. A step that needs a paragraph is a step that should have been
+          // designed into the lock instead (GAME_DESIGN.md §10) — and the deck voice (D-201) is
+          // held to the same bar, because it is the same screen band.
+          const line = speak(step.line, voice)
+          expect(line.length, `${lesson.id}/${step.id} (${voice})`).toBeLessThan(90)
+          expect(line.split('\n'), `${lesson.id}/${step.id} (${voice})`).toHaveLength(1)
+          if (step.hint !== undefined) {
+            expect(speak(step.hint, voice).length, `${lesson.id}/${step.id} hint (${voice})`)
+              .toBeLessThan(90)
+          }
         }
       }
     }
+  })
+
+  it('the deck voice never names a control the deck does not have', () => {
+    // The whole point of D-201: a lesson saying "Hold Q" on a machine with no Q is the D-105
+    // lie read aloud. The kb voice is allowed all of these, so only the deck voice is swept.
+    const KEYBOARD_WORDS = /\bQ\b|\bSpace\b|arrow|number keys|keys 1/i
+    for (const lesson of LESSONS) {
+      for (const step of lesson.steps) {
+        const texts = [step.line, ...(step.hint !== undefined ? [step.hint] : [])]
+        for (const t of texts) {
+          expect(speak(t, 'deck'), `${lesson.id}/${step.id}`).not.toMatch(KEYBOARD_WORDS)
+        }
+      }
+    }
+  })
+
+  it('a plain line speaks the same in every voice', () => {
+    expect(speak('the words', 'kb')).toBe('the words')
+    expect(speak('the words', 'deck')).toBe('the words')
+    expect(speak({ kb: 'press Q', deck: 'press R2' }, 'deck')).toBe('press R2')
   })
 
   it('has unique step ids within each lesson', () => {
@@ -173,10 +199,13 @@ describe('the lessons', () => {
     expect(first).toBeDefined()
     if (!first) return
 
-    expect(currentLine(run)).toBe(first.line)
+    expect(currentLine(run)).toBe(speak(first.line, 'kb'))
+    // The deck voice resolves through the same road, and differs exactly where a variant exists.
+    expect(currentLine(run, 'deck')).toBe(speak(first.line, 'deck'))
+    expect(currentLine(run, 'deck')).toContain('R2')
     // The hint replaces the line rather than joining it — still one line at a time.
     run.onStepFor = (first.hintAfter ?? 8) + 1
-    expect(currentLine(run)).toBe(first.hint)
+    expect(currentLine(run)).toBe(speak(first.hint ?? '', 'kb'))
     expect(currentLine(run)).not.toContain('\n')
   })
 

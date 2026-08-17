@@ -180,6 +180,7 @@ import {
   drawResults,
   drawSettings,
   drawGauntlet,
+  drawStreak,
   drawTrophies,
   drawTutorial,
   GUIDE_PAGE_COUNT,
@@ -192,6 +193,8 @@ import {
   type ShellContext,
 } from './ui/shell'
 import { generateDungeonLock } from './game/gauntlet'
+import { rankEarned } from './game/ranks'
+import { chainLabel, generateStreakLock, streakTierFor } from './game/streak'
 // The scripted solver, for the dev hook alone: `solveCurrentLock` lets the browser suite play
 // any lock with the same machine that proves the roster openable. ~15KB of prod bundle carrying
 // a dev instrument — accepted, because a DEV-gated import would need a second chunk and the
@@ -252,6 +255,17 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   const hook = installDevHook(7)
   const vp = createViewport(canvas)
   const progress = new Progress(storage)
+  /**
+   * Launched for a controller — the Steam Deck build (D-200).
+   *
+   * The Electron wrapper appends `?deck=1` when Steam's own `SteamDeck` environment marker is
+   * set; the official Steam Input layout then plays the whole game by *sending keys*, so the
+   * only thing this flag changes is what the legend and the hints call them — a footer reading
+   * `hold [Q]` on a machine with no Q is the D-105 lie in controller form. A query parameter
+   * rather than any user-agent guesswork: gamescope's UA promises nothing, and `?deck=1` in a
+   * browser is also how a test reaches this mode honestly.
+   */
+  const deckMode = new URLSearchParams(window.location.search).has('deck')
   let palette: Palette = THEMES[progress.data.settings.theme]
 
   let config = makeConfig({ tools: STARTER_TOOLS })
@@ -488,6 +502,17 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   let gauntletSeedFocus = false
 
   /**
+   * True while the lock on the bench was dealt by the Streak (D-199) — the mode's entire
+   * per-attempt state. The chains themselves live in the save; this flag only says whether the
+   * pick that is up right now feeds them. Never persisted: a relaunch mid-pick abandons the
+   * *attempt* without breaking the *chain*, which is the mode's kindness — only a failed pick
+   * breaks one.
+   */
+  let streakPick = false
+  /** Deals this sitting, salting the generator so no two deals share a slug or an id. */
+  let streakDealt = 0
+
+  /**
    * The assist level the current pick is actually played at. The dungeon's chosen difficulty
    * overrides the settings for exactly the locks of its floor — the visual ladder, the sim
    * config and the par scaling all read this one function, so a Hard run cannot leak
@@ -559,8 +584,36 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     settleDungeon()
   }
 
+  /** Deal one Streak lock and put it on the bench. What happens next rides on the chain. */
+  function dealStreakLock(seed: number, tier: 1 | 2 | 3 | 4): void {
+    streakDealt += 1
+    const def = generateStreakLock(seed, streakDealt, tier)
+    // The sim seed is derived, not rolled: the same deal picks the same on every machine,
+    // which is what lets the e2e drive the mode from a known number (the dungeon's own trick).
+    startLock(def, ((seed + streakDealt * 104729) >>> 0) || 1)
+    streakPick = true
+  }
+
+  /**
+   * The chain breaks — the one place every break routes through (a walk-away from the pause
+   * panel, the header link mid-pick, a snapped pick), so the capture happens exactly once and
+   * the tally screen always says what fell.
+   */
+  function breakChainNow(why: string): void {
+    const { captured, newBest } = progress.breakStreak()
+    streakPick = false
+    session = null
+    status = captured
+      ? `${why} — the chain broke at ${chainLabel(captured)}${newBest ? '. Your best yet, captured.' : '.'}`
+      : `${why} — no chain stood.`
+    goto('streak')
+  }
+
   function startLock(def: LockDef, seed = seedFor(def), inspect = false): void {
     inspecting = inspect
+    // Every road onto the bench clears the flag; `dealStreakLock` raises it again after this
+    // returns. A bench lock started mid-mode must never feed the chain.
+    streakPick = false
     session = new Session(def, seed, currentConfig())
     layout = computeLayout(def.bitting.length, 0, def.rows ?? 1, mirrored())
     const kind = faceKindFor(def.family)
@@ -592,9 +645,18 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       goto('pick')
     },
     restart: () => {
+      // Never inside a Streak pick (D-199): the chain is "in a row", and a fresh clock on the
+      // same lock would be a free reroll. The pause panel hides its button; this guard is for
+      // every other road in.
+      if (streakPick) return
       if (session) startLock(session.def, session.seed, inspecting)
     },
     abandon: () => {
+      // Walking out of a Streak pick is the mode's one honest exit, and it costs the chain.
+      if (streakPick) {
+        breakChainNow('you walked away')
+        return
+      }
       // Abandoning a lesson abandons the lesson, not just the attempt — otherwise the line at
       // the bottom of the screen would follow the player onto their next lock. It also goes
       // back to where the lesson was started, which is not where a lock attempt goes.
@@ -673,6 +735,14 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       dungeonSettled = false
       dungeonBankedScore = 0
       status = ''
+    },
+    // ── The Streak (D-199) ──
+    streakStart: () => {
+      // Math.random is fine in the game layer (the sim's lint rule owns the sim), exactly as
+      // the dungeon rolls its floors. Tier and seed roll separately so neither leans on the
+      // other's distribution.
+      const tier = streakTierFor(Math.random(), progress.highestUnlockedTier)
+      dealStreakLock(((Math.random() * 0xffffffff) >>> 0) || 1, tier)
     },
     // ── The lock editor (D-080) ──
     //
@@ -986,6 +1056,9 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         // No restarts inside a dungeon pick — R does nothing there. The lock is the lock;
         // walking away and bumping it again is the crawler's honest retry.
         if (dungeonRun && dungeonRun.phase === 'picking') return
+        // Nor inside a Streak pick, and for the same reason (D-199): a chain of retried locks
+        // is not a chain.
+        if (streakPick) return
         if (screen === 'pick' && session) startLock(session.def)
       },
       onPause: () => {
@@ -999,7 +1072,12 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         }
         if (screen === 'pick') goto('pause')
         else if (screen === 'pause') goto('pick')
-        else if (screen !== 'menu') goto(previousScreen === 'pick' ? 'bench' : 'menu')
+        // The Streak tally is a destination, not a detour: Esc leaves it for the menu even
+        // when the payoff was the previous screen — "back to the bench" would be a non sequitur
+        // on a screen whose locks are not the bench's (D-199).
+        else if (screen !== 'menu') {
+          goto(previousScreen === 'pick' && screen !== 'streak' ? 'bench' : 'menu')
+        }
       },
       /**
        * The outward links, opened inside the pointer event so the browser allows the tab (D-103).
@@ -1180,6 +1258,20 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       settleDungeon() // the gate itself can win the run right here
       session = null
       goto('gauntlet')
+      return
+    }
+    /**
+     * A Streak open feeds the chain and nothing else — no record (a dealt lock exists for one
+     * attempt, and a slug nothing can ever revisit must not sit in `records` forever), no
+     * achievements, no play-day: the dungeon's own bookkeeping rule (D-199). The rank still
+     * matters — it is the letter the chain wears — so the payoff plays with it, and the tally
+     * screen takes over once the sequence settles.
+     */
+    if (streakPick) {
+      const rank = rankEarned(session.state.time, session.def.par, session.state.config.assist)
+      const chain = progress.noteStreakOpen(rank)
+      status = `${session.def.name} — open. The chain stands at ${chainLabel(chain)}.`
+      startOpenSequence(sequence, rank, 0)
       return
     }
     const base = outcomeFrom(session.def, session.state, session.state.stats, { challenges })
@@ -1387,6 +1479,9 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         pickAbandoned(dungeonRun)
         session = null
         goto('gauntlet')
+      } else if (streakPick) {
+        // Same rule on a Streak pick: leaving the lock is leaving the lock, whatever door.
+        breakChainNow('you walked away')
       } else {
         const wasLesson = lesson !== null
         lesson = null
@@ -1429,11 +1524,24 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         status = 'the pick snapped inside the lock'
         goto('gauntlet')
       }
+      // A Streak chain lives exactly as long as the picks do (D-199): the same frame-watch the
+      // dungeon keeps, because the ordinary path would let the player sit with a broken pick
+      // and press R — and R is the one verb the mode does not have.
+      if (streakPick && view.pickBroken && !view.opened) {
+        breakChainNow('the pick snapped inside the lock')
+      }
       // A lesson has no results page to land on — it goes back to the tutorial, where the
       // card it just finished says `done` and the next one is marked `next` (D-152). A dungeon
-      // open never reaches here: `finishAttempt` routes it straight back to the floor.
+      // open never reaches here: `finishAttempt` routes it straight back to the floor. A
+      // Streak open lands on the tally, where the chain it just grew is the headline.
       if (view.opened && isSettled(sequence)) {
-        goto(outcome ? 'results' : 'tutorial')
+        if (streakPick) {
+          streakPick = false
+          session = null
+          goto('streak')
+        } else {
+          goto(outcome ? 'results' : 'tutorial')
+        }
       }
     } else {
       updateFx(fx, seconds)
@@ -1498,6 +1606,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         dungeonRun !== null && dungeonRun.phase !== 'caught' && dungeonRun.phase !== 'won',
       ...(benchTier !== undefined ? { benchTier } : {}),
       ...(screen === 'gauntlet' ? { gauntlet: gauntletView() } : {}),
+      ...(streakPick ? { streakPick: true } : {}),
     }
 
     switch (screen) {
@@ -1527,6 +1636,9 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         break
       case 'gauntlet':
         drawGauntlet(shell)
+        break
+      case 'streak':
+        drawStreak(shell)
         break
       case 'editor':
         drawEditor(shell)
@@ -1676,12 +1788,16 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
               ['slider', 'shackle'],
             ] as const)
           : ([
+              // On deck the arrow rows stay: the D-pad *sends* arrows, so `← →` is the truth
+              // either way. Only the rows naming keys the device does not have change (D-200).
               ['← →', 'choose a wheel'],
-              ['space', 'turn'],
+              [deckMode ? 'A' : 'space', 'turn'],
               ['↑ ↓', 'one click'],
-              ['Q', 'pull the shackle'],
-              ['R', 'restart'],
-              ['esc', 'pause'],
+              [deckMode ? 'R2' : 'Q', 'pull the shackle'],
+              // A Streak pick has no R (D-199) — and a legend advertising a dead key is worse
+              // than a shorter legend (D-105). Wheels are never dealt, but the rule is the row's.
+              ...(streakPick ? ([] as const) : ([[deckMode ? 'Y' : 'R', 'restart']] as const)),
+              [deckMode ? 'start' : 'esc', 'pause'],
             ] as const)
         : input.touch.active
         ? ([
@@ -1692,8 +1808,8 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
           ] as const)
         : ([
             ['← →', 'move'],
-            ['space', 'lift'],
-            ['space+← →', 'carry it'],
+            [deckMode ? 'A' : 'space', 'lift'],
+            [deckMode ? 'A+← →' : 'space+← →', 'carry it'],
             /**
              * The trim is Training only (D-111), so the legend only claims it on Training.
              *
@@ -1707,22 +1823,29 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
             ...(assist === 'training'
               ? ([['↑ ↓', 'fine lift']] as const)
               : ([] as const)),
-            ['Q', 'tension wrench'],
+            [deckMode ? 'R2' : 'Q', 'tension wrench'],
             // `1-0` alone did not say that `0` is the tenth step, or that there are ten (D-103) —
             // and naming the step still did not name the *control* it belongs to (D-107).
             // "…, 1 to 10" as well, until the legend became a column in the left gutter: at 24
             // characters that row reached x=480 and the lock starts at x=384 on anything with six
             // chambers. The cap says `1-0` and the footer heading says "pressure N of 10", so the
-            // range is stated twice already (D-115).
-            ['1-0', 'wrench pressure'],
-            ['R', 'restart'],
-            ['esc', 'pause'],
+            // range is stated twice already (D-115). On deck the bumpers step the same dial
+            // (they send W and E — D-200), so the cap names them and the heading still counts.
+            [deckMode ? 'L1 R1' : '1-0', 'wrench pressure'],
+            // No R on a Streak pick (D-199): the row goes rather than greying, the same rule
+            // that deleted `tab tools` when the loadout went — D-105 is what ignoring it costs.
+            ...(streakPick ? ([] as const) : ([[deckMode ? 'Y' : 'R', 'restart']] as const)),
+            [deckMode ? 'start' : 'esc', 'pause'],
           ] as const),
       // The gutters belong to the pads while a finger is down, whatever the layout (D-160).
       touchActive: input.touch.active,
       benchHot: overBenchLink,
       // Short enough to sit between the strain meter and the plug bar at the larger face (D-102).
-      restartHint: input.touch.active ? 'tap pause, then restart' : 'press [R] for a fresh pick',
+      restartHint: input.touch.active
+        ? 'tap pause, then restart'
+        : deckMode
+          ? 'press [Y] for a fresh pick'
+          : 'press [R] for a fresh pick',
       /**
        * Names the control the player actually has. On touch the wrench *is* the slider, so there
        * is no key to name and telling them to hold one would be a lie (D-107).
@@ -1737,8 +1860,8 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
           // "slide to" because the wrench moves from where it is now, not to where you touched.
           `drag the ${shackle ? 'shackle' : 'wrench'} up the ${mirrored() ? 'right' : 'left'} edge`
         : shackle
-          ? 'hold [Q] to pull the shackle'
-          : 'hold [Q] to turn the wrench',
+          ? `hold [${deckMode ? 'R2' : 'Q'}] to pull the shackle`
+          : `hold [${deckMode ? 'R2' : 'Q'}] to turn the wrench`,
       // Teach the grip that makes this playable one-handed-per-control, until it has happened.
       ...(session && pickedButUnturned(session.state)
         ? { heldHint: shackle ? 'every wheel is seated — pull through' : 'every pin is up — turn harder' }
@@ -1761,7 +1884,9 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     if (progress.data.settings.subtitles) drawSubtitles(vp, palette, subtitles)
     if (lesson) {
       drawLessonLine(vp, palette, {
-        line: currentLine(lesson),
+        // The course speaks the hardware's names (D-201): R2 and the bumpers on deck, Q and
+        // the digits everywhere else — the same swap the key legend makes, one layer deeper.
+        line: currentLine(lesson, deckMode ? 'deck' : 'kb'),
         step: lesson.step,
         total: lesson.lesson.steps.length,
       })
@@ -1965,7 +2090,8 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     lesson
       ? {
           id: lesson.lesson.id,
-          line: currentLine(lesson),
+          // The voice the screen is actually speaking, so a test reads what a player would.
+          line: currentLine(lesson, deckMode ? 'deck' : 'kb'),
           step: lesson.step,
           total: lesson.lesson.steps.length,
           complete: lesson.complete,
@@ -2067,10 +2193,18 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   hook.goto = (name: string): void => {
     goto(name as ScreenName)
   }
-  hook.layoutState = (): { compact: boolean; interfaceMode: string; scale: number } => ({
+  hook.layoutState = (): {
+    compact: boolean
+    interfaceMode: string
+    scale: number
+    deck: boolean
+  } => ({
     compact: isCompact(vp),
     interfaceMode: vp.interfaceMode,
     scale: vp.scale,
+    // The ?deck=1 handshake (D-200), exposed because the legend swap it drives is exactly the
+    // kind of one-flag rendering change a screenshot proves and nothing else honestly can.
+    deck: deckMode,
   })
   // ── The Lock dungeon (docs/DUNGEON.md): the floor driven from a known seed, for the e2e ──
   hook.startDungeonRun = (seed: number, difficulty): void => {
@@ -2144,6 +2278,15 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       enemies: dungeonRun.enemies.map((e) => ({ kind: e.kind, x: e.x, y: e.y, awake: e.awake })),
     }
   }
+  // ── The Streak (D-199): known deals, for the e2e ──
+  hook.startStreakLock = (seed: number, tier: 1 | 2 | 3 | 4): void => {
+    dealStreakLock((seed >>> 0) || 1, tier)
+  }
+  hook.streakState = () => ({
+    live: streakPick,
+    current: progress.data.streak.current,
+    best: progress.data.streak.best,
+  })
   /**
    * Open the live session with the real solver's own hands — D-165.
    *

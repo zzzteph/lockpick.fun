@@ -20,17 +20,41 @@
 import type { LockDef, SimState } from '../sim'
 import { T_MIN_HOLD } from '../sim'
 
+/**
+ * Which set of control names the teaching speaks in — D-201.
+ *
+ * `kb` is the course as it has always read. `deck` is the same course naming the Steam Deck's
+ * controls (`A`, `R2`, the bumpers, the D-pad) — the words the official Steam Input layout
+ * puts under the player's fingers (D-200, `shear-line/steam/steam-input.md`). A lesson line
+ * saying "Hold Q" on a machine with no Q is the D-105 lie read aloud, and it was the one
+ * place the deck handshake left it standing.
+ */
+export type LessonVoice = 'kb' | 'deck'
+
+/**
+ * One line of teaching: a plain string when the words are the same in every voice, or one
+ * string per voice when the line names a control. Whole-line variants rather than token
+ * substitution, deliberately — "keys 1 to 0" and "L1 and R1 step them" differ in grammar,
+ * not just in a name, and prose stitched from tokens reads like it.
+ */
+export type LessonText = string | { readonly kb: string; readonly deck: string }
+
+/** Resolve a line for the voice the player's hardware speaks. */
+export function speak(text: LessonText, voice: LessonVoice): string {
+  return typeof text === 'string' ? text : text[voice]
+}
+
 export interface LessonStep {
   readonly id: string
   /** The one line shown while this step is the current one. */
-  readonly line: string
+  readonly line: LessonText
   /** True once the player has done the thing. Read every frame off live state. */
   readonly done: (s: SimState) => boolean
   /**
    * A second line, shown only while the player is visibly stuck on this step — after
    * `hintAfter` seconds. Still one line at a time; it replaces, it does not stack.
    */
-  readonly hint?: string
+  readonly hint?: LessonText
   readonly hintAfter?: number
 }
 
@@ -232,28 +256,43 @@ export const LESSONS: readonly Lesson[] = [
     steps: [
       {
         id: 'goal',
-        line: 'The goal is rotation: a lock opens when its plug turns. Hold Q and turn it.',
+        line: {
+          kb: 'The goal is rotation: a lock opens when its plug turns. Hold Q and turn it.',
+          deck: 'The goal is rotation: a lock opens when its plug turns. Hold R2 and turn it.',
+        },
         done: holdingTension,
-        hint: 'Q is the tension wrench. Hold it — you are turning the plug the way a key would.',
+        hint: {
+          kb: 'Q is the tension wrench. Hold it — you are turning the plug the way a key would.',
+          deck: 'R2 is the tension wrench. Hold it — you are turning the plug the way a key would.',
+        },
         hintAfter: 6,
       },
       {
         id: 'blocked',
         line: 'It stopped. The pin is crossing the shear line — the seam the plug turns along.',
         done: (s) => holdingTension(s) && s.pickChamber >= 0 && s.pickChamber === s.bindingChamber,
-        hint: 'Arrow keys move the pick. Go to the pin — it is carrying all your turning force.',
+        hint: {
+          kb: 'Arrow keys move the pick. Go to the pin — it is carrying all your turning force.',
+          deck: 'The D-pad moves the pick. Go to the pin — it is carrying all your turning force.',
+        },
         hintAfter: 8,
       },
       {
         id: 'clear',
-        line: 'Lift it with Space. When the cut between its halves meets the seam, nothing blocks.',
+        line: {
+          kb: 'Lift it with Space. When the cut between its halves meets the seam, nothing blocks.',
+          deck: 'Lift it with A. When the cut between its halves meets the seam, nothing blocks.',
+        },
         done: anySet,
         hint: 'Slowly. The click is the plug edge catching under the driver — that pin is done.',
         hintAfter: 10,
       },
       {
         id: 'open',
-        line: 'Nothing crosses the shear line now. Keep holding Q and the plug turns open.',
+        line: {
+          kb: 'Nothing crosses the shear line now. Keep holding Q and the plug turns open.',
+          deck: 'Nothing crosses the shear line now. Keep holding R2 and the plug turns open.',
+        },
         done: (s) => s.opened,
       },
     ],
@@ -266,9 +305,15 @@ export const LESSONS: readonly Lesson[] = [
     steps: [
       {
         id: 'tension',
-        line: 'Hold Q. That is the wrench, turning the plug.',
+        line: {
+          kb: 'Hold Q. That is the wrench, turning the plug.',
+          deck: 'Hold R2. That is the wrench, turning the plug.',
+        },
         done: holdingTension,
-        hint: 'Q, and keep holding it. Nothing works without it. 1-0 set how hard.',
+        hint: {
+          kb: 'Q, and keep holding it. Nothing works without it. 1-0 set how hard.',
+          deck: 'R2, and keep holding it. Nothing works without it. L1 and R1 set how hard.',
+        },
         hintAfter: 6,
       },
       {
@@ -280,9 +325,15 @@ export const LESSONS: readonly Lesson[] = [
       },
       {
         id: 'lift',
-        line: 'Lift it. Hold Space, and let go the moment something gives.',
+        line: {
+          kb: 'Lift it. Hold Space, and let go the moment something gives.',
+          deck: 'Lift it. Hold A, and let go the moment something gives.',
+        },
         done: anySet,
-        hint: 'Space lifts while you hold it. Go slowly — a pin must sit still for a moment to catch.',
+        hint: {
+          kb: 'Space lifts while you hold it. Go slowly — a pin must sit still for a moment to catch.',
+          deck: 'A lifts while you hold it. Go slowly — a pin must sit still for a moment to catch.',
+        },
         hintAfter: 10,
       },
       {
@@ -291,7 +342,10 @@ export const LESSONS: readonly Lesson[] = [
         // Ends when they have *arrived* at the new binding pin, not when the lock is open, so the
         // pressure step below lands while they are actually working it.
         done: (s) => anySet(s) && s.bindingChamber >= 0 && s.pickChamber === s.bindingChamber,
-        hint: 'Release Space, arrow across, then hold Space again.',
+        hint: {
+          kb: 'Release Space, arrow across, then hold Space again.',
+          deck: 'Release A, cross with the D-pad, then hold A again.',
+        },
         hintAfter: 8,
       },
       {
@@ -313,7 +367,10 @@ export const LESSONS: readonly Lesson[] = [
         line: 'Keep the pressure up while you work it — too light and the pin you just set drops.',
         done: allSet,
         // Under 90 characters, which the lesson test enforces: a line has to *be* a line.
-        hint: '1 to 0 are the pressure steps. 3 holds what you have caught; 1 and 2 will not.',
+        hint: {
+          kb: '1 to 0 are the pressure steps. 3 holds what you have caught; 1 and 2 will not.',
+          deck: 'L1 and R1 step the pressure. 3 holds what you have caught; 1 and 2 will not.',
+        },
         hintAfter: 7,
       },
       {
@@ -345,7 +402,10 @@ export const LESSONS: readonly Lesson[] = [
         id: 'stuck',
         line: 'That pin is jammed into the shell, and nothing you do with the pick will free it.',
         done: (s) => s.stats.fullResets > 0 || s.stats.feathers > 0,
-        hint: 'Let go of Q. Everything drops, and you start again.',
+        hint: {
+          kb: 'Let go of Q. Everything drops, and you start again.',
+          deck: 'Let go of R2. Everything drops, and you start again.',
+        },
         hintAfter: 5,
       },
       {
@@ -362,9 +422,15 @@ export const LESSONS: readonly Lesson[] = [
          * it, so it is taught here, next to the other way to lose a pin.
          */
         id: 'travel',
-        line: 'Let Space go before you move on, or you will shove a set pin back out.',
+        line: {
+          kb: 'Let Space go before you move on, or you will shove a set pin back out.',
+          deck: 'Let A go before you move on, or you will shove a set pin back out.',
+        },
         done: allSet,
-        hint: 'Release Space, then arrow across, then hold Space again. That order is the trick.',
+        hint: {
+          kb: 'Release Space, then arrow across, then hold Space again. That order is the trick.',
+          deck: 'Release A, then cross on the D-pad, then hold A again. That order is the trick.',
+        },
         hintAfter: 10,
       },
       {
@@ -390,21 +456,33 @@ export const LESSONS: readonly Lesson[] = [
     steps: [
       {
         id: 'grip',
-        line: 'The wrench has ten pressures — keys 1 to 0. Hold Q at 5 and set a pin.',
+        line: {
+          kb: 'The wrench has ten pressures — keys 1 to 0. Hold Q at 5 and set a pin.',
+          deck: 'The wrench has ten pressures — L1 and R1 step them. Hold R2 at 5 and set a pin.',
+        },
         done: anySet,
         hint: 'Middle pressure is the all-rounder: firm enough to hold, light enough to lift.',
         hintAfter: 10,
       },
       {
         id: 'heavy',
-        line: 'Now lean on it: press 8. Feel the binding pin pinch harder under the same lift.',
+        line: {
+          kb: 'Now lean on it: press 8. Feel the binding pin pinch harder under the same lift.',
+          deck: 'Now lean on it: R1 up to 8. Feel the binding pin pinch harder under the same lift.',
+        },
         done: (s) => s.tension >= 0.75,
-        hint: 'The number keys change pressure while you hold Q. Press 8, then lift and compare.',
+        hint: {
+          kb: 'The number keys change pressure while you hold Q. Press 8, then lift and compare.',
+          deck: 'The bumpers change pressure while you hold R2. Step to 8, then lift and compare.',
+        },
         hintAfter: 8,
       },
       {
         id: 'feather',
-        line: 'Ease back to 3. Set pins hold at 3 — and a fighting pin loosens its grip.',
+        line: {
+          kb: 'Ease back to 3. Set pins hold at 3 — and a fighting pin loosens its grip.',
+          deck: 'Ease back to 3 with L1. Set pins hold at 3 — and a fighting pin loosens its grip.',
+        },
         done: (s) => anySet(s) && s.tension >= T_MIN_HOLD && s.tension <= 0.42,
         hint: '1 and 2 drop everything; 3 is the lightest hold. Feathering lives between 3 and 5.',
         hintAfter: 8,
@@ -431,7 +509,10 @@ export const LESSONS: readonly Lesson[] = [
         id: 'false-set',
         line: 'The plug just gave, and that pin feels set. It is not — that is a spool lying.',
         done: (s) => s.chambers.some((c) => c.hasFalseSet && c.state === 'SET'),
-        hint: 'Ease the tension off — press 2 or 3 — and keep holding Space on that pin.',
+        hint: {
+          kb: 'Ease the tension off — press 2 or 3 — and keep holding Space on that pin.',
+          deck: 'Ease the tension off — L1 down to 2 or 3 — and keep holding A on that pin.',
+        },
         hintAfter: 8,
       },
       {
@@ -497,23 +578,38 @@ export const LESSONS: readonly Lesson[] = [
     steps: [
       {
         id: 'pull',
-        line: 'A different animal: no keyway, three wheels on a shackle. Hold Q and pull.',
+        line: {
+          kb: 'A different animal: no keyway, three wheels on a shackle. Hold Q and pull.',
+          deck: 'A different animal: no keyway, three wheels on a shackle. Hold R2 and pull.',
+        },
         done: holdingTension,
-        hint: 'Q is the shackle now. Wheels only speak under load — pull and keep pulling.',
+        hint: {
+          kb: 'Q is the shackle now. Wheels only speak under load — pull and keep pulling.',
+          deck: 'R2 is the shackle now. Wheels only speak under load — pull and keep pulling.',
+        },
         hintAfter: 6,
       },
       {
         id: 'find',
-        line: 'One wheel drags under the pull. Arrows move between wheels — find the stiff one.',
+        line: {
+          kb: 'One wheel drags under the pull. Arrows move between wheels — find the stiff one.',
+          deck: 'One wheel drags under the pull. The D-pad moves between wheels — find the stiff one.',
+        },
         done: (s) => holdingTension(s) && s.pickChamber >= 0 && s.pickChamber === s.bindingChamber,
         hint: 'Cross the pack slowly. The bound wheel turns heavy; free ones spin light.',
         hintAfter: 8,
       },
       {
         id: 'dial',
-        line: 'Hold Space: the wheel rolls digit to digit. At one digit the drag lets go.',
+        line: {
+          kb: 'Hold Space: the wheel rolls digit to digit. At one digit the drag lets go.',
+          deck: 'Hold A: the wheel rolls digit to digit. At one digit the drag lets go.',
+        },
         done: anySet,
-        hint: 'Let go of Space and the wheel stays put. Roll on — the dial wraps past 9.',
+        hint: {
+          kb: 'Let go of Space and the wheel stays put. Roll on — the dial wraps past 9.',
+          deck: 'Let go of A and the wheel stays put. Roll on — the dial wraps past 9.',
+        },
         hintAfter: 10,
       },
       {
@@ -589,12 +685,14 @@ export function updateLesson(run: LessonRun, s: SimState, dt: number): void {
 }
 
 /** The single line to show right now, or null once the lesson is done. */
-export function currentLine(run: LessonRun): string | null {
+export function currentLine(run: LessonRun, voice: LessonVoice = 'kb'): string | null {
   if (run.complete) return null
   const step = run.lesson.steps[run.step]
   if (!step) return null
-  if (step.hint !== undefined && run.onStepFor >= (step.hintAfter ?? 8)) return step.hint
-  return step.line
+  if (step.hint !== undefined && run.onStepFor >= (step.hintAfter ?? 8)) {
+    return speak(step.hint, voice)
+  }
+  return speak(step.line, voice)
 }
 
 /** How far through, 0..1 — for the progress pips beside the line. */

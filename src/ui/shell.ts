@@ -20,6 +20,7 @@ import {
 import { ALL_LOCKS, chambersOf } from '../game/locks'
 import { decodeLock, encodeLock, formatCode, shareProblem, shareableCode } from '../game/sharecode'
 import { countsForTier, effectivePar, letterFor } from '../game/ranks'
+import { beatsChain, chainLabel } from '../game/streak'
 import type { AttemptOutcome, AttemptResult, Progress } from '../game/progress'
 import {
   DUNGEON_DIFFICULTY_FACTOR,
@@ -85,6 +86,7 @@ export type ScreenName =
   | 'codes'
   | 'help'
   | 'gauntlet'
+  | 'streak'
 
 const MARGIN = 24
 
@@ -124,6 +126,9 @@ export interface ShellActions {
   dungeonStepBack(): void
   /** Clear a terminal run so the briefing shows again. */
   gauntletReset(): void
+  // ── The Streak (D-199) ──
+  /** Deal the next random lock. The app rolls the tier and the seed; the chain rides on it. */
+  streakStart(): void
   /** Flip whether the next lock started from the bench is a study run (D-092). */
   toggleInspect(): void
   // ── The lock editor (D-080) ──
@@ -261,6 +266,12 @@ export interface ShellContext {
   hapticsSupported?: boolean
   /** The Gauntlet screen's whole world — absent everywhere else (D-165). */
   gauntlet?: GauntletScreenView
+  /**
+   * True while the lock on the bench was dealt by the Streak (D-199) — the pause panel reads
+   * it: no restart there (the chain is "in a row", and R would be a free reroll), and the
+   * walk-away button says what a walk-away costs.
+   */
+  streakPick?: boolean
   /** Which page of the player's own locks is showing. */
   codesPage?: number
   /** Which page of the roster the desktop codes screen is showing. */
@@ -481,9 +492,31 @@ function artWash(ctx: CanvasRenderingContext2D, p: Palette): void {
 export function drawMenu(c: ShellContext): void {
   const { vp, p, ui, progress, actions } = c
   const { ctx } = vp
+  /**
+   * The build number, bottom-right of the title screen — the owner's ask ("put the version
+   * number somewhere on the right bottom"). Two homes because D-132 swapped the corners: at
+   * the full face it sits beside the report button, which owns that corner; on compact the
+   * status caption owns it, so the version rides the credit line — a transient status message
+   * covers it briefly, which is what transient means. Menu only: every other screen's corner
+   * is spoken for, and the report URL already carries the version where a bug needs it.
+   */
+  const stamp = `v${__APP_VERSION__}`
   // No plate here — the owner's call: "background should only be in the game section,
   // not in the menu." The title screen stays plain drafting paper.
-  screenFrame(c, 'Shear line', c.status ?? creditLine(progress))
+  screenFrame(
+    c,
+    'Shear line',
+    c.status ?? (isCompact(vp) ? `${creditLine(progress)} · ${stamp}` : creditLine(progress)),
+  )
+  if (!isCompact(vp)) {
+    const report = reportLink(vp)
+    const vSize = typeFor(vp, TYPE.dimension)
+    text(ctx, stamp, report.x - 20, report.y + report.h / 2 + vSize * 0.36, {
+      font: font(vSize),
+      color: p.inkLight,
+      align: 'right',
+    })
+  }
 
   /**
    * The subtitle clears the title by its **own ascent**, not by a literal 32px — DECISIONS D-146.
@@ -546,16 +579,19 @@ export function drawMenu(c: ShellContext): void {
    * the title and a large one cannot produce a button the size of a door.
    */
   const w = compact ? 760 : 380
-  // Capped at 132, down from 140: the Gauntlet entry (D-165) filled the compact grid's last
-  // cell, so all four rows are now full — and on the narrowest phones the fourth row's bottom
-  // ran to within a pixel of the status line, which the crowding rule prices at six (D-156).
-  // At 132 the grid bottoms out at 996 with the floor maxed, and the line keeps its air.
-  // (140's own story: at 150 the last row overran the stage itself.)
-  const h = compact ? Math.round(Math.min(Math.max(touchFloorFor(vp), 96), 132)) : 56
+  // Capped at 111, down from 132: the Streak entry (D-199) opened a FIFTH compact row, and the
+  // grid buys it the way it bought the fourth — a lower cap, a slightly earlier start and a
+  // tighter gap, so five rows bottom out at 994 with the floor maxed and the status line keeps
+  // the air the crowding rule prices at six (D-156). The 96 floor is untouched: the cap only
+  // ever bites on the phones whose touch floor is generous. (132's own story is below in the
+  // history: four full rows; 140's: the last row overran the stage itself.)
+  const h = compact ? Math.round(Math.min(Math.max(touchFloorFor(vp), 96), 111)) : 56
   const x = (LOGICAL_WIDTH - w) / 2
-  const y = compact ? 236 : 320
+  const y = compact ? 228 : 320
   // Compact `gap` is the air *between* buttons; the flat layout's is a pitch. Hence `pitch` below.
-  const gap = compact ? 24 : 74
+  // The flat pitch came down 74 -> 66 for the same ninth entry: nine rows under the primary
+  // still clear the status band at 970.
+  const gap = compact ? 20 : 66
   const pitch = compact ? h + gap : gap
   const colW = compact ? (w - gap) / 2 : w
   /** The i-th non-primary entry. Two across on a phone, one under the next everywhere else. */
@@ -611,13 +647,18 @@ export function drawMenu(c: ShellContext): void {
   // also the owner's; the code keeps `gauntlet` as the internal id, the same arrangement as
   // blind-faith wearing "Hard Won" (D-046's lesson is about what the player reads). D-165.
   if (button(vp, p, ui, entry(0), 'Lock dungeon')) actions.goto('gauntlet')
-  if (button(vp, p, ui, entry(1), 'Bench')) actions.goto('bench')
+  // Beside the dungeon, deliberately: the two run modes share a row on a phone, so "the ways
+  // to play that are not the bench" read as one shelf. Display name "Lock streak" is the
+  // owner's, matching "Lock dungeon"; the code keeps `streak` as the internal id, the same
+  // arrangement as gauntlet wearing its dungeon name (D-165's lesson, D-199).
+  if (button(vp, p, ui, entry(1), 'Lock streak')) actions.goto('streak')
+  if (button(vp, p, ui, entry(2), 'Bench')) actions.goto('bench')
   // Near the bench, because it is the other place a lock gets picked — and once "Continue"
   // is the primary, this button is the only way back to the lessons for a taught player.
-  if (button(vp, p, ui, entry(2), 'Tutorial')) actions.goto('tutorial')
-  if (button(vp, p, ui, entry(3), 'Trophies')) actions.goto('trophies')
+  if (button(vp, p, ui, entry(3), 'Tutorial')) actions.goto('tutorial')
+  if (button(vp, p, ui, entry(4), 'Trophies')) actions.goto('trophies')
   // Between the trophies and the settings on purpose: it is a place to *go*, not a preference.
-  if (button(vp, p, ui, entry(4), 'Share codes')) actions.goto('codes')
+  if (button(vp, p, ui, entry(5), 'Share codes')) actions.goto('codes')
   /**
    * The editor, which had no way in from here (D-128).
    *
@@ -626,9 +667,9 @@ export function drawMenu(c: ShellContext): void {
    * findable only by guessing which other screen linked to it. Reported as *"no editor at the
    * menu"*. It sits after Share codes because the two belong together: build one, then send it.
    */
-  if (button(vp, p, ui, entry(5), 'Editor')) actions.goto('editor')
-  if (button(vp, p, ui, entry(6), 'Help')) actions.goto('help')
-  if (button(vp, p, ui, entry(7), 'Settings')) actions.goto('settings')
+  if (button(vp, p, ui, entry(6), 'Editor')) actions.goto('editor')
+  if (button(vp, p, ui, entry(7), 'Help')) actions.goto('help')
+  if (button(vp, p, ui, entry(8), 'Settings')) actions.goto('settings')
 
   /*
    * A domain used to be drawn here and on the codes screen. It named a host nobody had registered,
@@ -2264,10 +2305,16 @@ export function drawPause(c: ShellContext): void {
   ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT)
   ctx.restore()
 
+  /**
+   * A Streak pick pauses without a restart — the chain is "in a row", and a free reroll of the
+   * clock would gut it (D-199, the dungeon's own no-R rule) — and the way out names its price
+   * outright, because "Back to bench" on a button that snaps an S ×9 would be a trap.
+   */
+  const streak = c.streakPick === true
   const w = 420
   // 446, not 380: the panel gained a Help button and a panel sized for four buttons cannot hold
-  // five — the last one drew through its own bottom edge.
-  const h = 446
+  // five — the last one drew through its own bottom edge. The Streak variant drops one again.
+  const h = streak ? 380 : 446
   const x = (LOGICAL_WIDTH - w) / 2
   const y = (LOGICAL_HEIGHT - h) / 2
   panel(vp, p, { x, y, w, h }, undefined, p.paperShade)
@@ -2288,15 +2335,215 @@ export function drawPause(c: ShellContext): void {
     actions.resume()
   }
   by += 66
-  if (button(vp, p, ui, { x: x + 40, y: by, w: bw, h: 52 }, 'Restart lock')) actions.restart()
-  by += 66
+  if (!streak) {
+    if (button(vp, p, ui, { x: x + 40, y: by, w: bw, h: 52 }, 'Restart lock')) actions.restart()
+    by += 66
+  }
   // Reachable mid-attempt, because "what is that bar for" is a question you have *while* picking,
   // not one you plan a trip to the menu for (D-101).
   if (button(vp, p, ui, { x: x + 40, y: by, w: bw, h: 52 }, 'Help')) actions.goto('help')
   by += 66
   if (button(vp, p, ui, { x: x + 40, y: by, w: bw, h: 52 }, 'Settings')) actions.goto('settings')
   by += 66
-  if (button(vp, p, ui, { x: x + 40, y: by, w: bw, h: 52 }, 'Back to bench')) actions.abandon()
+  if (
+    button(vp, p, ui, { x: x + 40, y: by, w: bw, h: 52 }, streak ? 'Break the chain' : 'Back to bench')
+  ) {
+    actions.abandon()
+  }
+}
+
+// ── The Streak (D-199) ──────────────────────────────────────────────────────────────────
+
+/** The chain's ink is the results stamp's own mapping: teal to A, amber to C, crimson below. */
+function chainInk(p: Palette, rank: number | null): string {
+  if (rank === null) return p.inkLight
+  const readable = readableAccents(p)
+  return rank <= 1 ? readable.teal : rank <= 3 ? readable.amber : readable.crimson
+}
+
+/**
+ * One chain, stamped big in its panel — the results screen's letter, doing scoreboard duty.
+ * Scaled down to fit rather than clipped: `F ×999` is a chain somebody will eventually stand
+ * and the figure has to hold it.
+ */
+function chainFigure(vp: Viewport, rect: Rect, figure: string, ink: string, top: number): void {
+  const { ctx } = vp
+  const SIZE = 132
+  ctx.save()
+  ctx.font = font(SIZE, 'bold')
+  const w = ctx.measureText(figure).width
+  const scale = Math.min(1, (rect.w - 56) / Math.max(1, w))
+  ctx.translate(rect.x + rect.w / 2, rect.y + top + SIZE / 2)
+  ctx.scale(scale, scale)
+  ctx.fillStyle = ink
+  ctx.fillText(figure, -w / 2, SIZE * 0.36)
+  ctx.restore()
+}
+
+/**
+ * The Streak's one screen: the tally. Deal, current chain, best chain — briefing and results
+ * in the same place, because between locks they are the same place (D-199). The pick screen
+ * itself is untouched by the mode, exactly as the Gauntlet left it: a dealt lock is an
+ * ordinary lock whose name happens to say what tier it came off the pile from.
+ */
+export function drawStreak(c: ShellContext): void {
+  const { vp, p, ui, progress, actions } = c
+  const { ctx } = vp
+  const compact = isCompact(vp)
+  const readable = readableAccents(p)
+  const streak = progress.data.streak
+  const highest = progress.highestUnlockedTier
+
+  screenFrame(
+    c,
+    'Lock streak',
+    c.status ??
+      (compact
+        ? 'random locks, one after another'
+        : 'random locks, one after another — the chain only counts opens'),
+  )
+  navBar(c, [['Menu', () => actions.goto('menu')]])
+
+  const left = MARGIN + 60
+  label(ctx, 'One lock after another.', left, 220, {
+    font: font(typeFor(vp, TYPE.title)),
+    size: typeFor(vp, TYPE.title),
+    color: p.ink,
+  })
+
+  // Where the score cards begin — declared up here because the left column's text budgets are
+  // measured against it, not guessed near it.
+  const px = LOGICAL_WIDTH / 2 + 40
+  const bodySize = typeFor(vp, TYPE.body)
+  const lineH = Math.max(30, bodySize + 8)
+  const colW = compact ? 820 : 620
+  // Each block advances by the height `paragraph` actually consumed (D-132) — never by a
+  // guessed wrap count, which is how the first draft printed "picks only." on its neighbour.
+  let ty = 284
+  ty +=
+    paragraph(
+      ctx,
+      'Every deal is a lock you have never met — rolled fresh, never the same twice, from ' +
+        'whatever tiers your bench has unlocked. Wheels never turn up: picks only.',
+      left,
+      ty,
+      { font: font(bodySize), color: p.ink, maxWidth: colW, lineHeight: lineH, maxLines: 5 },
+    ) + 18
+  ty +=
+    paragraph(
+      ctx,
+      'Open it and the chain grows, wearing the worst letter in it. Snap the pick or walk ' +
+        'away and it breaks — and the best chain is captured as it falls.',
+      left,
+      ty,
+      { font: font(bodySize), color: p.inkLight, maxWidth: colW, lineHeight: lineH, maxLines: 5 },
+    ) + 44
+  const poolY = ty
+  /**
+   * Wrapped inside a measured budget that stops short of the card column, never drawn as one
+   * unbounded line. The sweep priced the long form 7px over the best card's caption — and the
+   * screenshot then caught what the sweep cannot: a line the cards are painted *after* buries
+   * its tail under their fill, which the probe's text-vs-text rule is blind to. A `maxWidth`
+   * makes the failure unreachable instead of merely unobserved.
+   */
+  const poolSize = typeFor(vp, TYPE.dimension)
+  const poolH = paragraph(
+    ctx,
+    compact
+      ? highest > 1
+        ? `tiers 1–${highest} on the pile, half again the clock`
+        : 'tier 1 on the pile — rank the bench for deeper deals'
+      : highest > 1
+        ? `dealing from tiers 1–${highest}, half again the bench clock on every lock`
+        : 'dealing from tier 1 — rank more of the bench to deepen the pile',
+    left,
+    poolY,
+    {
+      font: font(poolSize),
+      color: readable.amber,
+      maxWidth: px - 24 - left,
+      lineHeight: Math.max(26, poolSize + 8),
+      maxLines: 2,
+    },
+  )
+
+  const btnH = compact ? 84 : 56
+  const primaryW = compact ? 760 : 420
+  const startY = Math.max(compact ? 700 : 620, poolY + poolH + (compact ? 44 : 20))
+  if (
+    button(
+      vp,
+      p,
+      ui,
+      { x: left, y: startY, w: primaryW, h: btnH },
+      streak.current ? 'Next lock' : 'Deal a lock',
+      { primary: true },
+    )
+  ) {
+    actions.streakStart()
+  }
+
+  // ── The two chains, right half — the mode's whole scoreboard ──
+  //
+  // Side by side on the full page; STACKED on compact. Both choices are the sweep's: the
+  // compact title face crossed into the panel column (19px over THE CHAIN), so the cards sit
+  // below the heading's band — and the compact-scaled sub-lines are wider than a half-width
+  // card, so the centred pair crossed each other by 31px in the gap. A stacked card is the
+  // full column wide and everything fits at any face the matrix has.
+  const pw = LOGICAL_WIDTH - MARGIN - 36 - px
+  const cardGap = 24
+  const stacked = compact
+  const cardW = stacked ? pw : (pw - cardGap) / 2
+  const cardH = stacked ? 288 : 470
+  const py = compact ? 264 : 200
+  const subSize = typeFor(vp, TYPE.dimension)
+  // The figure sits higher in a stacked card so its sub-lines keep their air inside it.
+  const figureTop = stacked ? 64 : 78
+  const subOffset = figureTop + 132 + (stacked ? 20 : 64)
+
+  const chainCard = (
+    rect: Rect,
+    title: string,
+    chain: { rank: number; count: number } | null,
+    subline: string,
+    teal?: string,
+  ): void => {
+    panel(vp, p, rect, title)
+    chainFigure(vp, rect, chainLabel(chain), chainInk(p, chain?.rank ?? null), figureTop)
+    text(ctx, subline, rect.x + rect.w / 2, rect.y + subOffset, {
+      font: font(subSize),
+      color: p.inkLight,
+      align: 'center',
+    })
+    if (teal) {
+      text(ctx, teal, rect.x + rect.w / 2, rect.y + subOffset + subSize + 14, {
+        font: font(subSize),
+        color: readable.teal,
+        align: 'center',
+      })
+    }
+  }
+
+  chainCard(
+    { x: px, y: py, w: cardW, h: cardH },
+    'the chain',
+    streak.current,
+    streak.current ? `${streak.current.count} in a row, none dropped` : 'no chain standing',
+    // The line worth hurrying for: a standing chain already past the captured best. Only once
+    // a best exists — beside a card reading "no chain captured yet", "past your best" would
+    // name a thing the screen just said there is not.
+    streak.current && streak.best && beatsChain(streak.current, streak.best)
+      ? 'past your best — keep it alive'
+      : undefined,
+  )
+  chainCard(
+    stacked
+      ? { x: px, y: py + cardH + cardGap, w: cardW, h: cardH }
+      : { x: px + cardW + cardGap, y: py, w: cardW, h: cardH },
+    'best',
+    streak.best,
+    streak.best ? 'captured when its run ended' : 'no chain captured yet',
+  )
 }
 
 // ── The Gauntlet (D-165) ────────────────────────────────────────────────────────────────
