@@ -63,7 +63,23 @@ async function openIt(page: Page, tension = 0.45, rounds = 40): Promise<void> {
       await stepTicks(page, 120)
       continue
     }
-    await scriptPin(page, c.index, c.setLift + c.captureWindow * 0.5, tension, 240)
+    // Dip under the walls for a lying chamber, cruise for the honest ones, release on the
+    // click, breathe between rounds (D-204) — the same hand `openCurrentLock` plays.
+    const lying = c.state === 'FALSE_SET' || c.falseSetLifts.length > 0
+    for (let slice = 0; slice < 8; slice += 1) {
+      await scriptPin(
+        page,
+        c.index,
+        c.setLift + c.captureWindow * 0.5,
+        lying ? Math.min(tension, 0.2) : tension,
+        30,
+      )
+      const now = await getState(page)
+      const worked = now.chambers[c.index]
+      if (now.opened || worked?.state === 'SET' || worked?.state === 'OVERSET') break
+    }
+    await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: tension })
+    await stepTicks(page, 30)
   }
 }
 

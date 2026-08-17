@@ -272,7 +272,9 @@ test('heavy tension walls a spool that a light hand walks through', async ({ pag
     return getState(page)
   }
 
-  const light = await attempt(0.3)
+  // 0.2, down from 0.3 with D-204: the deadbolt carries a spool-deep, whose wall is ≈0.24
+  // now — the lightest wall in the lock is what the dip has to duck under.
+  const light = await attempt(0.2)
   expect(light.opened, `light: ${light.chambers.map((c) => c.state).join(',')}`).toBe(true)
 
   const heavy = await attempt(0.95)

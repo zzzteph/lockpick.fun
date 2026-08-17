@@ -87,6 +87,33 @@ export const PLUG_MAX_RATE = 1.2
  * a 0.12-deep notch can push anything.
  */
 export const COUNTER_ROTATION_FORCE = 42.8
+/**
+ * The pin chambers' counter-rotation force since D-204 — the owner's ruling, chosen from the
+ * three options measured in play: *"I do believe that counter rotation is not needed in our
+ * game - like I put on 2 level tension and I can put everything with no problems."* At 42.8
+ * every wall sat above the light steps (spool 0.55, serrated 0.60, t-pin 0.65), so a light
+ * hand never met one and the whole spool fight was optional. Raised so the walls land inside
+ * the playable band — spool between steps 3 and 4, mushroom around step 2, t-pin highest —
+ * making the climb a *felt* fight at the tensions people actually use, and the dips genuinely
+ * deep. The exact value is set by probe, not by the closed-form wall equation, because the
+ * pinch dynamics and exit geometry moved the real walls off the arithmetic twice already.
+ * Discs stay on `COUNTER_ROTATION_FORCE`: a wheel's gate drag is its only tell (D-197).
+ */
+export const PIN_COUNTER_FORCE = 90
+/**
+ * Ceiling on how much of a pin's taper feeds the counter-force — D-204's second finding.
+ *
+ * The force term is `F × T × (0.25 + taper)`, and at F=90 the mushroom's steep head (taper
+ * well past 0.5) drove its wall to 0.16 — BELOW `T_SET_HOLD` (0.18), the tension a set pin
+ * needs to stay on its ledge at all. That is not a hard lock, it is a structurally unpickable
+ * one: any hand light enough to climb the mushroom shed every banked pin mid-climb, and the
+ * solver's autopsy read 32 full resets and zero oversets on every failing seed. Past this cap
+ * a steeper head stops adding shove — the contact saturates — which holds the mushroom's wall
+ * at ~0.26: still the lowest in the catalogue (its identity — the pin that punishes a heavy
+ * hand hardest), now survivably above the hold floor. Spools and t-pins sit below the cap and
+ * are untouched by it.
+ */
+export const TAPER_FORCE_CAP = 0.35
 /** Radians of plug rotation past δ over which the ledge fully enters the groove. */
 export const ENGAGE_RAMP = 0.003
 
@@ -202,9 +229,8 @@ export const SET_SLIP_GRACE = 0.25
  * How long a set pin tolerates being *disturbed* — under its disturbed threshold while still
  * over its own — before it walks off, in seconds. D-203's time shape: the economy punishes a
  * hand that CAMPS at light pressure, not one that passes through. A transit shove across a
- * long lock runs ~1.2s of contact (the shaft suite's crossing, which must stay free — D-051:
- * travel never costs banked work) and a probe touch far less; a hand hunting pins while
- * parked at step 3 leans well past this on every chamber it works.
+ * long lock runs ~1.2s of contact and a probe touch far less; a hand hunting pins while
+ * parked light leans well past this on every chamber it works.
  */
 export const DISTURB_SLIP_GRACE = 1.5
 

@@ -216,8 +216,11 @@ describe('a serrated pin', () => {
     expect(spoolWall, `spool ${spoolWall} vs mushroom ${mushroomWall}`).toBeGreaterThan(
       mushroomWall,
     )
-    // And it still goes through comfortably at any tension a player would actually use.
-    expect(serratedWall).toBeGreaterThan(0.5)
+    // Highest wall of the three, above the taught climbing band — the ordering is the claim.
+    // (Was `> 0.5` when the walls lived above the playable steps; D-204 brought them down.
+    // `> 0.35` rather than `>= 0.4`: the wall sits exactly on the 0.4 grid step and float
+    // dust under a strict >= is a coin toss.)
+    expect(serratedWall).toBeGreaterThan(0.35)
   })
 })
 
@@ -267,9 +270,10 @@ describe('a mushroom', () => {
     expect(settable(oneMushroom, 0.12)).toBe(true)
     expect(settable(oneMushroom, 0.3)).toBe(false)
     // The spool is still going at a tension that has already stopped the mushroom dead, which is
-    // the ordering this test exists for. Measured walls on a lone pin: mushroom ≈0.3, spool ≈0.5.
+    // the ordering this test exists for. Measured walls on a lone pin since D-204: mushroom
+    // ≈0.26, spool ≈0.32 — and 0.4, which used to sail through, is a wall now.
     expect(settable(SINGLE_SPOOL, 0.3)).toBe(true)
-    expect(settable(SINGLE_SPOOL, 0.4)).toBe(true)
+    expect(settable(SINGLE_SPOOL, 0.4)).toBe(false)
   })
 })
 
@@ -379,7 +383,8 @@ describe('opening a security-pinned lock', () => {
 
   it('opens a serrated lock despite four lies per pin', () => {
     const s = createSimState(SERRATED_LOCK, 5, configWith(PERFECT_TOOLS))
-    expect(pickThrough(s, 0.4, 40)).toBe(true)
+    // 0.3, down from 0.4 with D-204: the serrated wall is ≈0.38 now, and 0.4 grinds forever.
+    expect(pickThrough(s, 0.3, 40)).toBe(true)
     expect(s.stats.falseSetsEntered).toBeGreaterThanOrEqual(4)
   })
 
@@ -573,10 +578,11 @@ describe('the tension economy — DECISIONS D-203', () => {
     stage(s, 2)
     const spool = s.chambers.find((c) => c.profile.bands.some((band) => band.reduced))
     if (!spool) throw new Error('no spool in the fixture')
-    // Lift at the default until the lie fires and walls, then dip to step 3 and climb.
+    // Lift at the default until the lie fires and walls, then dip below the wall and climb —
+    // 0.25 since D-204 brought the spool wall to ≈0.32, where 0.304 is a crawl at best.
     holdAt(s, spool.index, spool.setLift + 0.02, 0.489, 1.2)
     expect(spool.hasFalseSet).toBe(true)
-    holdAt(s, spool.index, spool.setLift + 0.02, 0.304, 3)
+    holdAt(s, spool.index, spool.setLift + 0.02, 0.25, 3)
     expect(spool.state).toBe('SET')
     expect(
       s.chambers.filter((c) => c.state === 'SET').length,

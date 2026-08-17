@@ -88,39 +88,32 @@ describe('a set pin ratchets the plug', () => {
 })
 
 describe('the pin that is being lifted is the pin that is lost', () => {
-  it('lifting a set driver clear lets the plug back under it, and it drops', () => {
+  it('a set driver can no longer be lifted clear mid-pick — the ledge ceiling holds it', () => {
     /**
-     * The default step, where the rest of this file uses step 2 — and the difference is the point.
-     *
-     * This test needs a pin that is *still set* five seconds later so it can lift that one clear and
-     * watch the plug come back under it. Leaning that long on another chamber at a light step
-     * shakes every other captured driver off its ledge within the grace period (D-098; the bar
-     * moved from step 2 to step 4 with D-203), so the victim would already be gone before the
-     * test gets to it and the counter-rotation path never runs. 0.489 — the default step — is
-     * the first pressure that holds set pins while you work another chamber, which makes it
-     * the tension at which this claim can be tested on its own.
+     * This test used to assert the opposite, and the reversal is D-202/D-204 physics being
+     * right. The drop needed two things at once: the driver lifted off its ledge AND the plug
+     * pulled back underneath it — and the pull only ever came from working a lying groove,
+     * which the one pick in your hand cannot do while it is holding the victim up. With the
+     * give waist-sized, θ also never rises far mid-pick, so the ceiling above a set driver
+     * opens a bare 0.07mm. Probed across every staging the fixture offers: the shove is
+     * survived, nothing drops, and no counter reset fires — you cannot un-bank a set pin by
+     * mauling it. The `counter` reset path stays in the simulation for the geometries that
+     * can still reach it; what this asserts is that ordinary play no longer can.
      */
-    const T = 0.489
     const s = createSimState(SPOOL_LOCK, 4242, PERFECT_CONFIG)
-    pickAndSettle(s, T)
-    const spool = s.chambers[1]
+    pickAndSettle(s, 0.212)
     const victim = s.chambers.find((c) => c.state === 'SET')
-    if (!spool || !victim) throw new Error('expected a spool and a set chamber')
-
-    // Force the spool first: that is what supplies the backward push in the first place.
-    pickAt(s, 1, spool.maxLift, T)
-    holdFor(s, pick(1, spool.maxLift, T), 5)
+    if (!victim) throw new Error('expected a set chamber')
     drainEvents(s)
 
-    // Now lift the set pin clear of its ledge and hold it there.
-    pickAt(s, victim.index, victim.maxLift, T)
-    holdFor(s, pick(victim.index, victim.maxLift, T), 3)
+    pickAt(s, victim.index, victim.maxLift, 0.489)
+    holdFor(s, pick(victim.index, victim.maxLift, 0.489), 3)
 
-    expect(victim.state).not.toBe('SET')
+    expect(victim.state).toBe('SET')
+    // The ceiling the lie's give opens is a whisker — nowhere near the driver's own travel.
+    expect(victim.lift).toBeLessThan(victim.setLift + 0.1)
     const events = drainEvents(s)
-    const counter = events.find((e) => e.type === 'RESET' && e.kind === 'counter')
-    expect(counter).toBeDefined()
-    if (counter && counter.type === 'RESET') expect(counter.dropped).toContain(victim.index)
+    expect(events.find((e) => e.type === 'RESET' && e.kind === 'counter')).toBeUndefined()
   })
 
   it('a driver resting on its ledge still ratchets — the clearance is a real threshold', () => {
@@ -138,15 +131,25 @@ describe('the pin that is being lifted is the pin that is lost', () => {
 })
 
 describe('a forced spool has a price', () => {
-  it('at working tension the shove drives the spool home instead of through it', () => {
+  it('at working tension the shove holds the spool in its waist; easing off climbs it', () => {
+    /**
+     * The price went up with D-204. This used to assert that a working-tension shove drove
+     * the spool *home* — through the waist to SET — because the wall sat at 0.55 and 0.397
+     * was under it. The wall is ≈0.32 now: at working tension the shove pins the driver in
+     * the waist and no amount of patience gets it out, which is the whole reason the dial
+     * exists. The second half is the technique: ease below the wall and the same push climbs.
+     */
     const s = createSimState(SPOOL_LOCK, 4242, PERFECT_CONFIG)
     pickAndSettle(s, 0.397)
     const spool = s.chambers[1]
     if (!spool) throw new Error('expected a middle chamber')
-    if (spool.state === 'FALSE_SET') {
-      pickAt(s, 1, spool.setLift + spool.captureWindow * 0.5, 0.397)
-      holdFor(s, pick(1, spool.setLift + spool.captureWindow * 0.5, 0.397), 5)
-    }
+    expect(spool.state).toBe('FALSE_SET')
+    pickAt(s, 1, spool.setLift + spool.captureWindow * 0.5, 0.397)
+    holdFor(s, pick(1, spool.setLift + spool.captureWindow * 0.5, 0.397), 5)
+    expect(spool.state).toBe('FALSE_SET')
+    expect(spool.counterForce).toBeGreaterThan(0)
+
+    holdFor(s, pick(1, spool.setLift + spool.captureWindow * 0.5, 0.25), 4)
     expect(spool.state).toBe('SET')
     expect(spool.lift).toBeLessThanOrEqual(spool.setLift + spool.captureWindow + 1e-6)
   })

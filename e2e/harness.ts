@@ -545,13 +545,25 @@ export async function openCurrentLock(page: Page, tension = 0.45): Promise<HookS
       await stepTicks(page, 120)
       continue
     }
-    await scriptPin(
-      page,
-      target.index,
-      target.setLift + target.captureWindow * 0.5,
-      tension,
-      240,
-    )
+    // The taught hand since D-204: dip under every wall in the catalogue for a chamber that
+    // lies (or is about to), cruise for the honest ones, stop pushing the moment it clicks,
+    // and breathe at cruise between rounds. On an all-security lock every round is a dip
+    // round, and a fixed shove that leans on past capture bleeds the earlier sets.
+    const lying = target.state === 'FALSE_SET' || target.falseSetLifts.length > 0
+    for (let slice = 0; slice < 8; slice += 1) {
+      await scriptPin(
+        page,
+        target.index,
+        target.setLift + target.captureWindow * 0.5,
+        lying ? Math.min(tension, 0.2) : tension,
+        30,
+      )
+      const now = await getState(page)
+      const worked = now.chambers[target.index]
+      if (now.opened || worked?.state === 'SET' || worked?.state === 'OVERSET') break
+    }
+    await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: tension })
+    await stepTicks(page, 30)
   }
   return getState(page)
 }

@@ -28,7 +28,9 @@ import {
   CAPTURE_TIME,
   CONTINUOUS_EVENT_STRIDE,
   COUNTER_ROTATION_FORCE,
+  PIN_COUNTER_FORCE,
   SERRATION_GRIP,
+  TAPER_FORCE_CAP,
   DISC_SPRING_RETURN,
   DT,
   LEDGE_CLEAR_MM,
@@ -144,7 +146,13 @@ function applyCounterRotation(state: SimState, c: Chamber, T: number, dt: number
     return
   }
   const engage = clamp01((state.theta - c.delta) / ENGAGE_RAMP)
-  c.counterForce = COUNTER_ROTATION_FORCE * T * (0.25 + taperAt(c)) * engage
+  // Pins fight at D-204's raised force; discs keep the spec's — a wheel's gate drag is
+  // tuned feel the dungeon has burned us on twice, and the owner's ruling was about pins.
+  // The taper cap is pin-side only for the same reason.
+  const disc = c.kind === 'disc'
+  const force = disc ? COUNTER_ROTATION_FORCE : PIN_COUNTER_FORCE
+  const taper = disc ? taperAt(c) : Math.min(taperAt(c), TAPER_FORCE_CAP)
+  c.counterForce = force * T * (0.25 + taper) * engage
   if (c.counterForce > 0) {
     if (c.counterForce > state.stats.maxCounterForce) {
       state.stats.maxCounterForce = c.counterForce

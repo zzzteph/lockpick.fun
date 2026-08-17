@@ -327,6 +327,16 @@ function workChamber(
   const c = s.chambers[index]
   if (!c) return { tension, done: true }
   let working = tension
+  /**
+   * A lie already standing on this chamber is a fight already declared — ease before pushing
+   * (D-204). Without this, the restore-to-cruise between chambers made every revisit to a
+   * fighting pin re-pay the whole stall-and-descend ladder from the top, which is where the
+   * last few timeout seeds went. A quarter of the way up from the floor clears every wall in
+   * the catalogue while staying above the feather line.
+   */
+  if (c.state === 'FALSE_SET') {
+    working = Math.max(minTension, minTension + (working - minTension) * 0.25)
+  }
   // A sidebar gate is unreadable geometry — aim at whatever the opening survey found.
   const target = gates.get(index) ?? targetLiftFor(c)
   // Get there before starting the clock: the stall detector below measures a pin that is not
@@ -366,10 +376,13 @@ function workChamber(
     }
 
     // Not moving? A groove is wedged against the plug's ledge. Back the tension off — the
-    // counter-force scales with it, and this is the whole spool technique.
+    // counter-force scales with it, and this is the whole spool technique. HALVING toward the
+    // floor rather than stepping (D-204): with the walls down in the playable band, a fixed
+    // 0.08 ladder from cruise spent whole seconds above a mushroom's 0.16 wall and six tier-3/4
+    // locks timed out — a hand that feels a fight eases right off, it does not tiptoe.
     if (stalled > STALL_TICKS) {
       if (working <= minTension + 1e-9) return { tension: working, done: false }
-      working = Math.max(minTension, working - TENSION_STEP)
+      working = Math.max(minTension, minTension + (working - minTension) * 0.5)
       stalled = 0
     }
   }
@@ -482,8 +495,15 @@ export function solveLock(
       lowest = Math.min(lowest, tension)
       rec.run(input(-1, 0, tension), Math.round(0.2 / DT))
     } else {
-      tension = result.tension
-      lowest = Math.min(lowest, tension)
+      /**
+       * Back to cruise once the chamber is won — D-204. Staying at the dipped tension was
+       * survivable when dips were shallow; with the walls down a dip runs to 0.11-0.2, where
+       * the pick crosses a tier-4 capture window faster than anything can catch — the solver
+       * overset its way through the clock on six locks. Dip for the fight, come back up for
+       * the work. (The earlier revert of this line was collateral: it shipped alongside a
+       * cruise raise that froze the wheels, and the wheels never pass through this path.)
+       */
+      tension = startTension
     }
   }
 

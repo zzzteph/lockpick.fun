@@ -513,9 +513,11 @@ export const LESSONS: readonly Lesson[] = [
         id: 'false-set',
         line: 'The plug just gave, and that pin feels set. It is not — that is a spool lying.',
         done: (s) => s.chambers.some((c) => c.hasFalseSet && c.state === 'SET'),
+        // "2", no longer "2 or 3": D-204 put the spool wall at ≈0.32, and step 3 is a crawl
+        // against it — bad advice to teach as the default dip.
         hint: {
-          kb: 'Ease the tension off — press 2 or 3 — and keep holding Space on that pin.',
-          deck: 'Ease the tension off — L1 down to 2 or 3 — and keep holding A on that pin.',
+          kb: 'Ease the tension off — press 2 — and keep holding Space on that pin.',
+          deck: 'Ease the tension off — L1 down to 2 — and keep holding A on that pin.',
         },
         hintAfter: 8,
       },

@@ -67,7 +67,8 @@ test('a sidebar holds the plug back with every pin set, and says so', async ({ p
   const gated = start.chambers.filter((c) => c.sidebarGate !== null)
   expect(gated.length).toBeGreaterThan(0)
 
-  await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: 0.4 })
+  // 0.22 since D-204: the sidebar lock's tight tolerance pulls its spools' wall to ~0.25.
+  await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: 0.22 })
   await stepTicks(page, 60)
 
   // Set every chamber deliberately at the far end of its window from the gate.
@@ -92,7 +93,7 @@ test('a sidebar holds the plug back with every pin set, and says so', async ({ p
         : Math.abs(high - gate) > Math.abs(low - gate)
           ? high
           : low
-    await scriptPin(page, b, target, 0.4, 0)
+    await scriptPin(page, b, target, 0.22, 0)
     await stepTicks(page, 60)
     state = await getState(page)
   }

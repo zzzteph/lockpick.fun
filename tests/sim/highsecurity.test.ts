@@ -349,13 +349,16 @@ describe('the top of the roster', () => {
  * the whole point when the question is whether setting it in the wrong place is detected.
  */
 function setEveryChamber(s: SimState, targetFor: (c: SimState['chambers'][number]) => number): void {
-  holdFor(s, tensionOnly(0.35), 0.3)
+  // 0.22, down from 0.35 with D-204: the sidebar lock's tight tolerance (0.58) pulls its
+  // spools' wall to ~0.25, and a stage that grinds above the wall never sets them. Probed:
+  // at 0.22 all six chambers set; at 0.28 two spools stay wedged. Above the 0.18 hold floor.
+  holdFor(s, tensionOnly(0.22), 0.3)
   for (let guard = 0; guard < 6000 && !s.chambers.every((c) => c.state === 'SET'); guard += 1) {
     // A false-set chamber is nobody's binding chamber — the groove has swallowed the ledge —
     // so falling back to the first unset one is what keeps a spool from deadlocking this.
     const b = s.bindingChamber >= 0 ? s.bindingChamber : s.chambers.findIndex((c) => c.state !== 'SET')
     const c = b >= 0 ? s.chambers[b] : undefined
     if (!c) break
-    holdFor(s, pick(b, targetFor(c), 0.35), 1 / 120)
+    holdFor(s, pick(b, targetFor(c), 0.22), 1 / 120)
   }
 }

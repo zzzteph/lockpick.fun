@@ -199,7 +199,8 @@ test('manual play checklist', async ({ page }) => {
     }
     rounds += 1
     // Stalled on a groove? Back the pressure off — the technique the lock is teaching.
-    if (rounds === 14) await pressureStep(page, 3)
+    // Step 2 since D-204: the spool wall is ≈0.32 now, and step 3 is a crawl against it.
+    if (rounds === 14) await pressureStep(page, 2)
 
     /**
      * Jammed a pin? Drop the wrench, take the reset, start again.
@@ -214,7 +215,8 @@ test('manual play checklist', async ({ page }) => {
       await tension(page, false)
       await page.waitForTimeout(400)
       await tension(page, true)
-      await pressureStep(page, 4)
+      // Back to step 2 — the dip this run has already learned; 4 would wall the spools (D-204).
+      await pressureStep(page, 2)
       await page.waitForTimeout(200)
       continue
     }

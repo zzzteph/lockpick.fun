@@ -133,7 +133,8 @@ test('@screenshot phase-14 the open, in full', async ({ page }) => {
         chamber: c.index,
         liftTarget: c.setLift + c.captureWindow * 0.5,
         tensionHeld: true,
-        tensionLevel: lying ? 0.35 : 0.489,
+        // 0.2 ducks under every wall in the deadbolt, spool-deep's ≈0.24 included (D-204).
+        tensionLevel: lying ? 0.2 : 0.489,
       })
       await stepTicks(page, 30)
       const now = await getState(page)
