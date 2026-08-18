@@ -2413,7 +2413,15 @@ export function drawStreak(c: ShellContext): void {
   if (!g) return
 
   const left = MARGIN + 60
-  label(ctx, 'Five minutes. As many as you can.', left, 220, {
+  /**
+   * The compact page gets the short title and one short paragraph — the D-122 rule, learnt
+   * here from the GitHub runner rather than a phone: at the extreme faces (2.4× type) the
+   * full title sat a hair over the right stage edge (26px on CI's font metrics, borderline
+   * locally — borderline-by-design IS the bug) and 3px under the MENU button, and the
+   * stacked copy shoved START THE CLOCK 61px below the stage, where the blueprint audit
+   * memorably read its caption at 1.30:1 against the letterbox.
+   */
+  label(ctx, compact ? 'Five minutes.' : 'Five minutes. As many as you can.', left, 220, {
     font: font(typeFor(vp, TYPE.title)),
     size: typeFor(vp, TYPE.title),
     color: p.ink,
@@ -2424,36 +2432,53 @@ export function drawStreak(c: ShellContext): void {
   const bodySize = typeFor(vp, TYPE.body)
   const lineH = Math.max(30, bodySize + 8)
   let ty = 284
-  ty +=
-    paragraph(
-      ctx,
-      'Every deal is a lock you have never met, from whatever tiers your bench has ' +
-        'unlocked. Each open scores its tier — a tier-4 lock is worth four tier-1s.',
-      left,
-      ty,
-      {
-        font: font(bodySize),
-        color: p.ink,
-        maxWidth: px - 24 - left,
-        lineHeight: lineH,
-        maxLines: 5,
-      },
-    ) + 18
-  ty +=
-    paragraph(
-      ctx,
-      'A snapped pick skips to the next lock, and so does R — the seconds you spent are ' +
-        'the price. The clock never stops for a deal.',
-      left,
-      ty,
-      {
-        font: font(bodySize),
-        color: p.inkLight,
-        maxWidth: px - 24 - left,
-        lineHeight: lineH,
-        maxLines: 5,
-      },
-    ) + 36
+  if (compact) {
+    ty +=
+      paragraph(
+        ctx,
+        'Each open scores its tier. R skips a lock; the clock never stops.',
+        left,
+        ty,
+        {
+          font: font(bodySize),
+          color: p.ink,
+          maxWidth: px - 24 - left,
+          lineHeight: lineH,
+          maxLines: 3,
+        },
+      ) + 30
+  } else {
+    ty +=
+      paragraph(
+        ctx,
+        'Every deal is a lock you have never met, from whatever tiers your bench has ' +
+          'unlocked. Each open scores its tier — a tier-4 lock is worth four tier-1s.',
+        left,
+        ty,
+        {
+          font: font(bodySize),
+          color: p.ink,
+          maxWidth: px - 24 - left,
+          lineHeight: lineH,
+          maxLines: 5,
+        },
+      ) + 18
+    ty +=
+      paragraph(
+        ctx,
+        'A snapped pick skips to the next lock, and so does R — the seconds you spent are ' +
+          'the price. The clock never stops for a deal.',
+        left,
+        ty,
+        {
+          font: font(bodySize),
+          color: p.inkLight,
+          maxWidth: px - 24 - left,
+          lineHeight: lineH,
+          maxLines: 5,
+        },
+      ) + 36
+  }
 
   // The difficulty, exactly the dungeon briefing's control: the run's locks are simulated
   // at it, and the bests are kept per rung.
@@ -2512,10 +2537,15 @@ export function drawStreak(c: ShellContext): void {
   }
 
   // ── The right half: the last run's summary, or the standing bests ──
+  //
+  // On compact the bests board goes (D-122's rule): the amber line above already answers
+  // "what is my best here", and four rows of scaled type beside a scaled column is exactly
+  // the crowding the extreme faces cannot hold. The summary stays — it is the payoff.
   const pw = LOGICAL_WIDTH - MARGIN - 36 - px
   const py = compact ? 264 : 200
   const ph = compact ? 560 : 470
   const subSize = typeFor(vp, TYPE.dimension)
+  if (compact && !g.summary) return
   if (g.summary) {
     panel(vp, p, { x: px, y: py, w: pw, h: ph }, 'the run')
     scoreFigure(
