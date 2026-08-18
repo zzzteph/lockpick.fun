@@ -1,124 +1,91 @@
 /**
- * The Streak — D-199.
+ * The Lock streak — D-205's five-minute blitz (replacing D-199's chain).
  *
- * Three claims worth proving headlessly: the chain arithmetic (grow, wear the worst letter,
- * capture on the break and only then), the deal (always a valid pin-tumbler, never a wheel
- * pack, priced like the roster with the time bonus on top), and the save's coercion of the two
- * chains. Whether a dealt lock is *beatable* is already covered from the other side —
- * `dungeonOpenable.test.ts` proves every cylinder the shared forge can produce, and the Streak
- * deals nothing else.
+ * Three claims worth proving headlessly: the scoring (sum of tiers, best per difficulty,
+ * banked only when a run finishes), the deal (always a valid pin-tumbler, never a wheel pack,
+ * priced like the roster with the time bonus on top), and the save's coercion of the bests.
+ * Whether a dealt lock is *beatable* is already covered from the other side —
+ * `dungeonOpenable.test.ts` proves every cylinder the shared forge can produce, and the
+ * Streak deals nothing else.
  */
 
 import { describe, expect, it } from 'vitest'
 import { MemoryStorage, migrate, newSave } from '../../src/game/save'
 import { Progress } from '../../src/game/progress'
-import { RANKS, letterFor } from '../../src/game/ranks'
 import { ALL_LOCKS } from '../../src/game/locks'
 import {
   STREAK_ID_BASE,
+  STREAK_SECONDS,
   STREAK_TIME_BONUS,
-  beatsChain,
-  chainLabel,
-  extendChain,
+  beatsScore,
+  blitzClock,
   generateStreakLock,
   streakTierFor,
 } from '../../src/game/streak'
 import { validateLockDef } from '../../src/sim'
 
-const S = 0
-const A = 1
-const B = 2
-const F = RANKS.length - 1
-
-describe('the chain', () => {
-  it('starts at ×1 wearing exactly what it earned', () => {
-    expect(extendChain(null, A)).toEqual({ rank: A, count: 1 })
+describe('the scoring', () => {
+  it('is five minutes flat', () => {
+    expect(STREAK_SECONDS).toBe(300)
   })
 
-  it('grows by one and wears its worst letter', () => {
-    let chain = extendChain(null, S)
-    chain = extendChain(chain, S)
-    expect(chain).toEqual({ rank: S, count: 2 })
-    chain = extendChain(chain, B)
-    expect(chain).toEqual({ rank: B, count: 3 })
-    // A later clean open cannot polish the letter back up: the B stays in the chain.
-    chain = extendChain(chain, S)
-    expect(chain).toEqual({ rank: B, count: 4 })
-  })
-
-  it('ranks length first, then the cleaner letter', () => {
-    expect(beatsChain({ rank: F, count: 7 }, { rank: S, count: 3 })).toBe(true)
-    expect(beatsChain({ rank: S, count: 3 }, { rank: F, count: 7 })).toBe(false)
-    expect(beatsChain({ rank: S, count: 3 }, { rank: A, count: 3 })).toBe(true)
-    expect(beatsChain({ rank: A, count: 3 }, { rank: S, count: 3 })).toBe(false)
+  it('ranks score first, opens breaking ties', () => {
+    expect(beatsScore({ score: 12, opens: 4 }, undefined)).toBe(true)
+    expect(beatsScore({ score: 12, opens: 4 }, { score: 11, opens: 9 })).toBe(true)
+    expect(beatsScore({ score: 11, opens: 9 }, { score: 12, opens: 4 })).toBe(false)
+    expect(beatsScore({ score: 12, opens: 6 }, { score: 12, opens: 4 })).toBe(true)
     // A tie beats nothing: the standing best keeps its place.
-    expect(beatsChain({ rank: S, count: 3 }, { rank: S, count: 3 })).toBe(false)
-    expect(beatsChain({ rank: F, count: 1 }, null)).toBe(true)
+    expect(beatsScore({ score: 12, opens: 4 }, { score: 12, opens: 4 })).toBe(false)
   })
 
-  it('prints as the letter times the count', () => {
-    expect(chainLabel({ rank: S, count: 3 })).toBe(`${letterFor(S)} ×3`)
-    expect(chainLabel(null)).toBe('—')
-  })
-})
-
-describe('the bookkeeping (Progress)', () => {
-  it('grows the current chain on an open and saves it', () => {
+  it('banks a finished run per difficulty, keeping the better one', () => {
     const p = Progress.fresh(new MemoryStorage())
-    expect(p.noteStreakOpen(S)).toEqual({ rank: S, count: 1 })
-    expect(p.noteStreakOpen(A)).toEqual({ rank: A, count: 2 })
-    expect(p.data.streak.current).toEqual({ rank: A, count: 2 })
-    // Best is untouched while the chain stands — capture happens at the break, not before.
-    expect(p.data.streak.best).toBeNull()
+    expect(p.noteStreakRun('easy', { score: 9, opens: 5 })).toBe(true)
+    expect(p.data.streakBest['easy']).toEqual({ score: 9, opens: 5 })
+    // A worse run leaves the board alone.
+    expect(p.noteStreakRun('easy', { score: 7, opens: 7 })).toBe(false)
+    expect(p.data.streakBest['easy']).toEqual({ score: 9, opens: 5 })
+    // Difficulties keep separate boards.
+    expect(p.noteStreakRun('hard', { score: 3, opens: 1 })).toBe(true)
+    expect(p.data.streakBest['easy']).toEqual({ score: 9, opens: 5 })
+    expect(p.data.streakBest['hard']).toEqual({ score: 3, opens: 1 })
   })
 
-  it('captures the best exactly when a chain breaks', () => {
-    const p = Progress.fresh(new MemoryStorage())
-    p.noteStreakOpen(S)
-    p.noteStreakOpen(S)
-    p.noteStreakOpen(S)
-    const first = p.breakStreak()
-    expect(first).toEqual({ captured: { rank: S, count: 3 }, newBest: true })
-    expect(p.data.streak).toEqual({ current: null, best: { rank: S, count: 3 } })
-
-    // A shorter chain falls without taking the best's place.
-    p.noteStreakOpen(S)
-    const second = p.breakStreak()
-    expect(second.newBest).toBe(false)
-    expect(p.data.streak.best).toEqual({ rank: S, count: 3 })
-
-    // A longer, sloppier one takes it — length first is the mode's whole name.
-    for (let i = 0; i < 4; i += 1) p.noteStreakOpen(F)
-    expect(p.breakStreak().newBest).toBe(true)
-    expect(p.data.streak.best).toEqual({ rank: F, count: 4 })
-  })
-
-  it('breaking with no chain standing is legal and does nothing', () => {
-    const p = Progress.fresh(new MemoryStorage())
-    expect(p.breakStreak()).toEqual({ captured: null, newBest: false })
-    expect(p.data.streak).toEqual({ current: null, best: null })
+  it('prints the clock as m:ss, floored at zero', () => {
+    expect(blitzClock(300)).toBe('5:00')
+    expect(blitzClock(29.4)).toBe('0:30')
+    expect(blitzClock(-2)).toBe('0:00')
   })
 })
 
 describe('the save', () => {
-  it('an old save wakes up with both chains empty', () => {
-    const migrated = migrate({ version: 1, credits: 0, opens: {} })
-    expect(migrated.streak).toEqual({ current: null, best: null })
+  it('an old save wakes up with an empty board — D-199 chains are dropped without ceremony', () => {
+    const migrated = migrate({
+      version: 5,
+      records: {},
+      streak: { current: { rank: 0, count: 9 }, best: { rank: 1, count: 3 } },
+    })
+    expect(migrated.streakBest).toEqual({})
+    expect('streak' in migrated).toBe(false)
   })
 
-  it('round-trips the chains and refuses half-remembered ones', () => {
+  it('round-trips the bests and refuses half-remembered ones', () => {
     const s = newSave()
-    s.streak = { current: { rank: 1, count: 4 }, best: { rank: 0, count: 9 } }
+    s.streakBest = { easy: { score: 21, opens: 9 }, hard: { score: 4, opens: 1 } }
     const back = migrate(JSON.parse(JSON.stringify(s)))
-    expect(back.streak).toEqual(s.streak)
+    expect(back.streakBest).toEqual(s.streakBest)
 
-    // A rank off the ladder is clamped onto it; a count below one is no chain at all.
     const mangled = migrate({
       ...JSON.parse(JSON.stringify(newSave())),
-      streak: { current: { rank: 40, count: 2.9 }, best: { rank: 0, count: 0 } },
+      streakBest: {
+        easy: { score: 21.9, opens: 9.2 },
+        medium: { score: -3, opens: 1 },
+        hard: { score: 'lots', opens: 1 },
+      },
     })
-    expect(mangled.streak.current).toEqual({ rank: RANKS.length - 1, count: 2 })
-    expect(mangled.streak.best).toBeNull()
+    expect(mangled.streakBest['easy']).toEqual({ score: 21, opens: 9 })
+    expect(mangled.streakBest['medium']).toBeUndefined()
+    expect(mangled.streakBest['hard']).toBeUndefined()
   })
 })
 
@@ -140,13 +107,14 @@ describe('the tier roll', () => {
 describe('the deal', () => {
   const SEEDS = [1, 88141, 31337, 271828, 999331]
 
-  it('is a valid pin tumbler at every tier — never a wheel pack', () => {
+  it('is a valid pin tumbler at every tier — never a wheel pack — and its tier is its price', () => {
     for (const tier of [1, 2, 3, 4] as const) {
       for (const seed of SEEDS) {
         const def = generateStreakLock(seed, tier * 7 + 1, tier)
         expect(() => validateLockDef(def), `seed ${seed} tier ${tier}`).not.toThrow()
         expect(def.family).toBe('pin-tumbler')
         expect(def.discs).toBeUndefined()
+        // The tier is the scoreboard's unit, so the def must carry the tier it was dealt at.
         expect(def.tier).toBe(tier)
         expect(def.id).toBeGreaterThanOrEqual(STREAK_ID_BASE)
         // The deal is blind, so the name says what the hand wants to know first.

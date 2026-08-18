@@ -108,6 +108,12 @@ export interface HudOptions {
   readonly lockName: string
   readonly elapsed: number
   /**
+   * Seconds left on the Lock streak's run clock (D-205). When present the header clock counts
+   * DOWN and turns crimson inside the last half minute — the per-lock time is meaningless in
+   * a blitz, and the number a sprinting hand needs is the one that ends the run.
+   */
+  readonly countdownLeft?: number
+  /**
    * Hide the resistance meter — Expert mode, which leaves audio and pick flex only.
    * Blind mode *keeps* it: `GAME_DESIGN.md §4` gives Blind "sound and the meter".
    */
@@ -549,9 +555,12 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
   // 70px digit in a 64px header band printed out through the border — reported as *"timing goes
   // out of the border area"* (D-157). The cap only ever binds at the compact scale.
   const clockSize = Math.min(ts(TYPE.clock), HEADER_H - 14)
-  text(ctx, formatClock(opts.elapsed), clockX, MARGIN + HEADER_H / 2 + clockSize * 0.36, {
+  const clockValue = opts.countdownLeft !== undefined ? Math.max(0, opts.countdownLeft) : opts.elapsed
+  text(ctx, formatClock(clockValue), clockX, MARGIN + HEADER_H / 2 + clockSize * 0.36, {
     font: font(clockSize),
-    color: p.ink,
+    // The run clock burning down through its last half minute is the one number that matters.
+    color:
+      opts.countdownLeft !== undefined && opts.countdownLeft < 30 ? readableAccents(p).crimson : p.ink,
     align: 'right',
   })
   const left = secondsLeftInRank(opts.elapsed, opts.par)

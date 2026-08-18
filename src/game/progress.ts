@@ -12,7 +12,7 @@ import { newlyEarned, type Achievement } from './achievements'
 import { challengesMet } from './challenges'
 import { CUSTOM_ID_BASE, slugFor } from './editor'
 import { bestOf, countsForTier, rankEarned } from './ranks'
-import { beatsChain, extendChain, type StreakChain } from './streak'
+import { beatsScore, type StreakScore } from './streak'
 import { ALL_LOCKS, locksInTier } from './locks'
 import { KIT } from './tools'
 import {
@@ -339,32 +339,18 @@ export class Progress {
   }
 
   /**
-   * One more open on the Streak's chain — D-199. The chain's letter is its worst open, so an S
-   * chain is a chain that never once dropped one. `best` is deliberately not touched here: a
-   * best is captured when a chain *breaks*, which is the mode's whole ceremony, and capturing
-   * early would drain the one moment the tally screen has.
+   * Bank a finished five-minute run — D-205, the same shape as `noteGauntlet`. Returns
+   * whether it is a new personal best at this difficulty, which is the one thing the summary
+   * screen wants to know. Called only when the clock runs out: an abandoned run banks
+   * nothing, and that rule lives in the run machine, not here.
    */
-  noteStreakOpen(rank: number): StreakChain {
-    const current = extendChain(this.data.streak.current, rank)
-    this.data.streak = { ...this.data.streak, current }
-    this.save()
-    return current
-  }
-
-  /**
-   * The chain breaks — a walk-away or a snapped pick, and the run machine in `app.ts` decides
-   * which counts. Captures the fallen chain into `best` if it earned the place, clears the
-   * table, and reports what fell so the tally screen can say so. Breaking with no chain
-   * standing is legal and does nothing, which is what lets every walk-away route call this
-   * without checking first.
-   */
-  breakStreak(): { captured: StreakChain | null; newBest: boolean } {
-    const { current, best } = this.data.streak
-    if (!current) return { captured: null, newBest: false }
-    const newBest = beatsChain(current, best)
-    this.data.streak = { current: null, best: newBest ? current : best }
-    this.save()
-    return { captured: current, newBest }
+  noteStreakRun(difficulty: SaveData['settings']['assist'], run: StreakScore): boolean {
+    const isBest = beatsScore(run, this.data.streakBest[difficulty])
+    if (isBest) {
+      this.data.streakBest = { ...this.data.streakBest, [difficulty]: run }
+      this.save()
+    }
+    return isBest
   }
 
   get totalOpens(): number {

@@ -382,14 +382,21 @@ export interface DevHook {
    */
   solveCurrentLock(): boolean
 
-  // ── The Streak (D-199) ──
-  /** Deal a Streak lock from a known seed at a known tier — determinism for the e2e. */
+  // ── The Lock streak (D-205) ──
+  /**
+   * Deal a Streak lock from a known seed at a known tier — determinism for the e2e. Starts a
+   * fresh five-minute run if none is live, so a scripted deal is always inside a real run.
+   */
   startStreakLock(seed: number, tier: 1 | 2 | 3 | 4): void
-  /** The chains as data, and whether the pick that is up right now feeds them. */
+  /** Burn run clock by hand — frame-stepping five minutes through the renderer is too slow. */
+  streakAdvance(seconds: number): void
+  /** The run as data: the clock, the score so far (or the last summary's), and the best. */
   streakState(): {
     live: boolean
-    current: { rank: number; count: number } | null
-    best: { rank: number; count: number } | null
+    left: number
+    score: number
+    opens: number
+    best: { score: number; opens: number } | null
   }
 
   /**

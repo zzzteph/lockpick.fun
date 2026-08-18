@@ -16,8 +16,8 @@ export const SAVE_KEY = 'shearline.save.v1'
 // declared here *as well*, which is how the two could have drifted apart silently.
 import type { AssistMode, LockDef } from '../sim'
 import { lockBySlug } from './locks'
-import { RANKS, rankIndexFor } from './ranks'
-import type { StreakChain } from './streak'
+import { rankIndexFor } from './ranks'
+import type { StreakScore } from './streak'
 
 export type { AssistMode }
 
@@ -189,15 +189,13 @@ export interface SaveData {
    */
   gauntletBest: Partial<Record<AssistMode, number>>
   /**
-   * The Streak's two chains (D-199): the one standing and the best one ever captured.
-   *
-   * `current` survives a relaunch deliberately — closing the game is not failing a lock, and a
-   * chain that only lived for one sitting would punish exactly the long patient runs the mode
-   * exists to grow. Only a failed pick breaks one. `best` is written at the moment a chain
-   * breaks, which is the mode's whole ceremony; like `gauntletBest` it is a score, never a
-   * currency — nothing unlocks behind it.
+   * The Lock streak's best five-minute runs, by the difficulty they were played at — D-205,
+   * replacing D-199's chains (which measured patience: they only ever ended on a mistake).
+   * Sum of the opened locks' tiers, with the open count kept beside it for colour. Like
+   * `gauntletBest` it is a score, never a currency — nothing unlocks behind it — and only
+   * *finished* runs write here: the run itself is never persisted, so there is no resume.
    */
-  streak: { current: StreakChain | null; best: StreakChain | null }
+  streakBest: Partial<Record<AssistMode, StreakScore>>
 }
 
 export function newSave(): SaveData {
@@ -210,7 +208,7 @@ export function newSave(): SaveData {
     playDays: {},
     customLocks: [],
     gauntletBest: {},
-    streak: { current: null, best: null },
+    streakBest: {},
     // Any odd 32-bit value; the mixer below does the work of spreading it.
     lockSalt: (Math.floor(Math.random() * 0xffffffff) | 1) >>> 0,
   }
@@ -352,21 +350,14 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
-/**
- * A chain is a rank index and a positive count, or it is nothing — no half-remembered chains.
- * The rank is clamped onto the ladder rather than trusted: a hand-edited save wearing rank 40
- * would otherwise print as F while comparing as something worse than F.
- */
-function coerceChain(raw: unknown): StreakChain | null {
+/** A best run is a non-negative score and open count, or it is nothing. */
+function coerceStreakScore(raw: unknown): StreakScore | null {
   if (!isRecord(raw)) return null
-  const rank = raw['rank']
-  const count = raw['count']
-  if (typeof rank !== 'number' || !Number.isFinite(rank)) return null
-  if (typeof count !== 'number' || !Number.isFinite(count) || count < 1) return null
-  return {
-    rank: Math.max(0, Math.min(RANKS.length - 1, Math.trunc(rank))),
-    count: Math.trunc(count),
-  }
+  const score = raw['score']
+  const opens = raw['opens']
+  if (typeof score !== 'number' || !Number.isFinite(score) || score < 0) return null
+  if (typeof opens !== 'number' || !Number.isFinite(opens) || opens < 0) return null
+  return { score: Math.trunc(score), opens: Math.trunc(opens) }
 }
 
 function coerceRecord(raw: unknown): LockRecord {
@@ -442,13 +433,16 @@ export function migrate(raw: unknown): SaveData {
           ),
         )
       : {},
-    // The Streak's chains arrive by the same road (D-199): absent on an old save, both null.
-    streak: isRecord(data['streak'])
-      ? {
-          current: coerceChain(data['streak']['current']),
-          best: coerceChain(data['streak']['best']),
-        }
-      : { current: null, best: null },
+    // The blitz bests arrive by the same road every new field has (D-205): absent — including
+    // on a save carrying D-199's old `streak` chains, which are dropped without ceremony; the
+    // mode was days old and unreleased — the table starts empty.
+    streakBest: isRecord(data['streakBest'])
+      ? Object.fromEntries(
+          Object.entries(data['streakBest'])
+            .map(([k, v]) => [k, coerceStreakScore(v)] as const)
+            .filter((e): e is readonly [string, StreakScore] => e[1] !== null),
+        )
+      : {},
     // A save from before D-073 has no salt; give it one rather than defaulting everybody to the
     // same bench, which would make every player's locks identical.
     lockSalt:

@@ -20,7 +20,6 @@ import {
 import { ALL_LOCKS, chambersOf } from '../game/locks'
 import { decodeLock, encodeLock, formatCode, shareProblem, shareableCode } from '../game/sharecode'
 import { countsForTier, effectivePar, letterFor } from '../game/ranks'
-import { beatsChain, chainLabel } from '../game/streak'
 import type { AttemptOutcome, AttemptResult, Progress } from '../game/progress'
 import {
   DUNGEON_DIFFICULTY_FACTOR,
@@ -126,9 +125,11 @@ export interface ShellActions {
   dungeonStepBack(): void
   /** Clear a terminal run so the briefing shows again. */
   gauntletReset(): void
-  // ── The Streak (D-199) ──
-  /** Deal the next random lock. The app rolls the tier and the seed; the chain rides on it. */
+  // ── The Lock streak (D-205) ──
+  /** Begin a five-minute run at the picked difficulty. The first lock deals immediately. */
   streakStart(): void
+  /** The briefing's difficulty pick — remembered by the app, not the save. */
+  streakSelectDifficulty(difficulty: SettingsData['assist']): void
   /** Flip whether the next lock started from the bench is a study run (D-092). */
   toggleInspect(): void
   // ── The lock editor (D-080) ──
@@ -225,6 +226,13 @@ export interface GauntletScreenView {
   seedFocus: boolean
 }
 
+export interface StreakScreenView {
+  /** Selected on the briefing; the run's own while one is live. */
+  difficulty: SettingsData['assist']
+  /** The last finished run, for the summary — null when the screen is a plain briefing. */
+  summary: { score: number; opens: number; newBest: boolean } | null
+}
+
 export interface ShellContext {
   vp: Viewport
   p: Palette
@@ -267,11 +275,13 @@ export interface ShellContext {
   /** The Gauntlet screen's whole world — absent everywhere else (D-165). */
   gauntlet?: GauntletScreenView
   /**
-   * True while the lock on the bench was dealt by the Streak (D-199) — the pause panel reads
-   * it: no restart there (the chain is "in a row", and R would be a free reroll), and the
-   * walk-away button says what a walk-away costs.
+   * True while the lock on the bench belongs to a live blitz run (D-205) — the pause panel
+   * reads it: no restart there (R on the pick screen is SKIP), and the way out says what it
+   * costs ("End the run — banks nothing").
    */
   streakPick?: boolean
+  /** The Lock streak screen's world — absent everywhere else (D-205). */
+  streak?: StreakScreenView
   /** Which page of the player's own locks is showing. */
   codesPage?: number
   /** Which page of the roster the desktop codes screen is showing. */
@@ -648,10 +658,11 @@ export function drawMenu(c: ShellContext): void {
   // blind-faith wearing "Hard Won" (D-046's lesson is about what the player reads). D-165.
   if (button(vp, p, ui, entry(0), 'Lock dungeon')) actions.goto('gauntlet')
   // Beside the dungeon, deliberately: the two run modes share a row on a phone, so "the ways
-  // to play that are not the bench" read as one shelf. Display name "Lock streak" is the
-  // owner's, matching "Lock dungeon"; the code keeps `streak` as the internal id, the same
-  // arrangement as gauntlet wearing its dungeon name (D-165's lesson, D-199).
-  if (button(vp, p, ui, entry(1), 'Lock streak')) actions.goto('streak')
+  // to play that are not the bench" read as one shelf. Display name "Lock blitz" is the
+  // owner's (renamed from "Lock streak" with the D-205 redesign it describes better); the
+  // code keeps `streak` as the internal id, the same arrangement as gauntlet wearing its
+  // dungeon name (D-165's lesson, D-199, D-205).
+  if (button(vp, p, ui, entry(1), 'Lock blitz')) actions.goto('streak')
   if (button(vp, p, ui, entry(2), 'Bench')) actions.goto('bench')
   // Near the bench, because it is the other place a lock gets picked — and once "Continue"
   // is the primary, this button is the only way back to the lessons for a taught player.
@@ -2306,9 +2317,9 @@ export function drawPause(c: ShellContext): void {
   ctx.restore()
 
   /**
-   * A Streak pick pauses without a restart — the chain is "in a row", and a free reroll of the
-   * clock would gut it (D-199, the dungeon's own no-R rule) — and the way out names its price
-   * outright, because "Back to bench" on a button that snaps an S ×9 would be a trap.
+   * A blitz pick pauses without a restart — R on the pick screen is SKIP, not restart, and
+   * the panel must not offer a reroll the mode does not have (D-205). The way out names its
+   * price outright: ending a run mid-clock banks nothing.
    */
   const streak = c.streakPick === true
   const w = 420
@@ -2346,27 +2357,23 @@ export function drawPause(c: ShellContext): void {
   if (button(vp, p, ui, { x: x + 40, y: by, w: bw, h: 52 }, 'Settings')) actions.goto('settings')
   by += 66
   if (
-    button(vp, p, ui, { x: x + 40, y: by, w: bw, h: 52 }, streak ? 'Break the chain' : 'Back to bench')
+    button(vp, p, ui, { x: x + 40, y: by, w: bw, h: 52 }, streak ? 'End the run' : 'Back to bench')
   ) {
     actions.abandon()
   }
 }
 
-// ── The Streak (D-199) ──────────────────────────────────────────────────────────────────
+// ── The Lock streak (D-205) ──────────────────────────────────────────────────────────────
 
-/** The chain's ink is the results stamp's own mapping: teal to A, amber to C, crimson below. */
-function chainInk(p: Palette, rank: number | null): string {
-  if (rank === null) return p.inkLight
-  const readable = readableAccents(p)
-  return rank <= 1 ? readable.teal : rank <= 3 ? readable.amber : readable.crimson
-}
+/** The four difficulties, briefing order — the same ladder the dungeon's briefing offers. */
+const STREAK_DIFFICULTIES = ['training', 'easy', 'medium', 'hard'] as const
 
 /**
- * One chain, stamped big in its panel — the results screen's letter, doing scoreboard duty.
- * Scaled down to fit rather than clipped: `F ×999` is a chain somebody will eventually stand
- * and the figure has to hold it.
+ * The final score, stamped big — the results screen's letter language doing scoreboard duty.
+ * Scaled down to fit rather than clipped, because a three-digit score is a run somebody will
+ * eventually stand.
  */
-function chainFigure(vp: Viewport, rect: Rect, figure: string, ink: string, top: number): void {
+function scoreFigure(vp: Viewport, rect: Rect, figure: string, ink: string, top: number): void {
   const { ctx } = vp
   const SIZE = 132
   ctx.save()
@@ -2381,169 +2388,180 @@ function chainFigure(vp: Viewport, rect: Rect, figure: string, ink: string, top:
 }
 
 /**
- * The Streak's one screen: the tally. Deal, current chain, best chain — briefing and results
- * in the same place, because between locks they are the same place (D-199). The pick screen
- * itself is untouched by the mode, exactly as the Gauntlet left it: a dealt lock is an
- * ordinary lock whose name happens to say what tier it came off the pile from.
+ * The Lock streak's one screen — D-205's blitz: five minutes, as many locks as you can, the
+ * score the sum of their tiers. This page is the briefing and the summary in one place;
+ * while a run is live the app is on the pick screen, whose header carries the countdown and
+ * the running score. The old chain tally (D-199) retired with the chain: it only ever ended
+ * on a mistake, so it measured patience rather than skill.
  */
 export function drawStreak(c: ShellContext): void {
   const { vp, p, ui, progress, actions } = c
   const { ctx } = vp
+  const g = c.streak
   const compact = isCompact(vp)
   const readable = readableAccents(p)
-  const streak = progress.data.streak
-  const highest = progress.highestUnlockedTier
 
   screenFrame(
     c,
-    'Lock streak',
+    'Lock blitz',
     c.status ??
       (compact
-        ? 'random locks, one after another'
-        : 'random locks, one after another — the chain only counts opens'),
+        ? 'five minutes — open as many as you can'
+        : 'five minutes on the clock — open as many locks as you can'),
   )
   navBar(c, [['Menu', () => actions.goto('menu')]])
+  if (!g) return
 
   const left = MARGIN + 60
-  label(ctx, 'One lock after another.', left, 220, {
+  label(ctx, 'Five minutes. As many as you can.', left, 220, {
     font: font(typeFor(vp, TYPE.title)),
     size: typeFor(vp, TYPE.title),
     color: p.ink,
   })
 
-  // Where the score cards begin — declared up here because the left column's text budgets are
-  // measured against it, not guessed near it.
+  // Where the score panel begins — the left column's text budgets are measured against it.
   const px = LOGICAL_WIDTH / 2 + 40
   const bodySize = typeFor(vp, TYPE.body)
   const lineH = Math.max(30, bodySize + 8)
-  const colW = compact ? 820 : 620
-  // Each block advances by the height `paragraph` actually consumed (D-132) — never by a
-  // guessed wrap count, which is how the first draft printed "picks only." on its neighbour.
   let ty = 284
   ty +=
     paragraph(
       ctx,
-      'Every deal is a lock you have never met — rolled fresh, never the same twice, from ' +
-        'whatever tiers your bench has unlocked. Wheels never turn up: picks only.',
+      'Every deal is a lock you have never met, from whatever tiers your bench has ' +
+        'unlocked. Each open scores its tier — a tier-4 lock is worth four tier-1s.',
       left,
       ty,
-      { font: font(bodySize), color: p.ink, maxWidth: colW, lineHeight: lineH, maxLines: 5 },
+      {
+        font: font(bodySize),
+        color: p.ink,
+        maxWidth: px - 24 - left,
+        lineHeight: lineH,
+        maxLines: 5,
+      },
     ) + 18
   ty +=
     paragraph(
       ctx,
-      'Open it and the chain grows, wearing the worst letter in it. Snap the pick or walk ' +
-        'away and it breaks — and the best chain is captured as it falls.',
+      'A snapped pick skips to the next lock, and so does R — the seconds you spent are ' +
+        'the price. The clock never stops for a deal.',
       left,
       ty,
-      { font: font(bodySize), color: p.inkLight, maxWidth: colW, lineHeight: lineH, maxLines: 5 },
-    ) + 44
-  const poolY = ty
-  /**
-   * Wrapped inside a measured budget that stops short of the card column, never drawn as one
-   * unbounded line. The sweep priced the long form 7px over the best card's caption — and the
-   * screenshot then caught what the sweep cannot: a line the cards are painted *after* buries
-   * its tail under their fill, which the probe's text-vs-text rule is blind to. A `maxWidth`
-   * makes the failure unreachable instead of merely unobserved.
-   */
-  const poolSize = typeFor(vp, TYPE.dimension)
-  const poolH = paragraph(
-    ctx,
-    compact
-      ? highest > 1
-        ? `tiers 1–${highest} on the pile, half again the clock`
-        : 'tier 1 on the pile — rank the bench for deeper deals'
-      : highest > 1
-        ? `dealing from tiers 1–${highest}, half again the bench clock on every lock`
-        : 'dealing from tier 1 — rank more of the bench to deepen the pile',
-    left,
-    poolY,
+      {
+        font: font(bodySize),
+        color: p.inkLight,
+        maxWidth: px - 24 - left,
+        lineHeight: lineH,
+        maxLines: 5,
+      },
+    ) + 36
+
+  // The difficulty, exactly the dungeon briefing's control: the run's locks are simulated
+  // at it, and the bests are kept per rung.
+  const segH = Math.max(compact ? 64 : 40, minControlH(vp, typeFor(vp, TYPE.body)))
+  label(ctx, 'difficulty', left, ty, {
+    font: font(typeFor(vp, TYPE.dimension)),
+    size: typeFor(vp, TYPE.dimension),
+    color: p.ink,
+  })
+  const idx = segmented(
+    vp,
+    p,
+    ui,
     {
-      font: font(poolSize),
-      color: readable.amber,
-      maxWidth: px - 24 - left,
-      lineHeight: Math.max(26, poolSize + 8),
-      maxLines: 2,
+      x: left,
+      y: ty + (compact ? 18 : 10),
+      w: compact
+        ? Math.min(
+            860,
+            STREAK_DIFFICULTIES.reduce(
+              (m, mode) =>
+                Math.max(m, Math.ceil(captionWidth(vp, mode, typeFor(vp, TYPE.body))) + 24),
+              0,
+            ) * STREAK_DIFFICULTIES.length,
+          )
+        : 580,
+      h: segH,
     },
+    STREAK_DIFFICULTIES,
+    STREAK_DIFFICULTIES.indexOf(g.difficulty),
+  )
+  const next = STREAK_DIFFICULTIES[idx]
+  if (next !== undefined && next !== g.difficulty) actions.streakSelectDifficulty(next)
+  ty += (compact ? 18 : 10) + segH + (compact ? 44 : 34)
+
+  const best = progress.data.streakBest[g.difficulty]
+  text(
+    ctx,
+    best
+      ? `best ${g.difficulty} run — ${best.score} pts, ${best.opens} locks`
+      : 'no run on the board at this level yet',
+    left,
+    ty,
+    { font: font(typeFor(vp, TYPE.dimension)), color: readable.amber },
   )
 
   const btnH = compact ? 84 : 56
   const primaryW = compact ? 760 : 420
-  const startY = Math.max(compact ? 700 : 620, poolY + poolH + (compact ? 44 : 20))
+  const startY = Math.max(compact ? 780 : 680, ty + (compact ? 60 : 44))
   if (
-    button(
-      vp,
-      p,
-      ui,
-      { x: left, y: startY, w: primaryW, h: btnH },
-      streak.current ? 'Next lock' : 'Deal a lock',
-      { primary: true },
-    )
+    button(vp, p, ui, { x: left, y: startY, w: primaryW, h: btnH }, 'Start the clock', {
+      primary: true,
+    })
   ) {
     actions.streakStart()
   }
 
-  // ── The two chains, right half — the mode's whole scoreboard ──
-  //
-  // Side by side on the full page; STACKED on compact. Both choices are the sweep's: the
-  // compact title face crossed into the panel column (19px over THE CHAIN), so the cards sit
-  // below the heading's band — and the compact-scaled sub-lines are wider than a half-width
-  // card, so the centred pair crossed each other by 31px in the gap. A stacked card is the
-  // full column wide and everything fits at any face the matrix has.
+  // ── The right half: the last run's summary, or the standing bests ──
   const pw = LOGICAL_WIDTH - MARGIN - 36 - px
-  const cardGap = 24
-  const stacked = compact
-  const cardW = stacked ? pw : (pw - cardGap) / 2
-  const cardH = stacked ? 288 : 470
   const py = compact ? 264 : 200
+  const ph = compact ? 560 : 470
   const subSize = typeFor(vp, TYPE.dimension)
-  // The figure sits higher in a stacked card so its sub-lines keep their air inside it.
-  const figureTop = stacked ? 64 : 78
-  const subOffset = figureTop + 132 + (stacked ? 20 : 64)
-
-  const chainCard = (
-    rect: Rect,
-    title: string,
-    chain: { rank: number; count: number } | null,
-    subline: string,
-    teal?: string,
-  ): void => {
-    panel(vp, p, rect, title)
-    chainFigure(vp, rect, chainLabel(chain), chainInk(p, chain?.rank ?? null), figureTop)
-    text(ctx, subline, rect.x + rect.w / 2, rect.y + subOffset, {
-      font: font(subSize),
-      color: p.inkLight,
-      align: 'center',
-    })
-    if (teal) {
-      text(ctx, teal, rect.x + rect.w / 2, rect.y + subOffset + subSize + 14, {
+  if (g.summary) {
+    panel(vp, p, { x: px, y: py, w: pw, h: ph }, 'the run')
+    scoreFigure(
+      vp,
+      { x: px, y: py, w: pw, h: ph },
+      `${g.summary.score} pts`,
+      g.summary.newBest ? readable.teal : p.ink,
+      compact ? 96 : 78,
+    )
+    const sy = py + (compact ? 96 : 78) + 132 + 44
+    text(
+      ctx,
+      `${g.summary.opens} ${g.summary.opens === 1 ? 'lock' : 'locks'} opened in five minutes`,
+      px + pw / 2,
+      sy,
+      { font: font(subSize), color: p.inkLight, align: 'center' },
+    )
+    if (g.summary.newBest) {
+      text(ctx, `a new best at ${g.difficulty}`, px + pw / 2, sy + subSize + 14, {
         font: font(subSize),
         color: readable.teal,
         align: 'center',
       })
     }
+  } else {
+    // No run to report: the board itself, one row per difficulty ever played.
+    panel(vp, p, { x: px, y: py, w: pw, h: ph }, 'best runs')
+    const rows = STREAK_DIFFICULTIES.map((mode) => [mode, progress.data.streakBest[mode]] as const)
+    const rowPitch = Math.max(44, subSize + 18)
+    let ry = py + 76
+    for (const [mode, score] of rows) {
+      label(ctx, mode, px + 40, ry, {
+        font: font(subSize),
+        size: subSize,
+        color: mode === g.difficulty ? p.ink : p.inkLight,
+      })
+      text(
+        ctx,
+        score ? `${score.score} pts · ${score.opens} locks` : '—',
+        px + pw - 40,
+        ry,
+        { font: font(subSize), color: score ? p.ink : p.inkLight, align: 'right' },
+      )
+      ry += rowPitch
+    }
   }
-
-  chainCard(
-    { x: px, y: py, w: cardW, h: cardH },
-    'the chain',
-    streak.current,
-    streak.current ? `${streak.current.count} in a row, none dropped` : 'no chain standing',
-    // The line worth hurrying for: a standing chain already past the captured best. Only once
-    // a best exists — beside a card reading "no chain captured yet", "past your best" would
-    // name a thing the screen just said there is not.
-    streak.current && streak.best && beatsChain(streak.current, streak.best)
-      ? 'past your best — keep it alive'
-      : undefined,
-  )
-  chainCard(
-    stacked
-      ? { x: px, y: py + cardH + cardGap, w: cardW, h: cardH }
-      : { x: px + cardW + cardGap, y: py, w: cardW, h: cardH },
-    'best',
-    streak.best,
-    streak.best ? 'captured when its run ended' : 'no chain captured yet',
-  )
 }
 
 // ── The Gauntlet (D-165) ────────────────────────────────────────────────────────────────

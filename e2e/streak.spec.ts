@@ -1,27 +1,27 @@
 /**
- * The Streak in a real browser — D-199.
+ * The Lock streak's blitz in a real browser — D-205.
  *
- * The unit suite proves the chain arithmetic and the deal; what only a browser can prove is the
- * glue: that a deal lands on the real pick screen, that the real open pipeline feeds the chain
- * and lands on the tally, that walking away through the real pause panel breaks it, and that a
- * dealt lock leaves no fingerprints in the bench's records. The "present, tested, and does
- * nothing" failure this project keeps having (START-HERE.md) lives exactly in glue like this.
+ * The unit suite proves the scoring and the deal; what only a browser can prove is the glue:
+ * that starting a run lands on the real pick screen with the countdown in the header, that an
+ * open scores its tier and deals the next lock the same frame, that R skips, that the clock
+ * running out banks the run and takes the summary screen, and that a dealt lock leaves no
+ * fingerprints in the bench's records.
  */
 
 import { expect, test, type Page } from '@playwright/test'
-import { advanceSeconds, bootGame, captureStage, setManual } from './harness'
-
-type Chain = { rank: number; count: number } | null
+import { advanceSeconds, bootGame, captureStage, renderOnce, setManual } from './harness'
 
 async function streakState(page: Page): Promise<{
   live: boolean
-  current: Chain
-  best: Chain
+  left: number
+  score: number
+  opens: number
+  best: { score: number; opens: number } | null
 }> {
   return page.evaluate(() => globalThis.__shearline!.streakState())
 }
 
-test('a deal opens on the pick screen; the open grows the chain and lands on the tally', async ({
+test('a run scores by tier, deals instantly, and banks when the clock runs out', async ({
   page,
 }) => {
   test.slow()
@@ -30,85 +30,91 @@ test('a deal opens on the pick screen; the open grows the chain and lands on the
 
   await page.evaluate(() => globalThis.__shearline!.goto('streak'))
   await page.evaluate(() => globalThis.__shearline!.renderOnce())
-  // The tally, fresh: no chain standing, nothing captured, and the screen audits clean.
   const audit = await page.evaluate(() => globalThis.__shearline!.auditScreen())
   const collisions = audit.findings.filter((f) =>
     ['overlap', 'text-over-control', 'crowded-text', 'off-stage'].includes(f.kind),
   )
   expect(collisions.map((f) => f.detail)).toEqual([])
-  expect(await streakState(page)).toEqual({ live: false, current: null, best: null })
+  expect((await streakState(page)).live).toBe(false)
 
-  // Deal from a known seed. The lock is a real pick-screen lock wearing the mode's slug.
+  // Deal from known seeds inside a real run: a tier-1 open scores 1, a tier-2 open scores 2.
   await page.evaluate(() => globalThis.__shearline!.startStreakLock(4242, 1))
   expect(await page.evaluate(() => globalThis.__shearline!.getScreen())).toBe('pick')
-  const state = await page.evaluate(() => globalThis.__shearline!.getState())
-  expect(state.lock.slug.startsWith('streak-')).toBe(true)
-  expect((await streakState(page)).live).toBe(true)
+  const s0 = await streakState(page)
+  expect(s0.live).toBe(true)
+  expect(s0.left).toBeGreaterThan(295)
+  expect(s0.score).toBe(0)
 
-  // The solver's hands open it; the payoff runs and settles; the tally takes over.
   expect(await page.evaluate(() => globalThis.__shearline!.solveCurrentLock())).toBe(true)
-  await advanceSeconds(page, 8)
+  await renderOnce(page)
+  // The next lock is already on the bench — no tally between, the dungeon's own rhythm.
+  expect(await page.evaluate(() => globalThis.__shearline!.getScreen())).toBe('pick')
+  const s1 = await streakState(page)
+  expect(s1.score).toBe(1)
+  expect(s1.opens).toBe(1)
+
+  // Force the next deal to a known tier-2 and open it: +2.
+  await page.evaluate(() => globalThis.__shearline!.startStreakLock(4243, 2))
+  expect(await page.evaluate(() => globalThis.__shearline!.solveCurrentLock())).toBe(true)
+  await renderOnce(page)
+  const s2 = await streakState(page)
+  expect(s2.score).toBe(3)
+  expect(s2.opens).toBe(2)
+
+  // R skips: a fresh lock, no score change, the clock still burning.
+  const slugBefore = (await page.evaluate(() => globalThis.__shearline!.getState())).lock.slug
+  await page.keyboard.press('KeyR')
+  await renderOnce(page)
+  const slugAfter = (await page.evaluate(() => globalThis.__shearline!.getState())).lock.slug
+  expect(slugAfter).not.toBe(slugBefore)
+  expect((await streakState(page)).score).toBe(3)
+
+  // Burn the clock out by hand (the dungeon's own determinism trick) — the run banks and the
+  // summary takes the screen.
+  await page.evaluate(() => globalThis.__shearline!.streakAdvance(301))
+  await renderOnce(page)
   expect(await page.evaluate(() => globalThis.__shearline!.getScreen())).toBe('streak')
-  const after = await streakState(page)
-  expect(after.live).toBe(false)
-  expect(after.current?.count).toBe(1)
-  // The break has not happened, so nothing is captured yet — that is the mode's ceremony.
-  expect(after.best).toBeNull()
-
-  // A second open grows the same chain rather than starting another.
-  await page.evaluate(() => globalThis.__shearline!.startStreakLock(4243, 1))
-  expect(await page.evaluate(() => globalThis.__shearline!.solveCurrentLock())).toBe(true)
-  await advanceSeconds(page, 8)
-  const grown = await streakState(page)
-  expect(grown.current?.count).toBe(2)
-  // The chain wears its worst letter: two opens can never wear a better rank than either.
-  expect(grown.current!.rank).toBeGreaterThanOrEqual(after.current!.rank)
+  const done = await streakState(page)
+  expect(done.live).toBe(false)
+  expect(done.score).toBe(3)
+  expect(done.best).toEqual({ score: 3, opens: 2 })
 
   // A dealt lock leaves no fingerprints: no record, no play-day, no achievement road.
   const save = await page.evaluate(() => globalThis.__shearline!.getSave())
   expect(Object.keys(save.records).filter((slug) => slug.startsWith('streak-'))).toEqual([])
+  await renderOnce(page)
   await captureStage(page, 'streak-tally')
   watcher.assertClean()
 })
 
-test('walking away through the pause panel breaks the chain and captures the best', async ({
-  page,
-}) => {
+test('walking out through the pause panel abandons the run — nothing banks', async ({ page }) => {
   test.slow()
   const watcher = await bootGame(page, { frames: 3 })
   await setManual(page, true)
 
-  // One open on the chain…
   await page.evaluate(() => globalThis.__shearline!.startStreakLock(1111, 1))
   expect(await page.evaluate(() => globalThis.__shearline!.solveCurrentLock())).toBe(true)
-  await advanceSeconds(page, 8)
-  expect((await streakState(page)).current?.count).toBe(1)
+  await renderOnce(page)
+  expect((await streakState(page)).score).toBe(1)
 
-  // …then a walk-away on the next deal. Esc pauses; the panel's last button names the price.
-  await page.evaluate(() => globalThis.__shearline!.startStreakLock(1112, 1))
+  // Esc pauses (the clock freezes with the sim); the panel's last button ends the run.
   await page.keyboard.press('Escape')
   expect(await page.evaluate(() => globalThis.__shearline!.getScreen())).toBe('pause')
+  const frozen = (await streakState(page)).left
+  await advanceSeconds(page, 3)
+  expect((await streakState(page)).left).toBeCloseTo(frozen, 1)
   /**
-   * The Streak pause panel, in logical coordinates: 420×380 centred (x 750, y 350), buttons at
+   * The blitz pause panel, in logical coordinates: 420×380 centred (x 750, y 350), buttons at
    * x+40 from y+110 on a 66 pitch — Resume, Help, Settings (no restart in this mode), then
-   * `Break the chain` at y 658. Derived from `drawPause`, not guessed; if that panel moves,
-   * this line is the loud failure that says so.
+   * `End the run` at y 658. Derived from `drawPause`, not guessed; if that panel moves, this
+   * line is the loud failure that says so.
    */
   await page.evaluate(() => globalThis.__shearline!.clickAt(960, 684))
 
   expect(await page.evaluate(() => globalThis.__shearline!.getScreen())).toBe('streak')
-  const broken = await streakState(page)
-  expect(broken.live).toBe(false)
-  expect(broken.current).toBeNull()
-  expect(broken.best?.count).toBe(1)
-
-  // R is not a verb here: a fresh deal cannot be restarted into a fresh clock.
-  await page.evaluate(() => globalThis.__shearline!.startStreakLock(1113, 1))
-  const seedBefore = (await page.evaluate(() => globalThis.__shearline!.getState())).seed
-  await page.keyboard.press('KeyR')
-  await page.evaluate(() => globalThis.__shearline!.renderOnce())
-  const seedAfter = (await page.evaluate(() => globalThis.__shearline!.getState())).seed
-  expect(seedAfter).toBe(seedBefore)
-  expect(await page.evaluate(() => globalThis.__shearline!.getScreen())).toBe('pick')
+  const after = await streakState(page)
+  expect(after.live).toBe(false)
+  // Abandoned: the 1-point run never reached the board.
+  expect(after.best).toBeNull()
   watcher.assertClean()
 })

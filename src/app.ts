@@ -193,8 +193,7 @@ import {
   type ShellContext,
 } from './ui/shell'
 import { generateDungeonLock } from './game/gauntlet'
-import { rankEarned } from './game/ranks'
-import { chainLabel, generateStreakLock, streakTierFor } from './game/streak'
+import { STREAK_SECONDS, generateStreakLock, streakTierFor } from './game/streak'
 // The scripted solver, for the dev hook alone: `solveCurrentLock` lets the browser suite play
 // any lock with the same machine that proves the roster openable. ~15KB of prod bundle carrying
 // a dev instrument — accepted, because a DEV-gated import would need a second chunk and the
@@ -502,12 +501,16 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   let gauntletSeedFocus = false
 
   /**
-   * True while the lock on the bench was dealt by the Streak (D-199) — the mode's entire
-   * per-attempt state. The chains themselves live in the save; this flag only says whether the
-   * pick that is up right now feeds them. Never persisted: a relaunch mid-pick abandons the
-   * *attempt* without breaking the *chain*, which is the mode's kindness — only a failed pick
-   * breaks one.
+   * The Lock streak's live run — D-205's five-minute blitz, or null when no run stands.
+   * Never persisted, exactly like the dungeon: a relaunch has no run to resume, which is
+   * what makes "no resume" true. `summary` holds the last finished run for the tally screen
+   * until the next one starts.
    */
+  let streakRun: { left: number; score: number; opens: number } | null = null
+  let streakSummary: { score: number; opens: number; newBest: boolean } | null = null
+  /** The difficulty the briefing picked — the run's locks are simulated at it (like the dungeon). */
+  let streakDifficulty = progress.data.settings.assist
+  /** True while the lock on the bench was dealt by the Streak — the pick screen's own flag. */
   let streakPick = false
   /** Deals this sitting, salting the generator so no two deals share a slug or an id. */
   let streakDealt = 0
@@ -519,9 +522,11 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
    * Training's x-ray.
    */
   function activeAssist(): typeof progress.data.settings.assist {
-    return dungeonRun && dungeonRun.phase === 'picking'
-      ? gauntletDifficulty
-      : progress.data.settings.assist
+    if (dungeonRun && dungeonRun.phase === 'picking') return gauntletDifficulty
+    // A blitz lock is simulated at the run's chosen difficulty, exactly as the dungeon's
+    // are (D-205) — the briefing's pick must be the level the clock is actually run against.
+    if (streakPick) return streakDifficulty
+    return progress.data.settings.assist
   }
 
   /** The keys the crawl owns outright — stripped from the widget layer while it runs. */
@@ -584,7 +589,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     settleDungeon()
   }
 
-  /** Deal one Streak lock and put it on the bench. What happens next rides on the chain. */
+  /** Deal one Streak lock and put it on the bench. The clock does not stop for the deal. */
   function dealStreakLock(seed: number, tier: 1 | 2 | 3 | 4): void {
     streakDealt += 1
     const def = generateStreakLock(seed, streakDealt, tier)
@@ -594,18 +599,35 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     streakPick = true
   }
 
+  /** Roll and deal the run's next lock. Tier and seed roll separately, as the dungeon does. */
+  function dealNextStreakLock(): void {
+    const tier = streakTierFor(Math.random(), progress.highestUnlockedTier)
+    dealStreakLock(((Math.random() * 0xffffffff) >>> 0) || 1, tier)
+  }
+
   /**
-   * The chain breaks — the one place every break routes through (a walk-away from the pause
-   * panel, the header link mid-pick, a snapped pick), so the capture happens exactly once and
-   * the tally screen always says what fell.
+   * The clock ran out — the one place a run ever banks (D-205). An abandoned run banks
+   * nothing, exactly like the dungeon's fallen runs, and that branch never calls this.
    */
-  function breakChainNow(why: string): void {
-    const { captured, newBest } = progress.breakStreak()
+  function endStreakRun(): void {
+    if (!streakRun) return
+    const run = { score: streakRun.score, opens: streakRun.opens }
+    const newBest = progress.noteStreakRun(streakDifficulty, run)
+    streakSummary = { ...run, newBest }
+    streakRun = null
     streakPick = false
     session = null
-    status = captured
-      ? `${why} — the chain broke at ${chainLabel(captured)}${newBest ? '. Your best yet, captured.' : '.'}`
-      : `${why} — no chain stood.`
+    status = ''
+    goto('streak')
+  }
+
+  /** Walk out mid-run — the pause panel's exit. Banks nothing, says so once. */
+  function abandonStreakRun(): void {
+    streakRun = null
+    streakSummary = null
+    streakPick = false
+    session = null
+    status = 'run abandoned — nothing banked'
     goto('streak')
   }
 
@@ -645,16 +667,19 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       goto('pick')
     },
     restart: () => {
-      // Never inside a Streak pick (D-199): the chain is "in a row", and a fresh clock on the
-      // same lock would be a free reroll. The pause panel hides its button; this guard is for
-      // every other road in.
-      if (streakPick) return
+      // Inside a blitz, R is SKIP — deal the next lock, the seconds already spent are the
+      // price (D-205). A bailing verb is a real skill: a lock that is fighting you can cost
+      // less than a lock you insist on.
+      if (streakPick) {
+        if (streakRun) dealNextStreakLock()
+        return
+      }
       if (session) startLock(session.def, session.seed, inspecting)
     },
     abandon: () => {
-      // Walking out of a Streak pick is the mode's one honest exit, and it costs the chain.
+      // Walking out of a blitz is abandoning the run — it banks nothing.
       if (streakPick) {
-        breakChainNow('you walked away')
+        abandonStreakRun()
         return
       }
       // Abandoning a lesson abandons the lesson, not just the attempt — otherwise the line at
@@ -736,13 +761,15 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       dungeonBankedScore = 0
       status = ''
     },
-    // ── The Streak (D-199) ──
+    // ── The Lock streak (D-205) ──
     streakStart: () => {
-      // Math.random is fine in the game layer (the sim's lint rule owns the sim), exactly as
-      // the dungeon rolls its floors. Tier and seed roll separately so neither leans on the
-      // other's distribution.
-      const tier = streakTierFor(Math.random(), progress.highestUnlockedTier)
-      dealStreakLock(((Math.random() * 0xffffffff) >>> 0) || 1, tier)
+      streakRun = { left: STREAK_SECONDS, score: 0, opens: 0 }
+      streakSummary = null
+      status = ''
+      dealNextStreakLock()
+    },
+    streakSelectDifficulty: (difficulty) => {
+      streakDifficulty = difficulty
     },
     // ── The lock editor (D-080) ──
     //
@@ -1056,9 +1083,11 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         // No restarts inside a dungeon pick — R does nothing there. The lock is the lock;
         // walking away and bumping it again is the crawler's honest retry.
         if (dungeonRun && dungeonRun.phase === 'picking') return
-        // Nor inside a Streak pick, and for the same reason (D-199): a chain of retried locks
-        // is not a chain.
-        if (streakPick) return
+        // Inside a blitz, R is SKIP: next lock, the clock keeps running (D-205).
+        if (streakPick) {
+          if (streakRun && screen === 'pick') dealNextStreakLock()
+          return
+        }
         if (screen === 'pick' && session) startLock(session.def)
       },
       onPause: () => {
@@ -1261,17 +1290,16 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       return
     }
     /**
-     * A Streak open feeds the chain and nothing else — no record (a dealt lock exists for one
-     * attempt, and a slug nothing can ever revisit must not sit in `records` forever), no
-     * achievements, no play-day: the dungeon's own bookkeeping rule (D-199). The rank still
-     * matters — it is the letter the chain wears — so the payoff plays with it, and the tally
-     * screen takes over once the sequence settles.
+     * A blitz open scores its tier and deals the next lock THE SAME FRAME — no payoff, no
+     * tally between, exactly the dungeon's rhythm (D-205): two and a half seconds of fanfare
+     * is a whole lock's worth of clock. No record, no achievements, no play-day either — a
+     * dealt lock exists for one attempt, and the run's score is the entire bookkeeping.
      */
-    if (streakPick) {
-      const rank = rankEarned(session.state.time, session.def.par, session.state.config.assist)
-      const chain = progress.noteStreakOpen(rank)
-      status = `${session.def.name} — open. The chain stands at ${chainLabel(chain)}.`
-      startOpenSequence(sequence, rank, 0)
+    if (streakPick && streakRun) {
+      streakRun.score += session.def.tier
+      streakRun.opens += 1
+      status = ''
+      dealNextStreakLock()
       return
     }
     const base = outcomeFrom(session.def, session.state, session.state.stats, { challenges })
@@ -1480,8 +1508,9 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         session = null
         goto('gauntlet')
       } else if (streakPick) {
-        // Same rule on a Streak pick: leaving the lock is leaving the lock, whatever door.
-        breakChainNow('you walked away')
+        // The header link mid-blitz is the same walk-out the pause panel offers: run over,
+        // nothing banked.
+        abandonStreakRun()
       } else {
         const wasLesson = lesson !== null
         lesson = null
@@ -1491,6 +1520,16 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     }
 
     if (screen === 'results') resultsAge += seconds
+    /**
+     * The blitz clock — D-205. It burns exactly while the run's lock is on the bench: the
+     * pause panel freezes it (screen is 'pause'), and there is no "between locks" to leak
+     * time into because deals are instant. When it hits zero the run banks and the summary
+     * takes the screen, whatever the pick was doing.
+     */
+    if (streakRun && streakPick && screen === 'pick') {
+      streakRun.left -= seconds
+      if (streakRun.left <= 0) endStreakRun()
+    }
     tickKeyboard(seconds)
     const inp = currentInput()
     if (screen === 'pick' && session) {
@@ -1524,24 +1563,18 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         status = 'the pick snapped inside the lock'
         goto('gauntlet')
       }
-      // A Streak chain lives exactly as long as the picks do (D-199): the same frame-watch the
-      // dungeon keeps, because the ordinary path would let the player sit with a broken pick
-      // and press R — and R is the one verb the mode does not have.
-      if (streakPick && view.pickBroken && !view.opened) {
-        breakChainNow('the pick snapped inside the lock')
+      // A snapped pick in the blitz skips to the next lock — the seconds already burnt are
+      // the whole penalty (D-205). Watched here in the frame, like the dungeon's snap.
+      if (streakPick && streakRun && view.pickBroken && !view.opened) {
+        status = 'the pick snapped — next lock'
+        dealNextStreakLock()
       }
       // A lesson has no results page to land on — it goes back to the tutorial, where the
       // card it just finished says `done` and the next one is marked `next` (D-152). A dungeon
-      // open never reaches here: `finishAttempt` routes it straight back to the floor. A
-      // Streak open lands on the tally, where the chain it just grew is the headline.
+      // open never reaches here, and neither does a blitz open: `finishAttempt` routes both
+      // straight onward.
       if (view.opened && isSettled(sequence)) {
-        if (streakPick) {
-          streakPick = false
-          session = null
-          goto('streak')
-        } else {
-          goto(outcome ? 'results' : 'tutorial')
-        }
+        goto(outcome ? 'results' : 'tutorial')
       }
     } else {
       updateFx(fx, seconds)
@@ -1607,6 +1640,9 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       ...(benchTier !== undefined ? { benchTier } : {}),
       ...(screen === 'gauntlet' ? { gauntlet: gauntletView() } : {}),
       ...(streakPick ? { streakPick: true } : {}),
+      ...(screen === 'streak'
+        ? { streak: { difficulty: streakDifficulty, summary: streakSummary } }
+        : {}),
     }
 
     switch (screen) {
@@ -1731,8 +1767,13 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     ctx.restore()
 
     drawHud(vp, palette, view, {
-      lockName: session.def.name,
+      // In a blitz the header carries the running score beside the lock's name, and the
+      // clock counts the run down instead of the attempt up (D-205).
+      lockName: streakRun
+        ? `${session.def.name} · ${streakRun.score} pts`
+        : session.def.name,
       elapsed: view.time,
+      ...(streakRun ? { countdownLeft: streakRun.left } : {}),
       inspecting,
       lesson: lesson !== null,
       // The face locks draw a dial and the padlock a body, not the side cutaway — their
@@ -1794,9 +1835,10 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
               [deckMode ? 'A' : 'space', 'turn'],
               ['↑ ↓', 'one click'],
               [deckMode ? 'R2' : 'Q', 'pull the shackle'],
-              // A Streak pick has no R (D-199) — and a legend advertising a dead key is worse
-              // than a shorter legend (D-105). Wheels are never dealt, but the rule is the row's.
-              ...(streakPick ? ([] as const) : ([[deckMode ? 'Y' : 'R', 'restart']] as const)),
+              // In a blitz R is SKIP (D-205); wheels are never dealt, but the rule is the row's.
+              ...(streakPick
+                ? ([[deckMode ? 'Y' : 'R', 'skip lock']] as const)
+                : ([[deckMode ? 'Y' : 'R', 'restart']] as const)),
               [deckMode ? 'start' : 'esc', 'pause'],
             ] as const)
         : input.touch.active
@@ -1832,9 +1874,11 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
             // range is stated twice already (D-115). On deck the bumpers step the same dial
             // (they send W and E — D-200), so the cap names them and the heading still counts.
             [deckMode ? 'L1 R1' : '1-0', 'wrench pressure'],
-            // No R on a Streak pick (D-199): the row goes rather than greying, the same rule
-            // that deleted `tab tools` when the loadout went — D-105 is what ignoring it costs.
-            ...(streakPick ? ([] as const) : ([[deckMode ? 'Y' : 'R', 'restart']] as const)),
+            // In a blitz R deals the NEXT lock rather than rerolling this one (D-205) — the
+            // legend says so, because a bailing verb nobody knows about is not a verb.
+            ...(streakPick
+              ? ([[deckMode ? 'Y' : 'R', 'skip lock']] as const)
+              : ([[deckMode ? 'Y' : 'R', 'restart']] as const)),
             [deckMode ? 'start' : 'esc', 'pause'],
           ] as const),
       // The gutters belong to the pads while a finger is down, whatever the layout (D-160).
@@ -2278,15 +2322,28 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       enemies: dungeonRun.enemies.map((e) => ({ kind: e.kind, x: e.x, y: e.y, awake: e.awake })),
     }
   }
-  // ── The Streak (D-199): known deals, for the e2e ──
+  // ── The Lock streak (D-205): known deals inside a real run, for the e2e ──
   hook.startStreakLock = (seed: number, tier: 1 | 2 | 3 | 4): void => {
+    if (!streakRun) {
+      streakRun = { left: STREAK_SECONDS, score: 0, opens: 0 }
+      streakSummary = null
+    }
     dealStreakLock((seed >>> 0) || 1, tier)
   }
   hook.streakState = () => ({
-    live: streakPick,
-    current: progress.data.streak.current,
-    best: progress.data.streak.best,
+    live: streakRun !== null,
+    left: streakRun?.left ?? 0,
+    score: streakRun?.score ?? streakSummary?.score ?? 0,
+    opens: streakRun?.opens ?? streakSummary?.opens ?? 0,
+    best: progress.data.streakBest[streakDifficulty] ?? null,
   })
+  // Burn run time by hand — the dungeon's own determinism trick (`dungeonAdvance`): frame-
+  // stepping five real minutes through the renderer is eighteen thousand canvases.
+  hook.streakAdvance = (seconds: number): void => {
+    if (!streakRun) return
+    streakRun.left -= Math.max(0, seconds)
+    if (streakRun.left <= 0) endStreakRun()
+  }
   /**
    * Open the live session with the real solver's own hands — D-165.
    *

@@ -1,36 +1,32 @@
 /**
- * The Streak — random locks, dealt one after another, and a chain that only counts opens.
+ * The Lock streak — five minutes, as many locks as you can, scored by the sum of their tiers.
  *
- * The mode in one sentence: press the button, get a lock you have never met, open it and the
- * chain grows; snap the pick or walk away and the chain breaks. The bench's whole philosophy is
- * "nothing is random, every lock is the same lock every time" (D-073) — this screen is the
- * deliberate exception, and the extra time on the clock below is what that exception costs the
- * house: an unseen binding order cannot be known, so the par is half again what the same
- * cylinder would carry on the bench.
+ * The second design of the mode, replacing D-199's endless chain at the owner's word (D-205):
+ * the chain only ever ended on a mistake, so its best score measured patience rather than
+ * skill, and it punished stopping — real life ended a session and the mode read it as
+ * failure. A hard five-minute window gives every run identical stakes, a number anyone can
+ * read, and a clock that makes the tension economy (D-203/D-204) the drama: haste wants a
+ * heavy hand, and a heavy hand meets walls.
  *
- * Everything here is pure — chain arithmetic over two small records, and a generator that
- * dresses the dungeon forge's output for the bench — so the whole mode's logic is testable
- * headlessly. `src/app.ts` owns when a chain extends or breaks; `save.ts` owns where the two
- * chains live. See DECISIONS D-199.
+ * Scoring is the **sum of tiers** of the locks opened — the owner's pick over a raw count or
+ * a within-run ramp — so the deal stays honestly random over everything the bench has
+ * unlocked while a run heavy in deep locks is worth what it cost. A tier-4 open is four
+ * tier-1s.
+ *
+ * The bench's whole philosophy is "nothing is random, every lock is the same lock every
+ * time" (D-073) — this screen is still the deliberate exception, and the extra time on every
+ * dealt lock's par below is what that exception costs the house: an unseen binding order
+ * cannot be known.
+ *
+ * Everything here is pure; `src/app.ts` owns the run's clock and `save.ts` owns the bests.
  */
 
 import type { LockDef } from '../sim'
 import { createRng, nextInt } from '../sim'
 import { generateDungeonLock } from './gauntlet'
-import { letterFor } from './ranks'
 
-/**
- * A chain: how many locks fell in a row, wearing the **worst** rank any of them earned.
- *
- * Worst, not best or last, because a chain is as strong as its weakest link — five opens where
- * one of them slipped to a B is a B ×5, and the only way to wear an S is to have never dropped
- * below one. `rank` is an index into `RANKS` (0 is S), stored the same way `LockRecord.bestRank`
- * is and for the same reason: indexes compare with `<`, letters are presentation.
- */
-export interface StreakChain {
-  readonly rank: number
-  readonly count: number
-}
+/** The window. Five minutes flat — the owner's number, and short enough for "one more run". */
+export const STREAK_SECONDS = 300
 
 /**
  * Half again the bench clock, baked into every dealt lock's par.
@@ -48,35 +44,27 @@ export const STREAK_TIME_BONUS = 1.5
  */
 export const STREAK_ID_BASE = 60_000
 
-/** One more open. A fresh chain starts at ×1 wearing exactly what it just earned. */
-export function extendChain(current: StreakChain | null, rank: number): StreakChain {
-  if (!current) return { rank, count: 1 }
-  return { rank: Math.max(current.rank, rank), count: current.count + 1 }
+/** One finished run, as the save keeps it: the score, and the opens behind it for colour. */
+export interface StreakScore {
+  /** Sum of the opened locks' tiers. */
+  readonly score: number
+  readonly opens: number
 }
 
-/**
- * Whether a fallen chain takes the best's place. Length first — the mode is called the Streak,
- * and seven sloppy opens in a row are a longer streak than three clean ones — with the cleaner
- * letter breaking ties.
- */
-export function beatsChain(chain: StreakChain, best: StreakChain | null): boolean {
+/** Whether a finished run takes the best's place. Score first; opens break ties. */
+export function beatsScore(run: StreakScore, best: StreakScore | undefined): boolean {
   if (!best) return true
-  if (chain.count !== best.count) return chain.count > best.count
-  return chain.rank < best.rank
-}
-
-/** `S ×3`, or an em-dash when no chain stands. The screen's whole vocabulary. */
-export function chainLabel(chain: StreakChain | null): string {
-  return chain ? `${letterFor(chain.rank)} ×${chain.count}` : '—'
+  if (run.score !== best.score) return run.score > best.score
+  return run.opens > best.opens
 }
 
 /**
  * Which tier a deal comes from: uniform across everything the bench has unlocked.
  *
  * `roll` is a plain 0..1 so the caller owns the randomness — the app hands in `Math.random()`,
- * a test hands in a number and gets an answer it can assert. Uniform deliberately: weighting
- * toward the deep end would turn a mode about rhythm into a mode about the hardest tier, and
- * the tier-1 breathers are part of what makes a long chain a story.
+ * a test hands in a number and gets an answer it can assert. Uniform deliberately, and with
+ * sum-of-tiers scoring it is also *fair*: a run dealt more deep locks is dealt more points'
+ * worth of work, not more luck.
  */
 export function streakTierFor(roll: number, highestUnlocked: number): 1 | 2 | 3 | 4 {
   const top = Math.max(1, Math.min(4, Math.floor(highestUnlocked)))
@@ -126,10 +114,17 @@ export function generateStreakLock(seed: number, n: number, tier: 1 | 2 | 3 | 4)
     ...base,
     id: STREAK_ID_BASE + (n % 1000),
     slug: `streak-${seed >>> 0}-${n}`,
-    // The tier in the name, deliberately: the deal is blind, and "how hard is this one" is the
-    // first thing a hand on the wrench wants to know.
+    // The tier in the name, deliberately: the deal is blind, the tier is the lock's price on
+    // the scoreboard, and "how hard is this one" is the first thing a hand on the wrench asks.
     name: `${brand} No.${serial} — tier ${tier}`,
+    tier,
     par,
-    note: 'Dealt off the pile. The chain only counts opens.',
+    note: 'Dealt off the pile. The clock does not stop.',
   }
+}
+
+/** m:ss for the run clock. */
+export function blitzClock(secondsLeft: number): string {
+  const s = Math.max(0, Math.ceil(secondsLeft))
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
