@@ -393,6 +393,8 @@ export interface DevHook {
   /** The run as data: the clock, the score so far (or the last summary's), and the best. */
   streakState(): {
     live: boolean
+    /** True while the between-locks breather is up (D-206) — any key/tap deals the next lock. */
+    interlude: boolean
     left: number
     score: number
     opens: number

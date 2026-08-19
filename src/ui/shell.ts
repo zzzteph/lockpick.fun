@@ -20,6 +20,7 @@ import {
 import { ALL_LOCKS, chambersOf } from '../game/locks'
 import { decodeLock, encodeLock, formatCode, shareProblem, shareableCode } from '../game/sharecode'
 import { countsForTier, effectivePar, letterFor } from '../game/ranks'
+import { blitzClock } from '../game/streak'
 import type { AttemptOutcome, AttemptResult, Progress } from '../game/progress'
 import {
   DUNGEON_DIFFICULTY_FACTOR,
@@ -231,6 +232,11 @@ export interface StreakScreenView {
   difficulty: SettingsData['assist']
   /** The last finished run, for the summary — null when the screen is a plain briefing. */
   summary: { score: number; opens: number; newBest: boolean } | null
+  /**
+   * The between-locks breather (D-206) — non-null exactly while a live run waits for the
+   * next deal. The clock is frozen; any key or tap continues.
+   */
+  interlude: { left: number; score: number; opens: number; avgSeconds: number } | null
 }
 
 export interface ShellContext {
@@ -2400,6 +2406,56 @@ export function drawStreak(c: ShellContext): void {
   const g = c.streak
   const compact = isCompact(vp)
   const readable = readableAccents(p)
+
+  /**
+   * The between-locks breather — D-206, the owner's ask: *"may be need a screen to show that
+   * how many locks you cracked, avg time per lock and how much left?"* It replaces the page
+   * outright while a live run waits: no nav (the only verb here is "next lock"), the clock
+   * frozen by construction, and every key or tap continues — handled in the app's frame, so
+   * this face draws and never listens.
+   */
+  if (g?.interlude) {
+    const il = g.interlude
+    screenFrame(c, 'Lock blitz', 'the clock is stopped')
+    const cy = 300
+    label(ctx, `${il.opens} ${il.opens === 1 ? 'lock' : 'locks'} cracked`, LOGICAL_WIDTH / 2, cy, {
+      font: font(typeFor(vp, TYPE.title)),
+      size: typeFor(vp, TYPE.title),
+      color: p.ink,
+      align: 'center',
+    })
+    const rowSize = typeFor(vp, TYPE.body)
+    const rowPitch = Math.max(44, rowSize + 18)
+    let ry = cy + (compact ? 96 : 76)
+    const rows: [string, string][] = [
+      ['points', `${il.score}`],
+      ['average per lock', `${il.avgSeconds.toFixed(1)}s`],
+      ['time left', blitzClock(il.left)],
+    ]
+    for (const [k, v] of rows) {
+      label(ctx, k, LOGICAL_WIDTH / 2 - 30, ry, {
+        font: font(rowSize),
+        size: rowSize,
+        color: p.inkLight,
+        align: 'right',
+      })
+      text(ctx, v, LOGICAL_WIDTH / 2 + 30, ry, { font: font(rowSize), color: p.ink })
+      ry += rowPitch
+    }
+    label(
+      ctx,
+      'any key for the next lock',
+      LOGICAL_WIDTH / 2,
+      ry + (compact ? 44 : 30),
+      {
+        font: font(typeFor(vp, TYPE.body)),
+        size: typeFor(vp, TYPE.body),
+        color: readableAccents(p).amber,
+        align: 'center',
+      },
+    )
+    return
+  }
 
   screenFrame(
     c,

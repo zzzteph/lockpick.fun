@@ -238,6 +238,28 @@ const SCREENS: { name: string; arrange: (page: Page) => Promise<void> }[] = [
       await goto(p, 'streak')
     },
   },
+  {
+    // The blitz pick (D-206): the centre band carries the big run countdown instead of the
+    // rank letter, and the header carries the running score beside the dealt lock's name.
+    name: 'streak-pick',
+    arrange: async (p) => {
+      await p.evaluate(() => globalThis.__shearline!.startStreakLock(4242, 1))
+      await renderOnce(p)
+    },
+  },
+  {
+    // The between-locks breather (D-206): real run numbers, the frozen clock, the amber
+    // "any key" line — reached the way play reaches it, through an actual open.
+    name: 'streak-interlude',
+    arrange: async (p) => {
+      await p.evaluate(() => {
+        const h = globalThis.__shearline!
+        h.startStreakLock(4242, 1)
+        h.solveCurrentLock()
+      })
+      await renderOnce(p)
+    },
+  },
   { name: 'settings', arrange: async (p) => goto(p, 'settings') },
   { name: 'help', arrange: async (p) => goto(p, 'help') },
   {

@@ -508,6 +508,12 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
    */
   let streakRun: { left: number; score: number; opens: number } | null = null
   let streakSummary: { score: number; opens: number; newBest: boolean } | null = null
+  /**
+   * True between an OPEN and the next deal — D-206's breather. The clock is frozen here by
+   * construction (it only burns on the pick screen) and any key or tap deals the next lock.
+   * Opens only: a skip or a snap deals instantly, because failing does not earn a rest stop.
+   */
+  let streakInterlude = false
   /** The difficulty the briefing picked — the run's locks are simulated at it (like the dungeon). */
   let streakDifficulty = progress.data.settings.assist
   /** True while the lock on the bench was dealt by the Streak — the pick screen's own flag. */
@@ -601,6 +607,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
 
   /** Roll and deal the run's next lock. Tier and seed roll separately, as the dungeon does. */
   function dealNextStreakLock(): void {
+    streakInterlude = false
     const tier = streakTierFor(Math.random(), progress.highestUnlockedTier)
     dealStreakLock(((Math.random() * 0xffffffff) >>> 0) || 1, tier)
   }
@@ -616,6 +623,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     streakSummary = { ...run, newBest }
     streakRun = null
     streakPick = false
+    streakInterlude = false
     session = null
     status = ''
     goto('streak')
@@ -626,6 +634,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     streakRun = null
     streakSummary = null
     streakPick = false
+    streakInterlude = false
     session = null
     status = 'run abandoned — nothing banked'
     goto('streak')
@@ -1101,6 +1110,11 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         }
         if (screen === 'pick') goto('pause')
         else if (screen === 'pause') goto('pick')
+        // Esc on the blitz interlude is "get on with it" — the next lock, not the menu. Every
+        // key means continue there (D-206), and Esc reaching this hook first must agree.
+        else if (screen === 'streak' && streakRun && streakInterlude) {
+          dealNextStreakLock()
+        }
         // The Streak tally is a destination, not a detour: Esc leaves it for the menu even
         // when the payoff was the previous screen — "back to the bench" would be a non sequitur
         // on a screen whose locks are not the bench's (D-199).
@@ -1299,7 +1313,13 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       streakRun.score += session.def.tier
       streakRun.opens += 1
       status = ''
-      dealNextStreakLock()
+      // The breather (D-206): score the open, freeze the clock, and show the run's numbers
+      // until a key or a tap deals the next lock. The clock freezes by construction — it
+      // only burns while a run's lock is on the pick screen.
+      streakInterlude = true
+      streakPick = false
+      session = null
+      goto('streak')
       return
     }
     const base = outcomeFrom(session.def, session.state, session.state.stats, { challenges })
@@ -1522,13 +1542,18 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     if (screen === 'results') resultsAge += seconds
     /**
      * The blitz clock — D-205. It burns exactly while the run's lock is on the bench: the
-     * pause panel freezes it (screen is 'pause'), and there is no "between locks" to leak
-     * time into because deals are instant. When it hits zero the run banks and the summary
-     * takes the screen, whatever the pick was doing.
+     * pause panel freezes it (screen is 'pause') and so does the interlude (screen is
+     * 'streak', D-206) — a breather the clock charged for would not be one. When it hits
+     * zero the run banks and the summary takes the screen, whatever the pick was doing.
      */
     if (streakRun && streakPick && screen === 'pick') {
       streakRun.left -= seconds
       if (streakRun.left <= 0) endStreakRun()
+    }
+    // Any key or tap on the interlude deals the next lock (D-206). Esc arrives through the
+    // pause hook instead and does the same there, so every input means "go".
+    if (streakRun && streakInterlude && screen === 'streak' && (keys.size > 0 || clicked)) {
+      dealNextStreakLock()
     }
     tickKeyboard(seconds)
     const inp = currentInput()
@@ -1641,7 +1666,25 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       ...(screen === 'gauntlet' ? { gauntlet: gauntletView() } : {}),
       ...(streakPick ? { streakPick: true } : {}),
       ...(screen === 'streak'
-        ? { streak: { difficulty: streakDifficulty, summary: streakSummary } }
+        ? {
+            streak: {
+              difficulty: streakDifficulty,
+              summary: streakSummary,
+              interlude:
+                streakRun && streakInterlude
+                  ? {
+                      left: streakRun.left,
+                      score: streakRun.score,
+                      opens: streakRun.opens,
+                      // Elapsed over opens — skips and fights are part of a lock's true cost.
+                      avgSeconds:
+                        streakRun.opens > 0
+                          ? (STREAK_SECONDS - streakRun.left) / streakRun.opens
+                          : 0,
+                    }
+                  : null,
+            },
+          }
         : {}),
     }
 
@@ -2332,6 +2375,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   }
   hook.streakState = () => ({
     live: streakRun !== null,
+    interlude: streakInterlude,
     left: streakRun?.left ?? 0,
     score: streakRun?.score ?? streakSummary?.score ?? 0,
     opens: streakRun?.opens ?? streakSummary?.opens ?? 0,

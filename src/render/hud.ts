@@ -108,9 +108,9 @@ export interface HudOptions {
   readonly lockName: string
   readonly elapsed: number
   /**
-   * Seconds left on the Lock streak's run clock (D-205). When present the header clock counts
-   * DOWN and turns crimson inside the last half minute — the per-lock time is meaningless in
-   * a blitz, and the number a sprinting hand needs is the one that ends the run.
+   * Seconds left on the Lock blitz's run clock (D-205/D-206). When present the CENTRE band
+   * carries it at rank size in place of the rank letter — a letter against one lock's par is
+   * bench-language on a mode measured by a wall clock — crimson inside the last half minute.
    */
   readonly countdownLeft?: number
   /**
@@ -554,13 +554,12 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
   // Capped to the band that holds it: `typeFor` scales the 40px clock to ~70 on a phone, and a
   // 70px digit in a 64px header band printed out through the border — reported as *"timing goes
   // out of the border area"* (D-157). The cap only ever binds at the compact scale.
+  // Always the per-lock clock, blitz included — the run countdown owns the CENTRE band
+  // there (D-206), and two copies of the same burning number is one too many.
   const clockSize = Math.min(ts(TYPE.clock), HEADER_H - 14)
-  const clockValue = opts.countdownLeft !== undefined ? Math.max(0, opts.countdownLeft) : opts.elapsed
-  text(ctx, formatClock(clockValue), clockX, MARGIN + HEADER_H / 2 + clockSize * 0.36, {
+  text(ctx, formatClock(opts.elapsed), clockX, MARGIN + HEADER_H / 2 + clockSize * 0.36, {
     font: font(clockSize),
-    // The run clock burning down through its last half minute is the one number that matters.
-    color:
-      opts.countdownLeft !== undefined && opts.countdownLeft < 30 ? readableAccents(p).crimson : p.ink,
+    color: p.ink,
     align: 'right',
   })
   const left = secondsLeftInRank(opts.elapsed, opts.par)
@@ -580,6 +579,31 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
   if (opts.lesson || opts.payoff) {
     // Nothing: during a lesson the instruction panel is drawn over this band by `drawLessonLine`,
     // and during the payoff the earned-rank stamp is. Both used to be drawn *through* the letter.
+  } else if (opts.countdownLeft !== undefined) {
+    /**
+     * The blitz band — D-206, the owner's word: *"it still could S and some other stuff, for
+     * the lock streak it make no sense - better to show the overall time left."* The rank
+     * machinery is bench-language: a letter against THIS lock's par, on a mode measured by a
+     * five-minute wall clock. So the band carries the run clock instead, at the rank's own
+     * size — the one number a sprinting hand actually needs — crimson through the last half
+     * minute. It outranks the hold-the-wrench banner deliberately: every dealt lock resets
+     * `maxTension`, and a banner flashing between every deal would strobe the whole run.
+     */
+    const runLeft = Math.max(0, opts.countdownLeft)
+    label(ctx, formatClock(runLeft), LOGICAL_WIDTH / 2, RANK_BAND_Y + 84, {
+      font: font(ts(TYPE.rank), 'bold'),
+      size: ts(TYPE.rank),
+      color: runLeft < 30 ? readable.crimson : p.ink,
+      align: 'center',
+    })
+    const countSize = compact ? ts(TYPE.dimension) : ts(TYPE.body)
+    label(
+      ctx,
+      'time left',
+      LOGICAL_WIDTH / 2,
+      Math.min(RANK_BAND_Y + 84 + countSize + 10, RANK_BAND_BOTTOM - countSize * 0.28 - 8),
+      { font: font(countSize), size: countSize, color: p.inkLight, align: 'center' },
+    )
   } else if (state.stats.maxTension <= 0) {
     /**
      * Before the wrench has *ever* been used this attempt, this band says so — at title size,

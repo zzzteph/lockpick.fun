@@ -13,12 +13,19 @@ import { advanceSeconds, bootGame, captureStage, renderOnce, setManual } from '.
 
 async function streakState(page: Page): Promise<{
   live: boolean
+  interlude: boolean
   left: number
   score: number
   opens: number
   best: { score: number; opens: number } | null
 }> {
   return page.evaluate(() => globalThis.__shearline!.streakState())
+}
+
+/** Dismiss the between-locks breather (D-206): any key continues, consumed by the frame. */
+async function continueRun(page: Page): Promise<void> {
+  await page.keyboard.press('Space')
+  await advanceSeconds(page, 0.05)
 }
 
 test('a run scores by tier, deals instantly, and banks when the clock runs out', async ({
@@ -47,19 +54,34 @@ test('a run scores by tier, deals instantly, and banks when the clock runs out',
 
   expect(await page.evaluate(() => globalThis.__shearline!.solveCurrentLock())).toBe(true)
   await renderOnce(page)
-  // The next lock is already on the bench — no tally between, the dungeon's own rhythm.
-  expect(await page.evaluate(() => globalThis.__shearline!.getScreen())).toBe('pick')
+  // An open lands on the breather (D-206): stats up, clock frozen, any key continues.
+  expect(await page.evaluate(() => globalThis.__shearline!.getScreen())).toBe('streak')
   const s1 = await streakState(page)
+  expect(s1.interlude).toBe(true)
   expect(s1.score).toBe(1)
   expect(s1.opens).toBe(1)
+  const frozenAt = s1.left
+  await advanceSeconds(page, 2)
+  expect((await streakState(page)).left).toBeCloseTo(frozenAt, 1)
+  // The interlude screen audits clean with real run numbers on it.
+  const ilAudit = await page.evaluate(() => globalThis.__shearline!.auditScreen())
+  expect(
+    ilAudit.findings
+      .filter((f) => ['overlap', 'text-over-control', 'crowded-text', 'off-stage'].includes(f.kind))
+      .map((f) => f.detail),
+  ).toEqual([])
+  await continueRun(page)
+  expect(await page.evaluate(() => globalThis.__shearline!.getScreen())).toBe('pick')
 
   // Force the next deal to a known tier-2 and open it: +2.
   await page.evaluate(() => globalThis.__shearline!.startStreakLock(4243, 2))
   expect(await page.evaluate(() => globalThis.__shearline!.solveCurrentLock())).toBe(true)
   await renderOnce(page)
   const s2 = await streakState(page)
+  expect(s2.interlude).toBe(true)
   expect(s2.score).toBe(3)
   expect(s2.opens).toBe(2)
+  await continueRun(page)
 
   // R skips: a fresh lock, no score change, the clock still burning.
   const slugBefore = (await page.evaluate(() => globalThis.__shearline!.getState())).lock.slug
@@ -96,8 +118,12 @@ test('walking out through the pause panel abandons the run — nothing banks', a
   expect(await page.evaluate(() => globalThis.__shearline!.solveCurrentLock())).toBe(true)
   await renderOnce(page)
   expect((await streakState(page)).score).toBe(1)
+  // Esc ON THE INTERLUDE means "next lock" like every other key (D-206)…
+  await page.keyboard.press('Escape')
+  await advanceSeconds(page, 0.05)
+  expect(await page.evaluate(() => globalThis.__shearline!.getScreen())).toBe('pick')
 
-  // Esc pauses (the clock freezes with the sim); the panel's last button ends the run.
+  // …while Esc on the pick pauses, clock frozen; the panel's last button ends the run.
   await page.keyboard.press('Escape')
   expect(await page.evaluate(() => globalThis.__shearline!.getScreen())).toBe('pause')
   const frozen = (await streakState(page)).left
