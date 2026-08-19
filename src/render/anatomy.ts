@@ -91,26 +91,34 @@ export function drawPartNames(vp: Viewport, p: Palette, layout: CutawayLayout): 
   const padX = tail - (layout.endPad / 2) * sign
   const plugX = plugPadCentre(layout)
 
+  /**
+   * A shade past `inkLight`, at full alpha — DECISIONS D-206's postscript. These names sat
+   * at `inkLight` under a 0.85 wash, which composites to 3.4:1 on the drafting shell's
+   * khaki; even pure `inkLight` only reaches 4.46 there, and the sweep's strict small-text
+   * rule wants 4.5. It slipped for a year because on the roster's five- and six-chamber
+   * locks the label straddles lighter ground — the blitz's four-chamber deals park it fully
+   * on the khaki, and the laptop face renders it at exactly the strict size. A 30% lean
+   * toward `ink` measures 6.0:1 on drafting and 7.4:1 on blueprint: still an annotation,
+   * no longer a coin toss against someone's font metrics.
+   */
+  const nameInk = mix(p.inkLight, p.ink, 0.3)
   const pair = (name: string, note: string, y: number, atX = padX): void => {
     text(ctx, name, atX, y - 6, {
       font: font(typeFor(vp, TYPE.dimension)),
-      color: p.inkLight,
+      color: nameInk,
       align: 'center',
     })
     text(ctx, note, atX, y + 9, {
       font: font(typeFor(vp, TYPE.dimension)),
-      color: alpha(p.inkLight, 0.75),
+      color: alpha(nameInk, 0.8),
       align: 'center',
     })
   }
 
-  ctx.save()
-  ctx.globalAlpha = 0.85
   // Which of these two turns is the fact the whole game rests on, so it is said out loud.
   pair('SHELL', 'fixed', (shellTop + shearY) / 2)
   // Between the shear line and the keyway roof, in whatever plug metal the rotation has left.
   if (plugX !== null) pair('PLUG', 'turns', (shearY + mmToY(layout, KEYWAY_FLOOR)) / 2, plugX)
-  ctx.restore()
 }
 
 /**
