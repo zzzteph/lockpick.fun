@@ -799,11 +799,22 @@ export class InputController {
    * ends are walls rather than wrap-arounds — easing off past 1 stays at 1, which on a bumper
    * is the difference between a dial and a roulette wheel.
    */
+  /**
+   * On a wheel pack the wrench keys are DEAD, not silent (D-213). A shackle has one pull
+   * (D-169, `WHEEL_PULL`), but `1`-`0` and the Deck's bumpers still wrote the persisted
+   * pressure with zero feedback — nothing on a wheel screen changed, and the next PIN
+   * lock opened at whatever was mashed during the wheels. The owner met exactly that:
+   * "The wrench pressure on 1-0 was a little weir at first." A key that does nothing
+   * here must also change nothing later.
+   */
+  wheelPack = false
+
   stepTension(dir: 1 | -1): void {
     this.setTensionLevel(tensionForStep(stepForTension(this.settings.tensionLevel) + dir))
   }
 
   setTensionLevel(level: number): void {
+    if (this.wheelPack) return
     this.settings.tensionLevel = clamp01(level)
   }
 

@@ -212,7 +212,15 @@ export const LESSON_WHEEL_LOCK: LockDef = {
   pins: ['standard', 'standard', 'standard'],
   discs: {
     trueGates: [0.75, 1.95, 1.35],
-    falseGates: [[], [], []],
+    /*
+     * Lies in the classroom — the owner's ask (D-212): "May be add false gates to the
+     * tutorieal." One on the first wheel, one on the second, the third clean, so the
+     * side view shows all three kinds of wheel at once. Both lies sit ABOVE their true
+     * gates on purpose: a student rolling up from zero meets the truth first and only
+     * finds a lie by overshooting — and the scripted lesson runs never cross one, so
+     * a held pull cannot freeze a wheel mid-script.
+     */
+    falseGates: [[2.25], [2.55], []],
     gateWidth: 0.15,
   },
   toleranceQuality: 1.3,
@@ -584,17 +592,19 @@ export const LESSONS: readonly Lesson[] = [
     steps: [
       {
         id: 'pull',
-        // The band under the lock is D-207's classroom x-ray: cores, gates, and the fence.
-        // Only here — every real wheel pack is sealed (D-173), which is exactly why the
-        // lesson must show the machine once.
+        // The lesson's lock is drawn from two sides (D-211): the flat face with each
+        // wheel's state on its window frame, and the picked wheel side-on — a full circle
+        // with its gates cut into the rim and the fence's tooth riding it. Lessons and
+        // training only — every higher rung is sealed (D-173), which is exactly why the
+        // teaching views must show the machine, moving.
         line: {
-          kb: 'A different animal — and the band below is its inside. Hold Q and pull.',
-          deck: 'A different animal — and the band below is its inside. Hold R2 and pull.',
+          kb: 'A different animal, seen through. Hold Q and pull — a tooth jams on a wheel.',
+          deck: 'A different animal, seen through. Hold R2 and pull — a tooth jams on a wheel.',
         },
         done: holdingTension,
         hint: {
-          kb: 'Q is the shackle now. The fence bar wants to drop into every wheel’s deep notch.',
-          deck: 'R2 is the shackle now. The fence bar wants to drop into every wheel’s deep notch.',
+          kb: 'Q is the shackle now. Its teeth only pass wheels whose clear gate is in the path.',
+          deck: 'R2 is the shackle now. Its teeth only pass wheels whose clear gate is in the path.',
         },
         hintAfter: 6,
       },
@@ -610,17 +620,22 @@ export const LESSONS: readonly Lesson[] = [
       },
       {
         id: 'dial',
-        // "Watch the notch" is the whole reason the x-ray exists (D-207): on a sealed pack
-        // the seat is silent and invisible by design, and a learner needs to SEE the gate
-        // arrive under the fence leg once to believe the drag afterwards.
+        // "Watch the slot" is the whole reason the x-ray exists (D-207/D-208): on a sealed
+        // pack the seat is silent and invisible by design, and a learner needs to SEE the
+        // gate arrive under the fence's finger once — and the finger DROP — to believe the
+        // drag afterwards.
         line: {
-          kb: 'Hold Space: the wheel rolls. Watch its deep notch — under the leg, the drag lets go.',
-          deck: 'Hold A: the wheel rolls. Watch its deep notch — under the leg, the drag lets go.',
+          kb: 'Hold Space: the wheel rolls. Bring the clear gate into the tooth’s path — it lets go.',
+          deck: 'Hold A: the wheel rolls. Bring the clear gate into the tooth’s path — it lets go.',
         },
         done: anySet,
+        // The escape move, finally taught (the dungeon's frozen-wheel players had to
+        // find it alone): a lie holds the tooth while the pull is on, and only a FULL
+        // release frees the wheel. The lesson lock has lies now, so the hint earns
+        // its place the first time a student overshoots.
         hint: {
-          kb: 'Let go of Space and the wheel stays put. Roll on — the dial wraps past 9.',
-          deck: 'Let go of A and the wheel stays put. Roll on — the dial wraps past 9.',
+          kb: 'Stuck on a shallow lie? Ease Q right off — the wheel frees. Then pull and roll on.',
+          deck: 'Stuck on a shallow lie? Ease R2 right off — the wheel frees. Then pull and roll on.',
         },
         hintAfter: 10,
       },
@@ -633,7 +648,7 @@ export const LESSONS: readonly Lesson[] = [
       },
       {
         id: 'open',
-        line: 'Seat all three and nothing holds the fence. Keep pulling and it opens.',
+        line: 'All three gates in line: nothing stops the teeth. Keep pulling — the shackle goes.',
         done: (s) => s.opened,
       },
     ],

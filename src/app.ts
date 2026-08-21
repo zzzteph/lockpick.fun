@@ -346,6 +346,13 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   let benchTier: number | undefined
   /** Which of the help screen's three pages is showing (D-103). */
   let helpPage = 0
+  /**
+   * How long the player has been FIGHTING a caught wheel — pull held, some wheel frozen
+   * in a false gate (D-214). Feeds the sealed rungs' rescue hint: on medium and hard the
+   * catch is invisible by design (D-173/D-191), and the dungeon report that started the
+   * whole wheels arc was a player stuck exactly here with nothing on screen saying why.
+   */
+  let caughtFightSeconds = 0
 
   const eventLog: SimEvent[] = []
   const eventWaiters: { type: string; resolve: () => void }[] = []
@@ -646,6 +653,10 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     // returns. A bench lock started mid-mode must never feed the chain.
     streakPick = false
     session = new Session(def, seed, currentConfig())
+    // Wheel packs kill the wrench keys outright (D-213): a shackle has one pull, and a
+    // dead key must not quietly rewrite the pressure the next pin lock opens at.
+    input.wheelPack = def.family === 'combination'
+    caughtFightSeconds = 0
     layout = computeLayout(def.bitting.length, 0, def.rows ?? 1, mirrored())
     const kind = faceKindFor(def.family)
     face = kind ? computeFaceLayout(def.bitting.length, kind, 0) : null
@@ -1274,7 +1285,11 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     // Its locks are teaching instruments and must never reach the roster's bookkeeping.
     if (lesson) {
       lesson.complete = true
-      finishLesson()
+      // NOT finished here (D-208): the lesson stays alive through the payoff, because the
+      // wheel lesson's whole face is the working x-ray and the open is its best frame —
+      // the fence falling, the latch clearing the heel, the shackle sliding out. Finishing
+      // here swapped the machine for a sealed lock at the exact moment of proof.
+      // `finishLesson` runs when the settled sequence routes away.
       startOpenSequence(sequence, 0, 0)
       return
     }
@@ -1570,6 +1585,14 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         updateSubtitles(subtitles, seconds, counter, view.thetaVelocity)
       }
       if (lesson) updateLesson(lesson, view, seconds)
+      // The rescue clock (D-214): counting only while the pull is held AND some wheel is
+      // frozen in a false gate — the one state a sealed pack gives no channel for. Any
+      // release or state change zeroes it, because the release IS the cure.
+      if (session.def.family === 'combination' && screen === 'pick') {
+        const fighting =
+          view.tension >= T_MIN_HOLD && view.chambers.some((c) => c.state === 'FALSE_SET')
+        caughtFightSeconds = fighting ? caughtFightSeconds + seconds : 0
+      }
       layout = computeLayout(view.chambers.length, view.theta, session.def.rows ?? 1, mirrored())
       if (face) face = computeFaceLayout(view.chambers.length, face.kind, view.theta)
       if (sequence.running) {
@@ -1597,8 +1620,10 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       // A lesson has no results page to land on — it goes back to the tutorial, where the
       // card it just finished says `done` and the next one is marked `next` (D-152). A dungeon
       // open never reaches here, and neither does a blitz open: `finishAttempt` routes both
-      // straight onward.
+      // straight onward. The lesson itself is banked and cleared HERE, not at the open (D-208),
+      // so the wheel lesson's working x-ray stays on stage for the whole payoff.
       if (view.opened && isSettled(sequence)) {
+        finishLesson()
         goto(outcome ? 'results' : 'tutorial')
       }
     } else {
@@ -1768,22 +1793,19 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       // active wheel's focus ring is the hand, and the shackle is the wrench.
       drawPadlock(vp, palette, view, padlock, {
         activeChamber: view.pickChamber,
-        // No x-ray at ANY assist since D-173 — the owner: "there should be NO helping
-        // wheels both in EASY or training modes". A wheel pack is a sealed object
-        // everywhere — and since D-191 even training's seat sound is gone: the right
-        // digit is indistinguishable at rest, everywhere, and only the drag says so.
-        //
-        // Everywhere EXCEPT the classroom — D-207, the same owner, having met his own
-        // sealed pack as a student: "I did not understand how to find the correct spot for
-        // a single wheel… some sort of see-through version in the tutorial would be
-        // helpful." A lesson lock is a teaching instrument, not content (the cutaway
-        // lessons show pins for the same reason), so the wheel LESSON runs with the D-167
-        // x-ray band — cores, gates, the fence riding them — and every real lock, bench,
-        // dungeon and blitz alike, stays sealed exactly as D-173 ruled.
-        showTargets: lesson !== null,
-        // Plain everywhere real (D-173/D-191) — and full colour in the classroom, where the
-        // teal true gate and the state-coloured fence legs ARE the lesson (D-207).
-        plainStates: lesson === null,
+        // The x-ray ladder, re-rung by the owner three times. D-173 sealed every real
+        // pack ("there should be NO helping wheels both in EASY or training modes");
+        // D-207 reopened the LESSON, the same owner having met his own sealed pack as a
+        // student ("I did not understand how to find the correct spot for a single
+        // wheel"); and D-211 reopened the low rungs — "Why this only in tutorial?…
+        // training and simple level shoul have xray, while medium an hardd" — sealed.
+        // So lessons, training and easy see the lock from two sides (the flat face plus
+        // the picked wheel side-on); medium and hard stay sealed, and since D-191 even
+        // the seat sound is gone there: only the drag says so.
+        showTargets: lesson !== null || assist === 'training' || assist === 'easy',
+        // Full colour wherever the x-ray shows — the teal clear gate and the amber
+        // binding tooth ARE the teaching (D-207/D-211). Plain everywhere sealed.
+        plainStates: lesson === null && assist !== 'training' && assist !== 'easy',
         fx,
       })
     } else if (face) {
@@ -1960,11 +1982,21 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
           ? `hold [${deckMode ? 'R2' : 'Q'}] to pull the shackle`
           : `hold [${deckMode ? 'R2' : 'Q'}] to turn the wrench`,
       // Teach the grip that makes this playable one-handed-per-control, until it has happened.
-      ...(session && pickedButUnturned(session.state)
-        ? { heldHint: shackle ? 'every wheel is seated — pull through' : 'every pin is up — turn harder' }
-        : input.touch.active && !input.usedBothThumbs
-          ? { heldHint: 'keep that thumb there — lift with the other' }
-          : {}),
+      // Outranked by the caught-wheel rescue (D-214): on the sealed rungs a wheel frozen in a
+      // false gate is invisible by design, and a player four seconds into fighting one needs
+      // the way out more than any coaching. Lessons, training and easy already SHOW the catch
+      // in the x-ray, so the line belongs to medium and hard alone — and it clears the moment
+      // the pull is eased, because the release is the cure it names.
+      ...(shackle &&
+      lesson === null &&
+      (assist === 'medium' || assist === 'hard') &&
+      caughtFightSeconds > 4
+        ? { heldHint: 'a wheel is caught in a false gate — ease the shackle right off to free it' }
+        : session && pickedButUnturned(session.state)
+          ? { heldHint: shackle ? 'every wheel is seated — pull through' : 'every pin is up — turn harder' }
+          : input.touch.active && !input.usedBothThumbs
+            ? { heldHint: 'keep that thumb there — lift with the other' }
+            : {}),
       shackle,
       par: session.def.par,
       mirrored: mirrored(),
@@ -2043,6 +2075,12 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       // Everything else that runs per frame runs here too. A harness that advanced only the
       // simulation would report a tutorial that never noticed the player doing anything.
       if (lesson) updateLesson(lesson, session.state, 1 / 120)
+      if (session.def.family === 'combination' && screen === 'pick') {
+        const fighting =
+          session.state.tension >= T_MIN_HOLD &&
+          session.state.chambers.some((c) => c.state === 'FALSE_SET')
+        caughtFightSeconds = fighting ? caughtFightSeconds + 1 / 120 : 0
+      }
       if (progress.data.settings.subtitles) {
         let counter = 0
         for (const c of session.state.chambers) {

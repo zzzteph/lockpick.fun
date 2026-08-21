@@ -73,7 +73,19 @@ test('a wheel rolls under Space and parks where you leave it, on a digit', async
   const startOff = Math.abs(((startAt / 0.3) % 1) - 0.5)
   expect(startOff, `start lift ${startAt.toFixed(3)} sits off the digit grid`).toBeLessThan(0.05)
   await page.keyboard.down(' ')
-  await page.waitForTimeout(450)
+  // The wait is measured in ROLL, not wall clock (D-213): a fixed 450ms window starved
+  // whenever this file ran first in a cold parallel invocation — eight workers booting
+  // through one fresh vite can eat most of half a second of rAF — and the claim is
+  // "Space rolls the wheel", not "Space rolls the wheel within 450 unstarved ms".
+  await page.waitForFunction(
+    (from) => {
+      const h = globalThis.__shearline
+      const c = h?.getState().chambers[0]
+      return c !== undefined && Math.abs(c.lift - from) > 0.1
+    },
+    startAt,
+    { timeout: 5000 },
+  )
   await page.keyboard.up(' ')
   await page.waitForTimeout(150)
   const rolled = (await getState(page)).chambers[0]?.lift ?? 0

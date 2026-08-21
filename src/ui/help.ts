@@ -219,151 +219,158 @@ function drawLockAnatomy(vp: Viewport, p: Palette, rect: Rect): void {
 }
 
 /**
- * One combination padlock in section, with its parts named — DECISIONS D-207.
+ * The combination padlock's pack, drawn the way the game now draws it — DECISIONS D-213.
  *
- * The wheels arrived with no reference at all: four help pages about pin locks, and a player lost
- * on the first combination lock — *"I did not understand how to find the correct spot for a single
- * wheel."* The wheel lesson now picks one open through a live x-ray band; this is the still
- * picture that band is a working view of, drawn schematic like the pin lock above: parts, names,
- * leader lines, nothing moving.
- *
- * The accents are the pick screen's own state language: **amber** for the fence, the piece whose
- * drag on the binding wheel is what the player feels; **teal** for a true gate, where a wheel
- * seats; **violet** for the false gates, the wheels' version of the pins' lie. And the one
- * structural sentence the picture has to carry is that the bar is rigid — every leg tip sits at
- * the same height, so a gate under one leg holds nothing. Here one wheel is seated on its true
- * gate, one is caught on a shallow lie, and the third — plain rim under its leg — is what keeps
- * the whole bar up.
+ * D-207's first diagram here was a body with a rigid bar over three circles; the game's
+ * own x-ray then went through four owner-driven rebuilds (D-208..D-212) and ended
+ * somewhere better — the pack seen down the axle, the first wheel whole and every wheel
+ * behind it peeking out as a ring that shows the bit of its own gates. A reference page
+ * that disagrees with the game it references is worse than none, so this is the SAME
+ * drawing, still: the front wheel with its digit ring and knurled grip, the clear gate a
+ * deep teal mouth cut into the edge and the lies shallow violet dents, the fence's tooth
+ * dropped into the seated front wheel, the middle wheel caught on a lie at its crest, and
+ * the back wheel binding, amber. Parts, names, leader lines, nothing moving.
  */
 function drawWheelAnatomy(vp: Viewport, p: Palette, rect: Rect): void {
   const { ctx } = vp
   const dim = typeFor(vp, TYPE.dimension)
   const ac = readableAccents(p)
-  const wheels = 3
+  const TAU = Math.PI * 2
 
-  // The body, and the shackle arching out of its top. The 0.78 keeps the tube's own width inside
-  // the rect on the shortest page, where the headroom above the body is at its thinnest.
-  const bodyH = rect.h * 0.64
-  const bodyY = rect.y + rect.h - bodyH
-  const scx = rect.x + rect.w * 0.5
-  const shackleR = Math.min(rect.w * 0.16, (bodyY - rect.y) * 0.78)
-  const shackleT = Math.max(16, shackleR * 0.3)
+  // The pack, centred left of the page so the callout column keeps its margin.
+  const R = Math.min(150, rect.h * 0.33)
+  const BAND = Math.max(20, R * 0.19)
+  const outerR = R + BAND * 2
+  const cx = rect.x + Math.max(outerR + 30, rect.w * 0.3)
+  const cy = rect.y + rect.h * 0.56
 
-  ctx.save()
-  // Shackle first, so the body section covers its legs where they run inside the shell. Two
-  // passes over one path — ink a stroke wider, then the metal — make an outlined tube without
-  // tracing both edges by hand.
-  ctx.beginPath()
-  ctx.moveTo(scx - shackleR, bodyY + bodyH * 0.2)
-  ctx.lineTo(scx - shackleR, bodyY)
-  ctx.arc(scx, bodyY, shackleR, Math.PI, 0)
-  ctx.lineTo(scx + shackleR, bodyY + bodyH * 0.2)
-  ctx.lineWidth = shackleT + STROKE.standard * 2
-  ctx.strokeStyle = p.ink
-  ctx.stroke()
-  ctx.lineWidth = shackleT
-  ctx.strokeStyle = p.paperShade
-  ctx.stroke()
+  // One ring per story: the front wheel seated (teal), the middle on a lie (violet), the
+  // back one binding (amber) — the three states a pack shows at once in play.
+  const rings = [
+    { rim: R, ink: ac.teal },
+    { rim: R + BAND, ink: ac.violet },
+    { rim: outerR, ink: ac.amber },
+  ] as const
 
-  // Shell body.
-  ctx.fillStyle = p.paperShade
-  ctx.fillRect(rect.x, bodyY, rect.w, bodyH)
-  ctx.lineWidth = STROKE.standard
-  ctx.strokeStyle = p.ink
-  ctx.strokeRect(rect.x, bodyY, rect.w, bodyH)
-
-  const inset = 40
-  const pitch = (rect.w - inset * 2) / wheels
-  const r = Math.min(pitch * 0.42, bodyH * 0.3)
-  const wheelY = bodyY + bodyH * 0.62
-  const wheelX = (i: number): number => rect.x + inset + pitch * (i + 0.5)
-  const centres: readonly [number, number, number] = [wheelX(0), wheelX(1), wheelX(2)]
-
-  // The fence: a rigid bar riding the rims on one leg per wheel, hung from the shackle's heel by
-  // the stem — when the bar falls, the shackle goes. Every leg tip sits at the same height, which
-  // is the diagram's whole argument: air under two legs, and the third wheel carrying the bar.
-  const barH = Math.max(14, r * 0.2)
-  const gap = Math.max(10, r * 0.16)
-  const barY = wheelY - r - gap - barH
-  const barLeft = centres[0] - r
-  const barRight = centres[2] + r
-  const legW = Math.max(12, r * 0.16)
-  const fencePiece = (x: number, y: number, w: number, h: number): void => {
-    ctx.fillStyle = alpha(ac.amber, 0.55)
-    ctx.fillRect(x, y, w, h)
-    ctx.lineWidth = STROKE.standard
-    ctx.strokeStyle = p.ink
-    ctx.strokeRect(x, y, w, h)
-  }
-  fencePiece(scx + shackleR - legW / 2, bodyY, legW, barY - bodyY)
-  fencePiece(barLeft, barY, barRight - barLeft, barH)
-  centres.forEach((cx) => {
-    fencePiece(cx - legW / 2, barY + barH, legW, gap)
-  })
-
-  // The wheels — the turning parts, each on its own hub — and their notches. A cut is filled with
-  // the shell's shade, because that is what an empty slot in a section shows: what is behind it.
-  const gateDepth = r * 0.42
-  const falseDepth = r * 0.16
-  const notch = (cx: number, angle: number, depth: number, colour: string, weight: number): void => {
-    const half = 0.17
+  // A gate, cut into a wheel's visible edge — mouth open through the rim, walls and
+  // floor in the gate's colour. On the rings it is exactly the BIT of the deeper wheel's
+  // gate the stack lets you see.
+  const wedge = (rim: number, a: number, w: number, depth: number, colour: string): void => {
     ctx.beginPath()
-    ctx.moveTo(cx + Math.cos(angle - half) * r, wheelY + Math.sin(angle - half) * r)
-    ctx.lineTo(cx + Math.cos(angle) * (r - depth), wheelY + Math.sin(angle) * (r - depth))
-    ctx.lineTo(cx + Math.cos(angle + half) * r, wheelY + Math.sin(angle + half) * r)
+    ctx.moveTo(cx + Math.cos(a - w) * (rim + 3), cy + Math.sin(a - w) * (rim + 3))
+    ctx.arc(cx, cy, rim + 3, a - w, a + w)
+    ctx.lineTo(cx + Math.cos(a + w) * (rim - depth), cy + Math.sin(a + w) * (rim - depth))
+    ctx.arc(cx, cy, rim - depth, a + w, a - w, true)
+    ctx.closePath()
     ctx.fillStyle = p.paperShade
     ctx.fill()
-    ctx.lineWidth = weight
+    ctx.lineWidth = STROKE.standard
     ctx.strokeStyle = colour
+    ctx.beginPath()
+    ctx.moveTo(cx + Math.cos(a - w) * (rim + 3), cy + Math.sin(a - w) * (rim + 3))
+    ctx.lineTo(cx + Math.cos(a - w) * (rim - depth), cy + Math.sin(a - w) * (rim - depth))
+    ctx.arc(cx, cy, rim - depth, a - w, a + w)
+    ctx.lineTo(cx + Math.cos(a + w) * (rim + 3), cy + Math.sin(a + w) * (rim + 3))
     ctx.stroke()
   }
-  centres.forEach((cx) => {
+
+  const TOP = -Math.PI / 2
+  ctx.save()
+  // Deepest disc first; each nearer disc covers all but its ring. A breath of shade per
+  // step back keeps the stack reading as depth.
+  for (let i = rings.length - 1; i >= 0; i -= 1) {
+    const ring = rings[i]
+    if (!ring) continue
     ctx.beginPath()
-    ctx.arc(cx, wheelY, r, 0, Math.PI * 2)
+    ctx.arc(cx, cy, ring.rim, 0, TAU)
     ctx.fillStyle = p.paper
     ctx.fill()
+    if (i > 0) {
+      ctx.fillStyle = alpha(p.ink, 0.03 * i)
+      ctx.fill()
+    }
+    ctx.lineWidth = STROKE.hairline
+    ctx.strokeStyle = alpha(p.ink, 0.35)
+    for (let k = 0; k < 36; k += 1) {
+      const a = (k / 36) * TAU
+      ctx.beginPath()
+      ctx.moveTo(cx + Math.cos(a) * (ring.rim - 6), cy + Math.sin(a) * (ring.rim - 6))
+      ctx.lineTo(cx + Math.cos(a) * (ring.rim + 1), cy + Math.sin(a) * (ring.rim + 1))
+      ctx.stroke()
+    }
     ctx.lineWidth = STROKE.standard
-    ctx.strokeStyle = p.ink
-    ctx.stroke()
+    ctx.strokeStyle = ring.ink
     ctx.beginPath()
-    ctx.arc(cx, wheelY, r * 0.16, 0, Math.PI * 2)
-    ctx.fillStyle = p.paperShade
-    ctx.fill()
-    ctx.lineWidth = STROKE.standard
-    ctx.strokeStyle = p.ink
+    ctx.arc(cx, cy, ring.rim, 0, TAU)
     ctx.stroke()
-  })
-  /*
-   * Three wheels, three stories. Wheel one: true gate seated square under its leg — done. Wheel
-   * two: a shallow false gate under the leg, the near-set feel with nothing beneath it. Wheel
-   * three: plain rim under the leg and its true gate swung away — the binding wheel, the one the
-   * fence is actually resting on. True gates are heavy teal wherever they sit, exactly as the
-   * lesson's x-ray band draws them.
-   */
-  const TOP = -Math.PI / 2
-  notch(centres[0], TOP, gateDepth, ac.teal, STROKE.heavy)
-  notch(centres[0], TOP + 2.3, falseDepth, ac.violet, STROKE.standard)
-  notch(centres[0], TOP - 2.1, falseDepth, ac.violet, STROKE.standard)
-  notch(centres[1], TOP, falseDepth, ac.violet, STROKE.standard)
-  notch(centres[1], TOP + 2.1, gateDepth, ac.teal, STROKE.heavy)
-  notch(centres[1], TOP - 2.3, falseDepth, ac.violet, STROKE.standard)
-  notch(centres[2], TOP - 2.7, gateDepth, ac.teal, STROKE.heavy)
-  notch(centres[2], TOP + 1.0, falseDepth, ac.violet, STROKE.standard)
-  notch(centres[2], TOP - 1.3, falseDepth, ac.violet, STROKE.standard)
+  }
+  // The cuts. Front: clear gate seated at the crest, its lie parked lower left. Middle:
+  // a lie right at the crest — the near-set feel with nothing beneath — and its clear
+  // gate swung away. Back: plain rim at the crest (the wheel holding everything up),
+  // gates elsewhere.
+  const deep = Math.min(34, R * 0.24)
+  wedge(R, TOP, 0.17, deep, ac.teal)
+  wedge(R, TOP + 2.4, 0.11, deep * 0.35, ac.violet)
+  wedge(R + BAND, TOP, 0.11, BAND * 0.45, ac.violet)
+  wedge(R + BAND, TOP + 1.9, 0.15, BAND + 4, ac.teal)
+  wedge(outerR, TOP - 2.5, 0.15, BAND + 4, ac.teal)
+  wedge(outerR, TOP + 1.1, 0.11, BAND * 0.45, ac.violet)
+
+  // The digits round the front face, the seated one bold at the crest — the digit in
+  // the window and the gate under the tooth are the same fact.
+  for (let d = 0; d < 10; d += 1) {
+    const a = TOP + ((d - 2) / 10) * TAU
+    text(ctx, String(d), cx + Math.cos(a) * (R - 40), cy + Math.sin(a) * (R - 40) + dim * 0.36, {
+      font: font(dim, d === 2 ? 'bold' : undefined),
+      color: d === 2 ? p.ink : alpha(p.inkLight, 0.6),
+      align: 'center',
+    })
+  }
+
+  // The hub — the shackle's leg, end-on: the whole pack rides on it.
+  ctx.lineWidth = STROKE.standard
+  ctx.strokeStyle = p.ink
+  ctx.beginPath()
+  ctx.arc(cx, cy, Math.max(16, R * 0.18), 0, TAU)
+  ctx.fillStyle = p.paperShade
+  ctx.fill()
+  ctx.stroke()
+
+  // The fence: bar and tooth, dropped into the seated front wheel's clear gate.
+  const barW = R * 1.2
+  const barH = 14
+  const barY = cy - outerR - Math.max(30, R * 0.26)
+  const toothW = Math.max(22, R * 0.17)
+  const tipY = cy - R + deep * 0.75
+  ctx.fillStyle = alpha(ac.amber, 0.45)
+  ctx.fillRect(cx - barW / 2, barY, barW, barH)
+  ctx.lineWidth = STROKE.standard
+  ctx.strokeStyle = p.ink
+  ctx.strokeRect(cx - barW / 2, barY, barW, barH)
+  ctx.fillStyle = alpha(ac.amber, 0.45)
+  ctx.fillRect(cx - toothW / 2, barY + barH, toothW, tipY - (barY + barH))
+  ctx.strokeRect(cx - toothW / 2, barY + barH, toothW, tipY - (barY + barH))
   ctx.restore()
 
+  // The names, an evenly spaced column with the leader lines doing the travelling —
+  // exactly the pin lock's arrangement above.
   const nameX = rect.x + rect.w + 34
   const marks: [string, number, number, string][] = [
-    ['shackle', scx + shackleR * 0.55, bodyY - shackleR * 0.8, p.ink],
-    ['fence', barRight - 10, barY + barH * 0.5, ac.amber],
-    ['true gate', centres[0], wheelY - r + gateDepth * 0.4, ac.teal],
+    ['fence', cx + barW / 2 - 6, barY + barH / 2, ac.amber],
+    ['tooth', cx + toothW / 2, barY + barH + 16, ac.amber],
+    [
+      'gate',
+      cx + Math.cos(TOP + 1.9) * (R + BAND - 8),
+      cy + Math.sin(TOP + 1.9) * (R + BAND - 8),
+      ac.teal,
+    ],
     [
       'false gate',
-      centres[2] + Math.cos(TOP + 1.0) * (r - falseDepth * 0.5),
-      wheelY + Math.sin(TOP + 1.0) * (r - falseDepth * 0.5),
+      cx + Math.cos(TOP + 1.1) * (outerR - 6),
+      cy + Math.sin(TOP + 1.1) * (outerR - 6),
       ac.violet,
     ],
-    ['wheel', centres[2] + r * 0.88, wheelY + r * 0.4, p.ink],
+    ['wheel', cx + Math.cos(0.5) * outerR, cy + Math.sin(0.5) * outerR, p.ink],
   ]
   const pitchY = Math.max(dim * 1.6, rect.h / marks.length)
   const firstY = rect.y + dim * 1.2
@@ -371,7 +378,6 @@ function drawWheelAnatomy(vp: Viewport, p: Palette, rect: Rect): void {
     callout(vp, name, nameX, firstY + i * pitchY, px, py, colour)
   })
 }
-
 /** `name`, one line about it, and the section drawing beside it. */
 interface Entry {
   readonly term: string
@@ -819,14 +825,15 @@ export function drawHelp(c: ShellContext): void {
       /*
        * Written to fit the line budget on a phone rather than trimmed to it (D-137): the compact
        * cut loses the clause naming the drag as the tell, which the diagram's binding wheel and
-       * the wheel lesson both carry anyway.
+       * the wheel lesson both carry anyway. Reworded at D-213 to say what the game now draws:
+       * teeth through gates, not a falling bar.
        */
       isCompact(vp)
-        ? 'Each wheel hides one deep gate. Under pull the fence drags on the rims; it drops — ' +
-          'and the shackle opens — only when every gate lines up under its legs at once.'
-        : 'Each wheel hides one deep gate in a rim of shallow lies. Under pull the fence bar ' +
-          'drags on the binding wheel — that drag is the tell, and at the gate it lets go. The ' +
-          'bar drops, and the shackle opens, only when every deep gate sits under its leg at once.',
+        ? 'Each wheel hides one clear gate among shallow lies. The fence teeth ride the ' +
+          'wheels — line every gate up beneath them and the pull drives the teeth through.'
+        : 'Each wheel hides one clear gate in a ring of shallow lies. The fence — the ' +
+          'shackle’s own teeth — rides every wheel: pull, and the binding wheel jams its ' +
+          'tooth; that drag is the tell. Line all the gates up and the pull drives the teeth through.',
       LEFT + 20,
       proseY + proseSize,
       {

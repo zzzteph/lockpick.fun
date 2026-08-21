@@ -9,16 +9,18 @@
  * the open, each wheel is a thumbwheel showing its digit strip through the body, and the
  * "nearest" wheel is simply the leftmost.
  *
- * How much of the inside shows is the owner's call too: **training draws a faint x-ray**
- * under the row — each wheel's core with its gates, and the fence riding them — and every
- * other assist shows a sealed lock, because a combination lock is decoded by feel and the
- * higher rungs are precisely the game not narrating (D-166).
+ * How much of the inside shows is the owner's call too: **lessons and the training rung
+ * see the lock from two sides** (D-211) — the flat face you operate, its window frames
+ * carrying each wheel's state, and beside it a SIDE-VIEW x-ray of the picked wheel: a full
+ * circle with its gates cut into the rim and the fence's tooth riding it. Everything above
+ * training shows a sealed lock, because a combination lock is decoded by feel and the
+ * higher rungs are precisely the game not narrating (D-166/D-173).
  *
  * This module owns geometry and drawing only. It reads `SimState` and never writes to it.
  */
 
 import type { Chamber, SimState } from '../sim'
-import { COMBO_DETENT, COMBO_DIGITS } from '../sim'
+import { COMBO_DETENT, COMBO_DIGITS, THETA_OPEN } from '../sim'
 import { roundRectPath, text } from './draw'
 import type { Fx } from './fx'
 import { LOGICAL_WIDTH, typeFor, type Viewport } from './viewport'
@@ -153,7 +155,11 @@ export function padlockAuditBox(layout: PadlockLayout): {
 
 export interface PadlockOptions {
   readonly activeChamber: number
-  /** Training only: the x-ray band — cores, gates and the fence riding them (D-166/D-167). */
+  /**
+   * Lessons and the training rung: the two-sided x-ray — state-coloured window frames on
+   * the face, and the picked wheel drawn side-on with its gates and the fence's tooth
+   * (D-166/D-207..D-211). Everything above training is sealed.
+   */
   readonly showTargets: boolean
   /** Above training the narration is off: state colours go steel (D-166). */
   readonly plainStates?: boolean
@@ -167,15 +173,13 @@ function stateInk(p: Palette, c: Chamber, plain: boolean): string {
       return p.teal
     case 'FALSE_SET':
       return p.violet
+    // The one dragging under the pull — the x-ray paints the FEEL (D-208/D-211). Only
+    // lessons and training ever reach this: everything above is sealed and plain.
+    case 'BINDING':
+      return p.amber
     default:
       return p.steel
   }
-}
-
-/** The angle a wheel's own body has been turned to, for the x-ray cores. Up is seated. */
-function coreAngle(c: Chamber, at: number): number {
-  const travel = c.maxLift > 0 ? c.maxLift : 1
-  return -Math.PI / 2 + ((at - c.lift) / travel) * Math.PI * 2
 }
 
 export function drawPadlock(
@@ -186,7 +190,6 @@ export function drawPadlock(
   opts: PadlockOptions,
 ): void {
   const { ctx } = vp
-  const plain = opts.plainStates === true
   const readable = readableAccents(p)
 
   // ── The shackle, which is the wrench ──────────────────────────────────────────────────
@@ -195,9 +198,19 @@ export function drawPadlock(
   // toe seats in the lower half. Under the pull the whole hook shifts outward — the give a
   // hand reads the fence's load from — and on the open it slides further as one piece, the
   // toe clear of its mouth, the long leg still home.
+  /*
+   * The give. On a sealed face it is the FEEL approximation the owner approved for play —
+   * pull harder, see more give. In the x-ray it is the physics itself (D-209, "we need to
+   * have real physics representations"): the sim's resolved travel θ, the same number the
+   * wheels are actually stopping. So the shackle barely budges against a bound wheel, a
+   * false gate visibly buys a few extra millimetres of stroke, each seated wheel lengthens
+   * it, and releasing the pull visibly gives it all back.
+   */
   const slide = state.opened
     ? SHACKLE_OPEN_SLIDE
-    : Math.min(1, state.tension / 0.6) * SHACKLE_GIVE
+    : opts.showTargets
+      ? Math.min(1, state.theta / THETA_OPEN) * SHACKLE_GIVE
+      : Math.min(1, state.tension / 0.6) * SHACKLE_GIVE
   const bodyRight = layout.bodyX + layout.bodyW
   const topY0 = layout.bodyY + 62
   const topY1 = topY0 + SHACKLE_THICK
@@ -275,7 +288,15 @@ export function drawPadlock(
     ctx.fillStyle = p.paper
     ctx.fill()
     ctx.lineWidth = active ? STROKE.heavy : STROKE.standard
-    ctx.strokeStyle = active ? p.ink : p.rule
+    // In the x-ray the window frame carries the wheel's verdict (D-211) — amber on the
+    // one dragging, teal seated, violet lying — so the pack reads at a glance while the
+    // side view explains the one under your hand. Sealed faces stay mute, as ruled.
+    ctx.strokeStyle =
+      opts.showTargets && opts.plainStates !== true
+        ? alpha(stateInk(p, c, false), 0.9)
+        : active
+          ? p.ink
+          : p.rule
     ctx.stroke()
 
     // The digit strip, clipped to the wheel: the current digit through the middle of the
@@ -334,82 +355,281 @@ export function drawPadlock(
     ctx.restore()
   }
 
-  // ── The classroom x-ray: the cores, their gates, and the fence riding them ─────────────
-  //
-  // Built for training (D-166/D-167), sealed everywhere by D-173, and back for LESSONS
-  // ONLY at D-207 — where it also finally got the weight a teaching drawing needs: the
-  // original was 0.45-alpha hairlines sized as an assist ("I did not understand how to
-  // find the correct spot for a single wheel"), and a learner cannot be taught by a band
-  // they have to squint at. Standard strokes, a deeper true notch, and the two parts
-  // NAMED, the way the cutaway names SHELL and PLUG.
-  if (opts.showTargets) {
-    const bandY = layout.rowY + layout.wheelH / 2 + 24
-    const coreR = 40
-    const coreY = bandY + coreR + 26
-    const ghost = alpha(p.ink, 0.75)
-    ctx.save()
-    ctx.lineWidth = STROKE.standard
-    ctx.strokeStyle = ghost
+  // ── The second side (D-211) ───────────────────────────────────────────────────────────
+  if (opts.showTargets) drawWheelSide(vp, p, state, layout, opts)
+}
 
-    // The fence: one bar, one leg per wheel. A seated wheel's leg is dropped into its gate;
-    // a false gate holds it partway — the same partial drop the sidebar column showed.
-    const seated = (c: Chamber): number =>
-      c.state === 'SET' ? 1 : c.state === 'FALSE_SET' ? 0.45 : 0
-    const fenceY = bandY + 4
-    const barLeft = wheelRect(layout, 0).x - 10
-    const barRight = wheelRect(layout, layout.count - 1).x + layout.wheelW + 10
+/**
+ * The lock's SECOND SIDE: the whole pack, edge-on — DECISIONS D-211, stacked D-212.
+ *
+ * Three combined-view drawings died before D-211 split the projections ("Isometr is bad…
+ * like with have lock from two sides"), and the split's first cut showed one wheel alone.
+ * The owner liked it and asked for the pack: *"can we somehow see that they are in line…
+ * if wheel is the firts, then we can see the bit of the gate."* So the side view is the
+ * STACK now: the first wheel whole in front — knurled rim, digit ring, its gates cut deep
+ * — and every wheel behind it peeking out as a ring, each ring carrying the visible BIT
+ * of its own true gate and lies at their live angles. Alignment stops being a claim: when
+ * the cuts stand in one radial line, you are looking down the open channel, and the open
+ * drives the tooth through it.
+ *
+ * Each wheel's outline wears its state colour (amber dragging, teal seated, violet lying
+ * — the face's window frames say the same, so the two views cross-read), the picked wheel
+ * is the heavy outline, the hub is the shackle's leg the pack rides on, and the fence's
+ * one drawn tooth rides the front rim: down into the cut on a seat, hard on the metal
+ * with the amber contact when the front wheel binds.
+ */
+function drawWheelSide(
+  vp: Viewport,
+  p: Palette,
+  state: SimState,
+  layout: PadlockLayout,
+  opts: PadlockOptions,
+): void {
+  const { ctx } = vp
+  const plain = opts.plainStates === true
+  const readable = readableAccents(p)
+  const ghost = alpha(p.ink, 0.75)
+  const TAU = Math.PI * 2
+  const wrap = (a: number): number => {
+    let w = a % TAU
+    if (w > Math.PI) w -= TAU
+    if (w <= -Math.PI) w += TAU
+    return w
+  }
+  const wheels = state.chambers.filter((ch) => ch.index < layout.count)
+  const front = wheels.find((ch) => ch.index === 0)
+  if (!front) return
+  const picked = Math.max(0, Math.min(opts.activeChamber, layout.count - 1))
+
+  // The front wheel whole; every wheel behind peeks out as an 18px ring. The panel sits
+  // in the left gutter at the row's own eye level, and grows leftward with the pack.
+  const R = 105
+  const BAND = 18
+  const outerR = R + BAND * (wheels.length - 1)
+  const cx = layout.bodyX - outerR - 48
+  const cy = layout.rowY
+
+  const angleOf = (ch: Chamber, at: number): number => {
+    const travel = ch.maxLift > 0 ? ch.maxLift : 1
+    return wrap(((at - ch.lift) / travel) * TAU) - Math.PI / 2
+  }
+  // A gate, cut into a wheel's visible edge: the mouth open through the rim stroke, two
+  // walls and a floor in the gate's colour. On the rings the cut is exactly the BIT of
+  // the deeper wheel's gate the stack lets you see.
+  const cut = (ch: Chamber, at: number, rim: number, depth: number, deep: boolean): void => {
+    const a = angleOf(ch, at)
+    const w = deep ? 0.17 : 0.11
+    const edge = plain ? ghost : deep ? readable.teal : alpha(p.violet, 0.85)
     ctx.beginPath()
-    ctx.moveTo(barLeft, fenceY)
-    ctx.lineTo(barRight, fenceY)
+    ctx.moveTo(cx + Math.cos(a - w) * (rim + 3), cy + Math.sin(a - w) * (rim + 3))
+    ctx.arc(cx, cy, rim + 3, a - w, a + w)
+    ctx.lineTo(cx + Math.cos(a + w) * (rim - depth), cy + Math.sin(a + w) * (rim - depth))
+    ctx.arc(cx, cy, rim - depth, a + w, a - w, true)
+    ctx.closePath()
+    ctx.fillStyle = p.paperShade
+    ctx.fill()
+    ctx.lineWidth = STROKE.standard
+    ctx.strokeStyle = edge
+    ctx.beginPath()
+    ctx.moveTo(cx + Math.cos(a - w) * (rim + 3), cy + Math.sin(a - w) * (rim + 3))
+    ctx.lineTo(cx + Math.cos(a - w) * (rim - depth), cy + Math.sin(a - w) * (rim - depth))
+    ctx.arc(cx, cy, rim - depth, a - w, a + w)
+    ctx.lineTo(cx + Math.cos(a + w) * (rim + 3), cy + Math.sin(a + w) * (rim + 3))
     ctx.stroke()
+  }
 
-    for (const c of state.chambers) {
-      if (c.index >= layout.count) continue
-      const r = wheelRect(layout, c.index)
-      const cx = r.x + r.w / 2
-      const drop = seated(c) * 14
-      ctx.strokeStyle = plain ? ghost : alpha(stateInk(p, c, plain), 0.9)
-      ctx.beginPath()
-      ctx.moveTo(cx, fenceY)
-      ctx.lineTo(cx, coreY - coreR - 8 + drop)
-      ctx.stroke()
-
-      // The core: the wheel's hidden middle, turning with it. The true gate is the deep
-      // notch, false gates are the shallow ones — the same honesty the cutaway gives a
-      // spool's waist. Seated is the gate straight up, under the leg.
-      ctx.strokeStyle = ghost
-      ctx.beginPath()
-      ctx.arc(cx, coreY, coreR, 0, Math.PI * 2)
-      ctx.stroke()
-      const notch = (at: number, depth: number): void => {
-        const a = coreAngle(c, at)
-        ctx.beginPath()
-        ctx.moveTo(cx + Math.cos(a) * coreR, coreY + Math.sin(a) * coreR)
-        ctx.lineTo(cx + Math.cos(a) * (coreR - depth), coreY + Math.sin(a) * (coreR - depth))
-        ctx.stroke()
-      }
-      ctx.strokeStyle = plain ? ghost : readable.teal
-      ctx.lineWidth = STROKE.heavy
-      notch(c.setLift, 22)
-      ctx.strokeStyle = plain ? ghost : alpha(p.violet, 0.85)
-      ctx.lineWidth = STROKE.standard
-      for (const f of c.falseGates) notch(f, 10)
-      ctx.lineWidth = STROKE.standard
+  ctx.save()
+  // Deepest wheel first, the front wheel last — each disc drawn whole, each next one
+  // covering all but the ring. A breath of shade per step back keeps the stack reading
+  // as depth rather than as one flat target.
+  for (let i = wheels.length - 1; i >= 0; i -= 1) {
+    const ch = wheels[i]
+    if (!ch) continue
+    const rim = R + BAND * i
+    ctx.beginPath()
+    ctx.arc(cx, cy, rim, 0, TAU)
+    ctx.fillStyle = p.paper
+    ctx.fill()
+    if (i > 0) {
+      ctx.fillStyle = alpha(p.ink, 0.03 * i)
+      ctx.fill()
     }
+    // Its knurled grip, its state on its outline, and the heavy line on the picked wheel.
+    ctx.lineWidth = STROKE.hairline
+    ctx.strokeStyle = alpha(p.ink, 0.35)
+    for (let k = 0; k < 36; k += 1) {
+      const a = (k / 36) * TAU
+      ctx.beginPath()
+      ctx.moveTo(cx + Math.cos(a) * (rim - 6), cy + Math.sin(a) * (rim - 6))
+      ctx.lineTo(cx + Math.cos(a) * (rim + 1), cy + Math.sin(a) * (rim + 1))
+      ctx.stroke()
+    }
+    ctx.lineWidth = ch.index === picked ? STROKE.heavy : STROKE.standard
+    ctx.strokeStyle = plain ? ghost : alpha(stateInk(p, ch, plain), 0.9)
+    ctx.beginPath()
+    ctx.arc(cx, cy, rim, 0, TAU)
+    ctx.stroke()
+    // The bit of every gate this wheel shows: through the ring on the deep wheels, deep
+    // into the face on the front one.
+    const depth = i === 0 ? 34 : BAND + 4
+    const shallow = i === 0 ? 12 : 8
+    cut(ch, ch.setLift, rim, depth, true)
+    for (const f of ch.falseGates) cut(ch, f, rim, shallow, false)
+  }
 
-    // The two parts, named — a diagram without names is a decoration.
-    const labelSize = typeFor(vp, TYPE.dimension)
-    text(ctx, 'fence', barLeft - 14, fenceY + labelSize * 0.36, {
-      font: font(labelSize),
-      color: ghost,
-      align: 'right',
+  // The digits, stamped round the front wheel's face and orbiting live. The one at the
+  // TOP is the one showing in the front window — gate and read line share the wheel's
+  // zero, which is the whole decode — and the digit passing the true gate sits in its
+  // mouth: the gate wears its number. (R−40, so compact faces clear each other — the
+  // sweep caught neighbours kissing at R−52.)
+  const digitSize = typeFor(vp, TYPE.dimension)
+  const frontTravel = front.maxLift > 0 ? front.maxLift : 1
+  for (let d = 0; d < COMBO_DIGITS; d += 1) {
+    const da = wrap((((d + 0.5) * COMBO_DETENT - front.lift) / frontTravel) * TAU) - Math.PI / 2
+    const atTop = Math.abs(wrap(da + Math.PI / 2)) < 0.31
+    text(ctx, String(d), cx + Math.cos(da) * (R - 40), cy + Math.sin(da) * (R - 40) + digitSize * 0.36, {
+      font: font(digitSize, atTop ? 'bold' : undefined),
+      color: atTop ? p.ink : alpha(p.inkLight, 0.6),
+      align: 'center',
     })
-    const firstCore = wheelRect(layout, 0).x + layout.wheelW / 2
-    text(ctx, 'gate', firstCore - coreR - 14, coreY + labelSize * 0.36, {
-      font: font(labelSize),
-      color: plain ? ghost : readable.teal,
-      align: 'right',
-    })
+  }
+
+  // The hub: the shackle's leg, end-on — the whole pack rides on it.
+  ctx.lineWidth = STROKE.standard
+  ctx.strokeStyle = ghost
+  ctx.beginPath()
+  ctx.arc(cx, cy, 22, 0, TAU)
+  ctx.fillStyle = p.paperShade
+  ctx.fill()
+  ctx.stroke()
+
+  // The lined-up channel, celebrated (D-213): the moment every cut stands in one radial
+  // row is the whole climax of the mode, and it used to happen without a word. When the
+  // pack is fully seated (or open), the channel's walls get one clear emphasis — a soft
+  // teal underglow beneath heavy edges, from the outer rim down to the front wheel's
+  // floor, right where the tooth is about to drive through.
+  const allSet = wheels.every((ch) => ch.state === 'SET')
+  if ((allSet || state.opened) && !plain) {
+    const a = angleOf(front, front.setLift)
+    const w = 0.17
+    const chanTop = outerR + 3
+    const chanFloor = R - 34
+    ctx.save()
+    for (const pass of [
+      { width: 10, colour: alpha(readable.teal, 0.22) },
+      { width: STROKE.heavy, colour: readable.teal },
+    ]) {
+      ctx.lineWidth = pass.width
+      ctx.strokeStyle = pass.colour
+      ctx.beginPath()
+      ctx.moveTo(cx + Math.cos(a - w) * chanTop, cy + Math.sin(a - w) * chanTop)
+      ctx.lineTo(cx + Math.cos(a - w) * chanFloor, cy + Math.sin(a - w) * chanFloor)
+      ctx.moveTo(cx + Math.cos(a + w) * chanTop, cy + Math.sin(a + w) * chanTop)
+      ctx.lineTo(cx + Math.cos(a + w) * chanFloor, cy + Math.sin(a + w) * chanFloor)
+      ctx.stroke()
+    }
     ctx.restore()
   }
+
+  // The fence, in section: the bar and the one drawn tooth, riding the FRONT wheel's rim
+  // over the rings — which is the true occlusion, the front wheel's tooth being nearest.
+  // PRESSED only while the pull is on (D-213): release, and the tooth visibly lifts a
+  // hair clear of the wheel — which is the escape move drawn, the same one the dial
+  // hint teaches: a lie only holds the tooth while something presses it in. Under pull:
+  // seated sits down inside the clear cut, a lie stops at the shallow floor, the binder
+  // presses solid metal. The open sends it through the lined-up channel.
+  const barW = 128
+  const barH = 14
+  const barY = cy - outerR - 46
+  const pulling = state.opened || state.tension > 0.05
+  const drop = state.opened ? 40 : front.state === 'SET' ? 26 : front.state === 'FALSE_SET' ? 9 : 0
+  const tipY = pulling ? cy - R + drop : cy - R - 6
+  ctx.fillStyle = p.paper
+  ctx.fillRect(cx - barW / 2, barY, barW, barH)
+  ctx.lineWidth = STROKE.standard
+  ctx.strokeStyle = ghost
+  ctx.strokeRect(cx - barW / 2, barY, barW, barH)
+  ctx.fillStyle = p.paper
+  ctx.fillRect(cx - 13, barY + barH, 26, tipY - (barY + barH))
+  ctx.fillStyle = plain ? alpha(ghost, 0.35) : alpha(stateInk(p, front, plain), 0.55)
+  ctx.fillRect(cx - 13, barY + barH, 26, tipY - (barY + barH))
+  ctx.strokeRect(cx - 13, barY + barH, 26, tipY - (barY + barH))
+  // The jam, lit at the contact and keyed to the pull being held.
+  if (!state.opened && front.state === 'BINDING' && state.tension > 0.05) {
+    ctx.lineWidth = STROKE.heavy
+    ctx.strokeStyle = readable.amber
+    ctx.beginPath()
+    ctx.moveTo(cx - 16, tipY)
+    ctx.lineTo(cx + 16, tipY)
+    ctx.stroke()
+  }
+  ctx.restore()
+
+  // Names, and what this drawing is: the callouts stay put and the leader lines chase
+  // the geometry, exactly as the help screen's anatomy pages do.
+  const labelSize = typeFor(vp, TYPE.dimension)
+  text(ctx, 'fence', cx - barW / 2 - 12, barY + barH / 2 + labelSize * 0.36, {
+    font: font(labelSize),
+    color: ghost,
+    align: 'right',
+  })
+  // Which ring is which wheel, said in numerals (D-213): a small column at the pack's
+  // lower right, one hairline out to each rim. In the band itself a numeral would not
+  // fit the compact face; out here the column has all the room it needs and still stops
+  // short of the body's edge.
+  const numeralX = layout.bodyX - 14
+  for (const ch of wheels) {
+    const rim = R + BAND * ch.index
+    const ny = cy + 34 + ch.index * labelSize * 1.5
+    const a = Math.asin(Math.min(1, (ny - cy) / rim))
+    ctx.save()
+    ctx.lineWidth = STROKE.hairline
+    ctx.strokeStyle = alpha(ghost, 0.5)
+    ctx.beginPath()
+    ctx.moveTo(numeralX - labelSize * 0.8, ny - labelSize * 0.14)
+    ctx.lineTo(cx + Math.cos(a) * (rim - 4), cy + Math.sin(a) * (rim - 4))
+    ctx.stroke()
+    ctx.restore()
+    text(ctx, String(ch.index + 1), numeralX, ny + labelSize * 0.36, {
+      font: font(labelSize),
+      color: ch.index === picked ? p.ink : p.inkLight,
+      align: 'right',
+    })
+  }
+  // The gate callouts sit UNDER the pack and read rightward — left-of-the-circle labels
+  // grew off the stage's left edge at the compact face, and a label that has to fight
+  // the bezel is a label in the wrong place. Leaders climb from the words to the cuts.
+  const labelLeft = cx - outerR + 2
+  const callout = (name: string, ly: number, at: number, colour: string): void => {
+    const a = angleOf(front, at)
+    ctx.save()
+    ctx.lineWidth = STROKE.hairline
+    ctx.strokeStyle = alpha(colour, 0.65)
+    ctx.beginPath()
+    ctx.moveTo(labelLeft + 8, ly - labelSize * 0.5)
+    ctx.lineTo(cx + Math.cos(a) * (R - 12), cy + Math.sin(a) * (R - 12))
+    ctx.stroke()
+    ctx.restore()
+    text(ctx, name, labelLeft, ly + labelSize * 0.36, {
+      font: font(labelSize),
+      color: colour,
+      align: 'left',
+    })
+  }
+  callout('gate', cy + outerR + 30, front.setLift, plain ? ghost : readable.teal)
+  const firstFalse = front.falseGates[0]
+  if (firstFalse !== undefined) {
+    callout(
+      'false gate',
+      cy + outerR + 30 + labelSize * 1.9,
+      firstFalse,
+      plain ? ghost : readable.violet,
+    )
+  }
+  // What this drawing is, said once, up top where nothing else lives.
+  text(ctx, 'the pack, side on', cx, barY - 14, {
+    font: font(labelSize),
+    color: p.inkLight,
+    align: 'center',
+  })
 }
