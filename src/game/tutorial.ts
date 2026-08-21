@@ -584,14 +584,17 @@ export const LESSONS: readonly Lesson[] = [
     steps: [
       {
         id: 'pull',
+        // The band under the lock is D-207's classroom x-ray: cores, gates, and the fence.
+        // Only here — every real wheel pack is sealed (D-173), which is exactly why the
+        // lesson must show the machine once.
         line: {
-          kb: 'A different animal: no keyway, three wheels on a shackle. Hold Q and pull.',
-          deck: 'A different animal: no keyway, three wheels on a shackle. Hold R2 and pull.',
+          kb: 'A different animal — and the band below is its inside. Hold Q and pull.',
+          deck: 'A different animal — and the band below is its inside. Hold R2 and pull.',
         },
         done: holdingTension,
         hint: {
-          kb: 'Q is the shackle now. Wheels only speak under load — pull and keep pulling.',
-          deck: 'R2 is the shackle now. Wheels only speak under load — pull and keep pulling.',
+          kb: 'Q is the shackle now. The fence bar wants to drop into every wheel’s deep notch.',
+          deck: 'R2 is the shackle now. The fence bar wants to drop into every wheel’s deep notch.',
         },
         hintAfter: 6,
       },
@@ -607,9 +610,12 @@ export const LESSONS: readonly Lesson[] = [
       },
       {
         id: 'dial',
+        // "Watch the notch" is the whole reason the x-ray exists (D-207): on a sealed pack
+        // the seat is silent and invisible by design, and a learner needs to SEE the gate
+        // arrive under the fence leg once to believe the drag afterwards.
         line: {
-          kb: 'Hold Space: the wheel rolls digit to digit. At one digit the drag lets go.',
-          deck: 'Hold A: the wheel rolls digit to digit. At one digit the drag lets go.',
+          kb: 'Hold Space: the wheel rolls. Watch its deep notch — under the leg, the drag lets go.',
+          deck: 'Hold A: the wheel rolls. Watch its deep notch — under the leg, the drag lets go.',
         },
         done: anySet,
         hint: {

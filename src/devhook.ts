@@ -239,6 +239,8 @@ export interface DevHook {
   // ── Shell and save ────────────────────────────────────────────────────────────────────
   getScreen(): string
   goto(name: string): void
+  /** Flip the help screen to a page — the tab row's own action, without clicking pixels (D-207). */
+  helpPage(page: number): void
   getSave(): SaveDataShape
   setSave(data: SaveDataShape): void
   exportSaveText(): string

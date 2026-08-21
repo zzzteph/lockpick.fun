@@ -1772,8 +1772,18 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         // wheels both in EASY or training modes". A wheel pack is a sealed object
         // everywhere — and since D-191 even training's seat sound is gone: the right
         // digit is indistinguishable at rest, everywhere, and only the drag says so.
-        showTargets: false,
-        plainStates: true,
+        //
+        // Everywhere EXCEPT the classroom — D-207, the same owner, having met his own
+        // sealed pack as a student: "I did not understand how to find the correct spot for
+        // a single wheel… some sort of see-through version in the tutorial would be
+        // helpful." A lesson lock is a teaching instrument, not content (the cutaway
+        // lessons show pins for the same reason), so the wheel LESSON runs with the D-167
+        // x-ray band — cores, gates, the fence riding them — and every real lock, bench,
+        // dungeon and blitz alike, stays sealed exactly as D-173 ruled.
+        showTargets: lesson !== null,
+        // Plain everywhere real (D-173/D-191) — and full colour in the classroom, where the
+        // teal true gate and the state-coloured fence legs ARE the lesson (D-207).
+        plainStates: lesson === null,
         fx,
       })
     } else if (face) {
@@ -2279,6 +2289,9 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   hook.getScreen = (): string => screen
   hook.goto = (name: string): void => {
     goto(name as ScreenName)
+  }
+  hook.helpPage = (page: number): void => {
+    actions.helpPage(page)
   }
   hook.layoutState = (): {
     compact: boolean

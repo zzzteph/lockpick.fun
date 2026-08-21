@@ -79,6 +79,34 @@ function drawDriver(vp: Viewport, p: Palette, name: PinTypeName, rect: Rect): vo
 }
 
 /**
+ * A name with a leader line back to the thing it names — shared by both anatomy diagrams.
+ *
+ * The label hangs in a regular column and the line does the travelling, so the column never has to
+ * chase the geometry it annotates (see the note above `marks` in `drawLockAnatomy`).
+ */
+function callout(
+  vp: Viewport,
+  name: string,
+  tx: number,
+  ty: number,
+  px: number,
+  py: number,
+  colour: string,
+): void {
+  const { ctx } = vp
+  const dim = typeFor(vp, TYPE.dimension)
+  ctx.save()
+  ctx.lineWidth = STROKE.hairline
+  ctx.strokeStyle = alpha(colour, 0.65)
+  ctx.beginPath()
+  ctx.moveTo(tx - 8, ty - dim * 0.3)
+  ctx.lineTo(px, py)
+  ctx.stroke()
+  ctx.restore()
+  label(ctx, name, tx, ty, { font: font(dim), size: dim, color: colour })
+}
+
+/**
  * One lock in section, with its parts named — DECISIONS D-133.
  *
  * The help screen opened with *"a plug cannot turn until every pin is caught on the shear line;
@@ -166,26 +194,6 @@ function drawLockAnatomy(vp: Viewport, p: Palette, rect: Rect): void {
   ctx.stroke()
   ctx.restore()
 
-  /** A name with a leader line back to the thing it names. */
-  const callout = (
-    name: string,
-    tx: number,
-    ty: number,
-    px: number,
-    py: number,
-    colour: string,
-  ): void => {
-    ctx.save()
-    ctx.lineWidth = STROKE.hairline
-    ctx.strokeStyle = alpha(colour, 0.65)
-    ctx.beginPath()
-    ctx.moveTo(tx - 8, ty - dim * 0.3)
-    ctx.lineTo(px, py)
-    ctx.stroke()
-    ctx.restore()
-    label(ctx, name, tx, ty, { font: font(dim), size: dim, color: colour })
-  }
-
   /*
    * The names are an evenly-spaced column, not five feature-relative positions.
    *
@@ -206,7 +214,161 @@ function drawLockAnatomy(vp: Viewport, p: Palette, rect: Rect): void {
   const pitchY = Math.max(dim * 1.6, (plugBottom - bodyY) / marks.length)
   const firstY = bodyY + dim
   marks.forEach(([name, px, py, colour], i) => {
-    callout(name, nameX, firstY + i * pitchY, px, py, colour)
+    callout(vp, name, nameX, firstY + i * pitchY, px, py, colour)
+  })
+}
+
+/**
+ * One combination padlock in section, with its parts named — DECISIONS D-207.
+ *
+ * The wheels arrived with no reference at all: four help pages about pin locks, and a player lost
+ * on the first combination lock — *"I did not understand how to find the correct spot for a single
+ * wheel."* The wheel lesson now picks one open through a live x-ray band; this is the still
+ * picture that band is a working view of, drawn schematic like the pin lock above: parts, names,
+ * leader lines, nothing moving.
+ *
+ * The accents are the pick screen's own state language: **amber** for the fence, the piece whose
+ * drag on the binding wheel is what the player feels; **teal** for a true gate, where a wheel
+ * seats; **violet** for the false gates, the wheels' version of the pins' lie. And the one
+ * structural sentence the picture has to carry is that the bar is rigid — every leg tip sits at
+ * the same height, so a gate under one leg holds nothing. Here one wheel is seated on its true
+ * gate, one is caught on a shallow lie, and the third — plain rim under its leg — is what keeps
+ * the whole bar up.
+ */
+function drawWheelAnatomy(vp: Viewport, p: Palette, rect: Rect): void {
+  const { ctx } = vp
+  const dim = typeFor(vp, TYPE.dimension)
+  const ac = readableAccents(p)
+  const wheels = 3
+
+  // The body, and the shackle arching out of its top. The 0.78 keeps the tube's own width inside
+  // the rect on the shortest page, where the headroom above the body is at its thinnest.
+  const bodyH = rect.h * 0.64
+  const bodyY = rect.y + rect.h - bodyH
+  const scx = rect.x + rect.w * 0.5
+  const shackleR = Math.min(rect.w * 0.16, (bodyY - rect.y) * 0.78)
+  const shackleT = Math.max(16, shackleR * 0.3)
+
+  ctx.save()
+  // Shackle first, so the body section covers its legs where they run inside the shell. Two
+  // passes over one path — ink a stroke wider, then the metal — make an outlined tube without
+  // tracing both edges by hand.
+  ctx.beginPath()
+  ctx.moveTo(scx - shackleR, bodyY + bodyH * 0.2)
+  ctx.lineTo(scx - shackleR, bodyY)
+  ctx.arc(scx, bodyY, shackleR, Math.PI, 0)
+  ctx.lineTo(scx + shackleR, bodyY + bodyH * 0.2)
+  ctx.lineWidth = shackleT + STROKE.standard * 2
+  ctx.strokeStyle = p.ink
+  ctx.stroke()
+  ctx.lineWidth = shackleT
+  ctx.strokeStyle = p.paperShade
+  ctx.stroke()
+
+  // Shell body.
+  ctx.fillStyle = p.paperShade
+  ctx.fillRect(rect.x, bodyY, rect.w, bodyH)
+  ctx.lineWidth = STROKE.standard
+  ctx.strokeStyle = p.ink
+  ctx.strokeRect(rect.x, bodyY, rect.w, bodyH)
+
+  const inset = 40
+  const pitch = (rect.w - inset * 2) / wheels
+  const r = Math.min(pitch * 0.42, bodyH * 0.3)
+  const wheelY = bodyY + bodyH * 0.62
+  const wheelX = (i: number): number => rect.x + inset + pitch * (i + 0.5)
+  const centres: readonly [number, number, number] = [wheelX(0), wheelX(1), wheelX(2)]
+
+  // The fence: a rigid bar riding the rims on one leg per wheel, hung from the shackle's heel by
+  // the stem — when the bar falls, the shackle goes. Every leg tip sits at the same height, which
+  // is the diagram's whole argument: air under two legs, and the third wheel carrying the bar.
+  const barH = Math.max(14, r * 0.2)
+  const gap = Math.max(10, r * 0.16)
+  const barY = wheelY - r - gap - barH
+  const barLeft = centres[0] - r
+  const barRight = centres[2] + r
+  const legW = Math.max(12, r * 0.16)
+  const fencePiece = (x: number, y: number, w: number, h: number): void => {
+    ctx.fillStyle = alpha(ac.amber, 0.55)
+    ctx.fillRect(x, y, w, h)
+    ctx.lineWidth = STROKE.standard
+    ctx.strokeStyle = p.ink
+    ctx.strokeRect(x, y, w, h)
+  }
+  fencePiece(scx + shackleR - legW / 2, bodyY, legW, barY - bodyY)
+  fencePiece(barLeft, barY, barRight - barLeft, barH)
+  centres.forEach((cx) => {
+    fencePiece(cx - legW / 2, barY + barH, legW, gap)
+  })
+
+  // The wheels — the turning parts, each on its own hub — and their notches. A cut is filled with
+  // the shell's shade, because that is what an empty slot in a section shows: what is behind it.
+  const gateDepth = r * 0.42
+  const falseDepth = r * 0.16
+  const notch = (cx: number, angle: number, depth: number, colour: string, weight: number): void => {
+    const half = 0.17
+    ctx.beginPath()
+    ctx.moveTo(cx + Math.cos(angle - half) * r, wheelY + Math.sin(angle - half) * r)
+    ctx.lineTo(cx + Math.cos(angle) * (r - depth), wheelY + Math.sin(angle) * (r - depth))
+    ctx.lineTo(cx + Math.cos(angle + half) * r, wheelY + Math.sin(angle + half) * r)
+    ctx.fillStyle = p.paperShade
+    ctx.fill()
+    ctx.lineWidth = weight
+    ctx.strokeStyle = colour
+    ctx.stroke()
+  }
+  centres.forEach((cx) => {
+    ctx.beginPath()
+    ctx.arc(cx, wheelY, r, 0, Math.PI * 2)
+    ctx.fillStyle = p.paper
+    ctx.fill()
+    ctx.lineWidth = STROKE.standard
+    ctx.strokeStyle = p.ink
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.arc(cx, wheelY, r * 0.16, 0, Math.PI * 2)
+    ctx.fillStyle = p.paperShade
+    ctx.fill()
+    ctx.lineWidth = STROKE.standard
+    ctx.strokeStyle = p.ink
+    ctx.stroke()
+  })
+  /*
+   * Three wheels, three stories. Wheel one: true gate seated square under its leg — done. Wheel
+   * two: a shallow false gate under the leg, the near-set feel with nothing beneath it. Wheel
+   * three: plain rim under the leg and its true gate swung away — the binding wheel, the one the
+   * fence is actually resting on. True gates are heavy teal wherever they sit, exactly as the
+   * lesson's x-ray band draws them.
+   */
+  const TOP = -Math.PI / 2
+  notch(centres[0], TOP, gateDepth, ac.teal, STROKE.heavy)
+  notch(centres[0], TOP + 2.3, falseDepth, ac.violet, STROKE.standard)
+  notch(centres[0], TOP - 2.1, falseDepth, ac.violet, STROKE.standard)
+  notch(centres[1], TOP, falseDepth, ac.violet, STROKE.standard)
+  notch(centres[1], TOP + 2.1, gateDepth, ac.teal, STROKE.heavy)
+  notch(centres[1], TOP - 2.3, falseDepth, ac.violet, STROKE.standard)
+  notch(centres[2], TOP - 2.7, gateDepth, ac.teal, STROKE.heavy)
+  notch(centres[2], TOP + 1.0, falseDepth, ac.violet, STROKE.standard)
+  notch(centres[2], TOP - 1.3, falseDepth, ac.violet, STROKE.standard)
+  ctx.restore()
+
+  const nameX = rect.x + rect.w + 34
+  const marks: [string, number, number, string][] = [
+    ['shackle', scx + shackleR * 0.55, bodyY - shackleR * 0.8, p.ink],
+    ['fence', barRight - 10, barY + barH * 0.5, ac.amber],
+    ['true gate', centres[0], wheelY - r + gateDepth * 0.4, ac.teal],
+    [
+      'false gate',
+      centres[2] + Math.cos(TOP + 1.0) * (r - falseDepth * 0.5),
+      wheelY + Math.sin(TOP + 1.0) * (r - falseDepth * 0.5),
+      ac.violet,
+    ],
+    ['wheel', centres[2] + r * 0.88, wheelY + r * 0.4, p.ink],
+  ]
+  const pitchY = Math.max(dim * 1.6, rect.h / marks.length)
+  const firstY = rect.y + dim * 1.2
+  marks.forEach(([name, px, py, colour], i) => {
+    callout(vp, name, nameX, firstY + i * pitchY, px, py, colour)
   })
 }
 
@@ -327,13 +489,17 @@ function footnote(c: ShellContext, line: string): void {
 }
 
 /**
- * Four pages now, and shorter names for them — DECISIONS D-133.
+ * Five pages now, and shorter names for them — DECISIONS D-133, D-207.
  *
  * `what a pin is doing` is 484px of tab at the compact face; four of those overflow the row. The
  * captions each have a heading-sized page under them saying the same thing at length, so the tab
  * only has to be a handle.
+ *
+ * `the wheels` is the combination padlock's page (D-207). The other four are all about pin locks,
+ * and the player who reported the wheels — *"I did not understand how to find the correct spot
+ * for a single wheel"* — had nowhere on the reference screen that so much as mentioned them.
  */
-const PAGES = ['the lock', 'the pins', 'the readouts', 'pin states'] as const
+const PAGES = ['the lock', 'the pins', 'the readouts', 'pin states', 'the wheels'] as const
 
 /** Exported so a swipe can be clamped to the real range, not just the tab row's (D-131). */
 export const HELP_PAGE_COUNT = PAGES.length
@@ -544,11 +710,24 @@ export function drawHelp(c: ShellContext): void {
   const tabSize = typeFor(vp, TYPE.body)
   const tabH = Math.max(42, minControlH(vp, tabSize))
   const tabY = introY + introH + 16
-  const tabW = Math.max(
-    260,
-    ...PAGES.map((name) => Math.ceil(captionWidth(vp, name, tabSize)) + 28),
-  )
   const tabGap = 20
+  /**
+   * The row is capped at the stage, not the captions — DECISIONS D-207.
+   *
+   * Five tabs now, and at the compact face they no longer fit at their natural width: `the
+   * readouts` alone wants a 400px handle, and five of those ran the fifth tab clean off the right
+   * edge of the stage. A tab is a handle, not a heading (D-133), so when the row runs out it is
+   * the handle that gives — the equal width caps at an even share of the stage and D-123 shrinks
+   * the longest words inside it — rather than the row giving up a page. On a full page the share
+   * is wider than any caption wants and nothing changes.
+   */
+  const tabShare = Math.floor(
+    (LOGICAL_WIDTH - LEFT * 2 - tabGap * (PAGES.length - 1)) / PAGES.length,
+  )
+  const tabW = Math.min(
+    tabShare,
+    Math.max(260, ...PAGES.map((name) => Math.ceil(captionWidth(vp, name, tabSize)) + 28)),
+  )
   PAGES.forEach((name, i) => {
     const rect: Rect = { x: LEFT + i * (tabW + tabGap), y: tabY, w: tabW, h: tabH }
     if (button(vp, p, ui, rect, name, { primary: i === page })) actions.helpPage(i)
@@ -618,8 +797,45 @@ export function drawHelp(c: ShellContext): void {
   } else if (page === 2) {
     grid(c, gridTop, READOUTS, () => p.ink)
     footnote(c, 'the gap between force and resistance is the reading — that is how you find the binding pin')
-  } else {
+  } else if (page === 3) {
     grid(c, gridTop, STATES, (term) => stateColour(term, p))
     footnote(c, 'nothing here is random — every lock is the same lock every time you pick it')
+  } else {
+    // The combination padlock in section (D-207) — same bones as `the lock`: the prose is placed
+    // from the report link up, and the diagram takes what is left between it and the tabs.
+    const proseSize = typeFor(vp, TYPE.body)
+    const proseLines = 3
+    const proseH = proseLines * (proseSize + 10)
+    const proseY = reportLink(vp).y - 20 - proseH
+    const w = Math.min(1020, LOGICAL_WIDTH - LEFT * 2 - 360)
+    drawWheelAnatomy(vp, p, {
+      x: LEFT + 20,
+      y: gridTop + 10,
+      w,
+      h: Math.max(120, proseY - gridTop - 40),
+    })
+    paragraph(
+      ctx,
+      /*
+       * Written to fit the line budget on a phone rather than trimmed to it (D-137): the compact
+       * cut loses the clause naming the drag as the tell, which the diagram's binding wheel and
+       * the wheel lesson both carry anyway.
+       */
+      isCompact(vp)
+        ? 'Each wheel hides one deep gate. Under pull the fence drags on the rims; it drops — ' +
+          'and the shackle opens — only when every gate lines up under its legs at once.'
+        : 'Each wheel hides one deep gate in a rim of shallow lies. Under pull the fence bar ' +
+          'drags on the binding wheel — that drag is the tell, and at the gate it lets go. The ' +
+          'bar drops, and the shackle opens, only when every deep gate sits under its leg at once.',
+      LEFT + 20,
+      proseY + proseSize,
+      {
+        font: font(proseSize),
+        color: p.ink,
+        maxWidth: LOGICAL_WIDTH - LEFT * 2 - 40,
+        lineHeight: proseSize + 10,
+        maxLines: proseLines,
+      },
+    )
   }
 }

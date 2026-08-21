@@ -334,14 +334,21 @@ export function drawPadlock(
     ctx.restore()
   }
 
-  // ── Training's x-ray: the cores, their gates, and the fence riding them ───────────────
+  // ── The classroom x-ray: the cores, their gates, and the fence riding them ─────────────
+  //
+  // Built for training (D-166/D-167), sealed everywhere by D-173, and back for LESSONS
+  // ONLY at D-207 — where it also finally got the weight a teaching drawing needs: the
+  // original was 0.45-alpha hairlines sized as an assist ("I did not understand how to
+  // find the correct spot for a single wheel"), and a learner cannot be taught by a band
+  // they have to squint at. Standard strokes, a deeper true notch, and the two parts
+  // NAMED, the way the cutaway names SHELL and PLUG.
   if (opts.showTargets) {
     const bandY = layout.rowY + layout.wheelH / 2 + 24
     const coreR = 40
     const coreY = bandY + coreR + 26
-    const ghost = alpha(p.ink, 0.45)
+    const ghost = alpha(p.ink, 0.75)
     ctx.save()
-    ctx.lineWidth = STROKE.hairline
+    ctx.lineWidth = STROKE.standard
     ctx.strokeStyle = ghost
 
     // The fence: one bar, one leg per wheel. A seated wheel's leg is dropped into its gate;
@@ -349,9 +356,11 @@ export function drawPadlock(
     const seated = (c: Chamber): number =>
       c.state === 'SET' ? 1 : c.state === 'FALSE_SET' ? 0.45 : 0
     const fenceY = bandY + 4
+    const barLeft = wheelRect(layout, 0).x - 10
+    const barRight = wheelRect(layout, layout.count - 1).x + layout.wheelW + 10
     ctx.beginPath()
-    ctx.moveTo(wheelRect(layout, 0).x - 10, fenceY)
-    ctx.lineTo(wheelRect(layout, layout.count - 1).x + layout.wheelW + 10, fenceY)
+    ctx.moveTo(barLeft, fenceY)
+    ctx.lineTo(barRight, fenceY)
     ctx.stroke()
 
     for (const c of state.chambers) {
@@ -359,7 +368,7 @@ export function drawPadlock(
       const r = wheelRect(layout, c.index)
       const cx = r.x + r.w / 2
       const drop = seated(c) * 14
-      ctx.strokeStyle = plain ? ghost : alpha(stateInk(p, c, plain), 0.8)
+      ctx.strokeStyle = plain ? ghost : alpha(stateInk(p, c, plain), 0.9)
       ctx.beginPath()
       ctx.moveTo(cx, fenceY)
       ctx.lineTo(cx, coreY - coreR - 8 + drop)
@@ -379,14 +388,28 @@ export function drawPadlock(
         ctx.lineTo(cx + Math.cos(a) * (coreR - depth), coreY + Math.sin(a) * (coreR - depth))
         ctx.stroke()
       }
-      ctx.strokeStyle = plain ? ghost : alpha(readable.teal, 0.85)
+      ctx.strokeStyle = plain ? ghost : readable.teal
+      ctx.lineWidth = STROKE.heavy
+      notch(c.setLift, 22)
+      ctx.strokeStyle = plain ? ghost : alpha(p.violet, 0.85)
       ctx.lineWidth = STROKE.standard
-      notch(c.setLift, 16)
-      ctx.strokeStyle = plain ? ghost : alpha(p.violet, 0.8)
-      ctx.lineWidth = STROKE.hairline
-      for (const f of c.falseGates) notch(f, 8)
-      ctx.lineWidth = STROKE.hairline
+      for (const f of c.falseGates) notch(f, 10)
+      ctx.lineWidth = STROKE.standard
     }
+
+    // The two parts, named — a diagram without names is a decoration.
+    const labelSize = typeFor(vp, TYPE.dimension)
+    text(ctx, 'fence', barLeft - 14, fenceY + labelSize * 0.36, {
+      font: font(labelSize),
+      color: ghost,
+      align: 'right',
+    })
+    const firstCore = wheelRect(layout, 0).x + layout.wheelW / 2
+    text(ctx, 'gate', firstCore - coreR - 14, coreY + labelSize * 0.36, {
+      font: font(labelSize),
+      color: plain ? ghost : readable.teal,
+      align: 'right',
+    })
     ctx.restore()
   }
 }

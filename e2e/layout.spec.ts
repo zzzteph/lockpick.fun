@@ -239,6 +239,15 @@ const SCREENS: { name: string; arrange: (page: Page) => Promise<void> }[] = [
     },
   },
   {
+    // The wheel lesson with its classroom x-ray (D-207): cores, gates, the fence riding
+    // them — drawn ONLY here, so this fixture is the one place the band stays audited.
+    name: 'lesson-wheels',
+    arrange: async (p) => {
+      await p.evaluate(() => globalThis.__shearline!.startLesson('lesson-wheels'))
+      await renderOnce(p)
+    },
+  },
+  {
     // The blitz pick (D-206): the centre band carries the big run countdown instead of the
     // rank letter, and the header carries the running score beside the dealt lock's name.
     name: 'streak-pick',
@@ -262,6 +271,16 @@ const SCREENS: { name: string; arrange: (page: Page) => Promise<void> }[] = [
   },
   { name: 'settings', arrange: async (p) => goto(p, 'settings') },
   { name: 'help', arrange: async (p) => goto(p, 'help') },
+  {
+    // The combination padlock's reference page (D-207): five tabs in the row now, and a second
+    // labelled anatomy diagram — callout column, prose band — that page 0's audit never sees.
+    name: 'help-wheels',
+    arrange: async (p) => {
+      await goto(p, 'help')
+      await p.evaluate(() => globalThis.__shearline!.helpPage(4))
+      await renderOnce(p)
+    },
+  },
   {
     name: 'pick',
     arrange: async (p) => {
