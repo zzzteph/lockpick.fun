@@ -12,9 +12,16 @@
  */
 
 import type { SimEvent, SimEventType } from '../sim'
-import { text } from './draw'
+import { text, wrapText } from './draw'
 import { STROKE, TYPE, alpha, font, readableAccents, type Palette } from './palette'
-import { LOGICAL_HEIGHT, LOGICAL_WIDTH, isCompact, typeFor, type Viewport } from './viewport'
+import {
+  LOGICAL_HEIGHT,
+  LOGICAL_WIDTH,
+  MIN_TYPE_CSS,
+  isCompact,
+  typeFor,
+  type Viewport,
+} from './viewport'
 
 /** How long a caption stays up. Long enough to read, short enough not to stack up. */
 export const CAPTION_SECONDS = 2.2
@@ -175,18 +182,38 @@ export function drawLessonLine(
   const sideClear = isCompact(vp) ? 200 : 40
   const maxText = LOGICAL_WIDTH - 2 * (pipRoom + sideClear)
   let size = typeFor(vp, TYPE.body)
+  /**
+   * The face shrinks to fit, but never through the readability floor — D-207's CI postscript.
+   *
+   * The floor was a bare 15 logical, which is nine CSS pixels on the phones the compact scale
+   * exists to protect. Nothing ever noticed because no fixture rendered an *active lesson* on a
+   * phone — the first one that did (lesson-wheels, whose teaching lines run long) came out at 30
+   * logical: 8.9 CSS px on a Galaxy S9+, flagged as tiny-type on ten devices at once. A teaching
+   * line the student cannot read is not a lesson. So the shrink now stops at `MIN_TYPE_CSS`
+   * (ceil'd, so the audit's half-pixel tolerance is cleared at every scale), and a sentence the
+   * floor face cannot hold on one line WRAPS instead — the box grows downward, into the same
+   * clear band it already owns.
+   */
+  const floorFace = Math.max(15, Math.ceil(MIN_TYPE_CSS / Math.max(vp.scale, 0.01)))
   ctx.save()
   ctx.font = font(size)
   let textW = ctx.measureText(lesson.line).width
-  while (size > 15 && textW > maxText) {
+  while (size > floorFace && textW > maxText) {
     size -= 1
     ctx.font = font(size)
     textW = ctx.measureText(lesson.line).width
   }
+  let lines = [lesson.line]
+  if (textW > maxText) {
+    lines = wrapText(ctx, lesson.line, maxText, font(size))
+    textW = Math.max(...lines.map((l) => ctx.measureText(l).width))
+  }
   ctx.restore()
 
+  const lineH = size + 10
   const width = Math.ceil(textW) + 56
-  const h = Math.max(46, size + 24)
+  // One line of `size + 24` is exactly the old height — a desktop line changes by nothing.
+  const h = Math.max(46, lines.length * lineH + 14)
   const x = (LOGICAL_WIDTH - width) / 2
   // Under the header, above the drawing. The bottom of the stage belongs to the subtitle
   // track, and instruction and transcript must not sit on top of each other.
@@ -202,10 +229,13 @@ export function drawLessonLine(
   ctx.fillRect(x, y, 6, h)
   ctx.restore()
 
-  text(ctx, lesson.line, LOGICAL_WIDTH / 2, y + h / 2 + size * 0.36, {
-    font: font(size),
-    color: p.ink,
-    align: 'center',
+  lines.forEach((l, i) => {
+    const cy = y + h / 2 + (i - (lines.length - 1) / 2) * lineH
+    text(ctx, l, LOGICAL_WIDTH / 2, cy + size * 0.36, {
+      font: font(size),
+      color: p.ink,
+      align: 'center',
+    })
   })
 
   // Progress pips, right of the line.
