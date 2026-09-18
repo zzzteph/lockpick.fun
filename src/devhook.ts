@@ -34,6 +34,8 @@ export interface HookChamber {
   maxLift: number
   keyPinLength: number
   counterForce: number
+  /** Solver only: a latched overset — wedged until the wrench drops (D-220/D-223). */
+  jammed?: boolean
   /** Pin profile name, so the harness can tell a spool from a standard pin. */
   profile: string
   /** Lifts at which this chamber presents a groove to the shear line. */

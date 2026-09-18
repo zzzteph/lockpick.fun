@@ -174,7 +174,10 @@ test('a human can open a 4-pin 2-spool lock from the keyboard', async ({ page })
    * and overset on the way through, and it asks for barely a third of a turn so a picked lock
    * will not open until you lean back on it. Both are real and both are tested elsewhere.
    */
-  await pressureStep(page, 3)
+  // On the solver (D-223) the dial maps differently — step 3 is under what any walk uses — and a
+  // false set is worked with counter-rotation (C) instead of a feather, so the default step 5.
+  const solver = await page.evaluate(() => globalThis.__shearline!.sideFrame() !== null)
+  await pressureStep(page, solver ? 5 : 3)
   await page.waitForTimeout(200)
 
   const deadline = Date.now() + 45_000
@@ -187,7 +190,9 @@ test('a human can open a 4-pin 2-spool lock from the keyboard', async ({ page })
     }
     // An overset is unrecoverable while the wrench is on, so a player does the only thing that
     // works: lets go, lets everything drop, and starts the lock again (D-051).
-    if (state.chambers.some((c) => c.state === 'OVERSET')) {
+    // On the solver only a WEDGED pin needs this (D-220/D-223): an OVERSET read just after a
+    // click is the pin settling, and dropping the wrench then throws every set away.
+    if (state.chambers.some((c) => c.state === 'OVERSET' && (c.jammed ?? true))) {
       await tension(page, false)
       await page.waitForTimeout(220)
       await tension(page, true)

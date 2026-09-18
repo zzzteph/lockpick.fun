@@ -9,9 +9,9 @@
  * `Session.advance`, so every event reaches whoever is listening.
  */
 
-import type { Session } from './session'
-import type { SimEvent, SimInput } from '../sim'
-import { KEY_LIFT_RATE, tensionForStep } from '../ui/input'
+import type { Session } from './game/session'
+import type { SimEvent, SimInput } from './sim'
+import { KEY_LIFT_RATE, tensionForStep } from './ui/input'
 
 const DT = 1 / 120
 /**
@@ -88,6 +88,7 @@ export function walkSolver(session: Session, onEvents: (events: readonly SimEven
       spent += DT
     }
     advance(input({ chamber: target, tensionHeld: true, tensionLevel: LEVEL }), 0.5)
+    console.log('push', target, falseSet >= 0 ? 'FS' : stuck >= 0 ? 'STUCK' : 'BIND', 'step', step, 'ease', easeStep, s.chambers.map((c) => c.state.slice(0, 4)).join(' '), 'th', (s.theta * 57.3).toFixed(3), 't', s.time.toFixed(1))
     // No new set from this push: once is a false set being worked, twice is the wrench too light.
     const setsAfter = s.chambers.filter((c) => c.state === 'SET').length
     idle = setsAfter > setsBefore ? 0 : idle + 1

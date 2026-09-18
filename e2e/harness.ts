@@ -525,6 +525,9 @@ export async function relieve(page: Page, below = 0.45, timeoutMs = 3000): Promi
  */
 export async function pushUntilClick(page: Page, chamber: number, timeoutMs = 2500): Promise<string> {
   const before = (await getState(page)).chambers[chamber]?.state ?? 'FREE'
+  // A false set is worked with the plug eased back under the lift — C, the counter-rotation key.
+  const counter = before === 'FALSE_SET'
+  if (counter) await page.keyboard.down('KeyC')
   await page.keyboard.down('Space')
   const deadline = Date.now() + timeoutMs
   let now = before
@@ -534,6 +537,7 @@ export async function pushUntilClick(page: Page, chamber: number, timeoutMs = 25
     await page.waitForTimeout(16)
   }
   await page.keyboard.up('Space')
+  if (counter) await page.keyboard.up('KeyC')
   await page.waitForTimeout(60)
   return now
 }
@@ -614,6 +618,28 @@ export async function openCurrentLock(page: Page, tension = 0.45): Promise<HookS
 }
 
 /**
+ * `scriptPin` on a solver lock (D-223): travel with the hand down, then ramp the lift at the
+ * keyboard's rate and let go the moment the pin answers — a click, a false set, or a jam — exactly
+ * the push `solverWalk` makes. The requested height is the rate sim's and means nothing here.
+ */
+export async function scriptPush(page: Page, chamber: number, tension: number): Promise<void> {
+  await setInput(page, { chamber, liftTarget: 0, tensionHeld: true, tensionLevel: tension })
+  await stepTicks(page, 36)
+  const before = (await getState(page)).chambers[chamber]?.state ?? 'FREE'
+  const counter = before === 'FALSE_SET'
+  let lift = 0
+  for (let k = 0; k < 40; k += 1) {
+    lift = Math.min(3.5, lift + (KEY_LIFT_RATE * 6) / 120)
+    await setInput(page, { chamber, liftTarget: lift, tensionHeld: true, tensionLevel: tension, ...(counter ? { counter: true } : {}) })
+    await stepTicks(page, 6)
+    const now = (await getState(page)).chambers[chamber]?.state ?? 'FREE'
+    if (now === 'SET' || now === 'OVERSET' || (now === 'FALSE_SET' && before !== 'FALSE_SET')) break
+  }
+  await setInput(page, { chamber, liftTarget: 0, tensionHeld: true, tensionLevel: tension })
+  await stepTicks(page, 36)
+}
+
+/**
  * Travel to a chamber and then lift it — the only sequence a player can actually perform.
  *
  * `setInput` is a raw scripted-input setter: it can express things no control scheme offers, and
@@ -636,6 +662,10 @@ export async function scriptPin(
   tension: number,
   ticks: number,
 ): Promise<void> {
+  if (await page.evaluate(() => globalThis.__shearline!.sideFrame() !== null)) {
+    await scriptPush(page, chamber, tension)
+    return
+  }
   await setInput(page, { chamber, liftTarget: 0, tensionHeld: true, tensionLevel: tension })
   for (let i = 0; i < 12; i += 1) {
     const at = await page.evaluate(() => globalThis.__shearline!.getState().pickChamber)

@@ -98,9 +98,11 @@ test('@screenshot phase-03 the moment a pin sets', async ({ page }) => {
   const c = before.chambers[b]
   expect(c).toBeDefined()
   if (!c) return
+  const solver = await page.evaluate(() => globalThis.__shearline!.sideFrame() !== null)
   await setInput(page, {
     chamber: b,
-    liftTarget: c.setLift + c.captureWindow / 2,
+    // The solver (D-223): the ceiling, and the click stops the hand; the rate sim: the window.
+    liftTarget: solver ? 3.5 : c.setLift + c.captureWindow / 2,
     tensionHeld: true,
     tensionLevel: 0.55,
   })

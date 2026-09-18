@@ -2708,6 +2708,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         maxLift: c.maxLift,
         keyPinLength: c.keyPinLength,
         counterForce: c.counterForce,
+        ...(c.jammed !== undefined ? { jammed: c.jammed } : {}),
         profile: c.profile.name,
         falseSetLifts: falseSetLifts(c),
         kind: c.kind,

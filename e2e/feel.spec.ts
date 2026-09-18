@@ -38,9 +38,12 @@ async function workBinding(page: Page, windowFraction: number, tension: number):
   const b = state.bindingChamber
   const c = state.chambers[b]
   if (!c) throw new Error('no binding chamber')
+  // On the solver (D-223) there is no rate-sim height to aim at: ask for the pick's ceiling and let
+  // the click stop the hand, as a held Space does.
+  const solver = await page.evaluate(() => globalThis.__shearline!.sideFrame() !== null)
   await setInput(page, {
     chamber: b,
-    liftTarget: c.setLift + c.captureWindow * windowFraction,
+    liftTarget: solver ? 3.5 : c.setLift + c.captureWindow * windowFraction,
     tensionHeld: true,
     tensionLevel: tension,
   })

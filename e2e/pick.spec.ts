@@ -86,13 +86,7 @@ test('a set pin reads as captured: driver above the shear line, plug ledge under
   if (!target) return
 
   const offsetBefore = state.ledgeOffset
-  await setInput(page, {
-    chamber: binding,
-    liftTarget: target.setLift + target.captureWindow / 2,
-    tensionHeld: true,
-    tensionLevel: 0.5,
-  })
-  await stepTicks(page, 180)
+  await scriptPin(page, binding, target.setLift + target.captureWindow / 2, 0.5, 180)
 
   state = await getState(page)
   expect(state.chambers[binding]?.state).toBe('SET')
