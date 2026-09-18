@@ -22,18 +22,16 @@ import type { AssistMode } from './save'
  */
 export { ASSIST_PAR_SCALE as ASSIST_MULTIPLIER } from './ranks'
 
-/** In ladder order, for the settings control and for tests that walk all four. */
-export const ASSIST_MODES: readonly AssistMode[] = ['training', 'easy', 'medium', 'hard']
+/** In ladder order, for the settings control and for tests that walk both. */
+export const ASSIST_MODES: readonly AssistMode[] = ['training', 'normal']
 
 /** What each level actually takes away, for the settings screen to say out loud. */
-// Re-rung by the owner in D-166: each level one step gentler than the D-046 ladder, and the
-// pick stays visible on every rung. Easy's rung is new — the whole cutaway with the state
-// narration switched off.
+// Two rungs since D-218 ("only two of them"): Training shows the coloured x-ray, Normal shows the
+// same geometry with the colour narration off. The pins stay drawn on both — the owner never
+// wanted the picture taken away, only the colours that name each pin's state.
 export const ASSIST_BLURB: Record<AssistMode, string> = {
   training: 'Everything visible: pin types, the binding pin, the target window.',
-  easy: 'Every pin, honestly drawn — but no state colours, no state word. The lock stops narrating.',
-  medium: 'Only the pin under your pick, and not what kind it is.',
-  hard: 'No pins at all. Your pick, a depth readout, and the meter.',
+  normal: 'Every pin, honestly drawn — but no state colours, no state word. The lock stops narrating.',
 }
 
 export interface ChallengeDef {

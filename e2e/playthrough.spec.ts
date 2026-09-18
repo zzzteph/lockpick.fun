@@ -11,6 +11,7 @@ import {
   scriptPin,
   setInput,
   setManual,
+  solverOpen,
   stepTicks,
 } from './harness'
 
@@ -55,6 +56,8 @@ async function save(page: Page): Promise<SaveDataShape> {
  * force stopped being scaled down to nothing for most of an attempt (D-053).
  */
 async function openIt(page: Page, startTension = 0.45, rounds = 90): Promise<boolean> {
+  const solved = await solverOpen(page)
+  if (solved !== null) return solved
   let tension = startTension
   let stuckOn = -1
   let stuckFor = 0

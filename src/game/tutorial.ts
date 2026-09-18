@@ -65,6 +65,13 @@ export interface Lesson {
   readonly teaches: string
   readonly lock: LockDef
   readonly steps: readonly LessonStep[]
+  /**
+   * Put the pick gun in hand for this lesson instead of the pick — D-217. The steps still read
+   * off generic state (tension held, a pin set, the plug open), so the lesson is completable by
+   * either tool; this only decides which one the player is *given* and which controls the lines
+   * name. Absent on every picking lesson.
+   */
+  readonly gun?: boolean
 }
 
 // ── The teaching locks ──────────────────────────────────────────────────────────────────
@@ -229,6 +236,29 @@ export const LESSON_WHEEL_LOCK: LockDef = {
   note: 'Three wheels and a shackle. The other family, from the first pull.',
 }
 
+/**
+ * The snap-gun lock: two plain pins, the loosest tolerance in the course.
+ *
+ * The gun teaches nothing about *where* a pin binds — it strikes them all at once — so the lock
+ * has to get out of the way and let the tool be the whole subject. Two standard pins, no lies,
+ * a forgiving window: a lucky strike or two pops it, which is the entire feel of the tool. The
+ * steps read off generic state (tension, a set pin, the open), so the classroom autosolver beats
+ * it with the pick just as the player beats it with the gun.
+ */
+export const LESSON_GUN_LOCK: LockDef = {
+  id: 908,
+  slug: 'lesson-the-snap-gun',
+  name: 'Lesson 8 — The Snap Gun',
+  tier: 1,
+  family: 'pin-tumbler',
+  bitting: [3.2, 3.8],
+  pins: ['standard', 'standard'],
+  toleranceQuality: 1.5,
+  keyway: 'standard',
+  par: 90,
+  note: 'Two plain pins, wide open. The lesson is the tool, not the lock.',
+}
+
 export const TUTORIAL_LOCKS: readonly LockDef[] = [
   LESSON_TURN_LOCK,
   LESSON_TENSION_LOCK,
@@ -237,6 +267,7 @@ export const TUTORIAL_LOCKS: readonly LockDef[] = [
   LESSON_SPOOL_LOCK,
   LESSON_SERRATED_LOCK,
   LESSON_WHEEL_LOCK,
+  LESSON_GUN_LOCK,
 ]
 
 // ── Predicates ──────────────────────────────────────────────────────────────────────────
@@ -403,9 +434,14 @@ export const LESSONS: readonly Lesson[] = [
       },
       {
         id: 'overset',
-        line: 'This lock is tighter. Lift one too far and watch what happens.',
-        done: (s) => s.chambers.some((c) => c.state === 'OVERSET') || s.stats.oversets > 0,
-        hint: 'Push a pin well past where it wants to sit. It will jam — that is the point.',
+        line: 'Now break it on purpose: push one pin too far and keep pushing.',
+        // Waits for the WEDGE (D-220/D-223), not a passing overshoot — a brief one frees itself,
+        // and the next line says the pick cannot free it.
+        done: (s) => s.chambers.some((c) => c.state === 'OVERSET' && (c.jammed ?? true)),
+        hint: {
+          kb: 'Hold Space on a pin past its click, and keep holding. In a second or two it jams.',
+          deck: 'Hold A on a pin past its click, and keep holding. In a second or two it jams.',
+        },
         hintAfter: 12,
       },
       {
@@ -650,6 +686,58 @@ export const LESSONS: readonly Lesson[] = [
         id: 'open',
         line: 'All three gates in line: nothing stops the teeth. Keep pulling — the shackle goes.',
         done: (s) => s.opened,
+      },
+    ],
+  },
+  {
+    /**
+     * The pick gun lesson — D-217, owner: "also add lesson to the training section."
+     *
+     * A different verb from every lesson before it: no hunting the binding pin, no reading a
+     * meter — the tool hits all the pins at once and luck decides which catch. So the lesson
+     * teaches exactly two things: light tension (a hard wrench pins the jumped drivers up where
+     * they cannot fall back and catch), and repetition (each strike re-rolls). The steps read
+     * off generic state, so the classroom autosolver clears it with the pick while the player
+     * clears it with the gun — the `gun` flag only decides which tool is in hand.
+     */
+    id: 'lesson-gun',
+    title: 'The snap gun',
+    teaches: 'A different tool: strike every pin at once and let luck catch them.',
+    lock: LESSON_GUN_LOCK,
+    gun: true,
+    steps: [
+      {
+        id: 'arm',
+        line: {
+          kb: 'This gun strikes every pin at once. Hold Q for light tension — the plug needs it.',
+          deck: 'This gun strikes every pin at once. Hold R2 for light tension — the plug needs it.',
+        },
+        done: holdingTension,
+        hint: {
+          kb: 'Q is the wrench. Keep it light: too hard and a jumped pin cannot fall back to catch.',
+          deck: 'R2 is the wrench. Keep it light: too hard and a jumped pin cannot fall back to catch.',
+        },
+        hintAfter: 6,
+      },
+      {
+        id: 'strike',
+        line: {
+          kb: 'Now strike: tap Space. Every pin jumps — and a lucky one catches at the shear line.',
+          deck: 'Now strike: tap A. Every pin jumps — and a lucky one catches at the shear line.',
+        },
+        done: anySet,
+        hint: {
+          kb: 'Tap Space again. Not every pin catches on a hit — that is the luck of the tool.',
+          deck: 'Tap A again. Not every pin catches on a hit — that is the luck of the tool.',
+        },
+        hintAfter: 6,
+      },
+      {
+        id: 'pop',
+        line: 'A pin caught and held. Keep striking; when the last one catches, the plug turns.',
+        done: (s) => s.opened,
+        hint: 'Every strike re-rolls the luck. Bump again and again until all the pins land at once.',
+        hintAfter: 8,
       },
     ],
   },

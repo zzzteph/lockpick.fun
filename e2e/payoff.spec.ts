@@ -14,6 +14,7 @@ import {
   setManual,
   setReducedMotion,
   skipOpenSequence,
+  solverOpen,
   stepTicks,
 } from './harness'
 
@@ -33,6 +34,7 @@ async function setSave(page: Page, patch: Partial<SaveDataShape>): Promise<void>
 
 /** Open the current lock by working each binding chamber in turn. */
 async function openIt(page: Page, tension = 0.45): Promise<void> {
+  if ((await solverOpen(page)) !== null) return
   await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: tension })
   await stepTicks(page, 60)
   for (let i = 0; i < 40; i += 1) {

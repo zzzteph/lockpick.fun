@@ -40,7 +40,7 @@ function run(): { live: Record<string, unknown>; view: Record<string, unknown> }
   if (!def) throw new Error('lock 13 missing from the roster')
   const session = new Session(def, 7, {
     tools: PERFECT_TOOLS,
-    assist: 'medium',
+    assist: 'normal',
     featherEnabled: false,
   })
   // A real attempt: wrench on, a pin worked hard enough to build contact and strain.

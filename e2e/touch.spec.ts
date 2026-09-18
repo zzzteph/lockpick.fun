@@ -9,7 +9,7 @@
 
 import { expect, test, type Page } from '@playwright/test'
 import { advanceSeconds, bootGame, getState, loadLock, setManual } from './harness'
-import { WRENCH_DRAG_PX, WRENCH_SLIDER, yForStep } from '../src/ui/touch'
+import { COUNTER_PAD, WRENCH_DRAG_PX, WRENCH_SLIDER, yForStep } from '../src/ui/touch'
 import { TENSION_STEPS } from '../src/ui/input'
 
 /** The starter lock: few pins, forgiving, standard drivers. */
@@ -84,6 +84,55 @@ async function setWrench(page: Page, step: number): Promise<void> {
   await touch(page, 'pointerdown', x, from, 2)
   await touch(page, 'pointermove', x, to, 2)
   await touch(page, 'pointerup', x, to, 2)
+}
+
+/**
+ * Where each pin is drawn, logical px: the solver's side view when it is up (docs/SOLVER_PORT.md
+ * stage 3), else the cutaway's chamber centres.
+ */
+async function pinCentres(page: Page): Promise<number[]> {
+  return page.evaluate(() => {
+    const hook = globalThis.__shearline!
+    const f = hook.sideFrame()
+    const n = hook.getState().chambers.length
+    if (f) return Array.from({ length: n }, (_, i) => f.x0 + (f.firstChamberX + f.pitch * i) * f.sidePx)
+    return hook.getGeometry().chambers.map((c) => c.shellX)
+  })
+}
+
+/**
+ * Work whatever binds, the way a player would: tap it, drag up until it stops moving, let go. A
+ * pin pushed too far jams now (D-220) and only dropping the wrench frees it — so on an overset
+ * the hand lets the wrench off and takes it up again, exactly the lesson's recovery.
+ */
+async function openByTouch(page: Page): Promise<void> {
+  const centres = await pinCentres(page)
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const state = await getState(page)
+    if (state.opened) break
+    if (state.chambers.some((c) => c.state === 'OVERSET')) {
+      await setWrench(page, 0)
+      await advanceSeconds(page, 0.4)
+      await setWrench(page, 5)
+      await advanceSeconds(page, 0.3)
+      continue
+    }
+    const binding = state.bindingChamber
+    const index = binding >= 0 ? binding : attempt % Math.max(1, centres.length)
+    const x = centres[index] ?? 960
+    await touch(page, 'pointerdown', x, 820)
+    await advanceSeconds(page, 0.15)
+    // Creep up in steps rather than one jump, so the capture window is not flown through.
+    for (let y = 800; y >= 400; y -= 20) {
+      await touch(page, 'pointermove', x, y)
+      await advanceSeconds(page, 0.1)
+      const now = await getState(page)
+      if (now.chambers[index]?.state === 'SET') break
+      if (now.chambers[index]?.state === 'OVERSET') break
+    }
+    await touch(page, 'pointerup', x, 400)
+    await advanceSeconds(page, 0.3)
+  }
 }
 
 test('a finger on the wrench applies tension, and taking it off releases it', async ({ page }) => {
@@ -182,27 +231,7 @@ for (const device of PLAYABLE_ON) {
       await setManual(page, true)
       await setWrench(page, 5)
 
-      const geometry = await page.evaluate(() => globalThis.__shearline?.getGeometry())
-      const centres = (geometry?.chambers ?? []).map((c) => c.shellX)
-
-      for (let attempt = 0; attempt < 24; attempt += 1) {
-        const state = await getState(page)
-        if (state.opened) break
-        const binding = state.bindingChamber
-        const index = binding >= 0 ? binding : attempt % Math.max(1, centres.length)
-        const x = centres[index] ?? 960
-        await touch(page, 'pointerdown', x, 820)
-        await advanceSeconds(page, 0.15)
-        for (let y = 800; y >= 480; y -= 40) {
-          await touch(page, 'pointermove', x, y)
-          await advanceSeconds(page, 0.12)
-          const now = await getState(page)
-          if (now.chambers[index]?.state === 'SET') break
-          if (now.chambers[index]?.state === 'OVERSET') break
-        }
-        await touch(page, 'pointerup', x, 480)
-        await advanceSeconds(page, 0.3)
-      }
+      await openByTouch(page)
 
       expect((await getState(page)).opened, `could not open the lock on ${device.name}`).toBe(true)
       watcher.assertClean()
@@ -216,29 +245,7 @@ test('a lock can be opened with touches alone', async ({ page }) => {
   await setManual(page, true)
   await setWrench(page, 5)
 
-  const geometry = await page.evaluate(() => globalThis.__shearline?.getGeometry())
-  const centres = (geometry?.chambers ?? []).map((c) => c.shellX)
-
-  // Work whatever binds, the way a player would: tap it, drag up until it stops moving, let go.
-  for (let attempt = 0; attempt < 24; attempt += 1) {
-    const state = await getState(page)
-    if (state.opened) break
-    const binding = state.bindingChamber
-    const index = binding >= 0 ? binding : attempt % Math.max(1, centres.length)
-    const x = centres[index] ?? 960
-    await touch(page, 'pointerdown', x, 820)
-    await advanceSeconds(page, 0.15)
-    // Creep up in steps rather than one jump, so the capture window is not flown through.
-    for (let y = 800; y >= 480; y -= 40) {
-      await touch(page, 'pointermove', x, y)
-      await advanceSeconds(page, 0.12)
-      const now = await getState(page)
-      if (now.chambers[index]?.state === 'SET') break
-      if (now.chambers[index]?.state === 'OVERSET') break
-    }
-    await touch(page, 'pointerup', x, 480)
-    await advanceSeconds(page, 0.3)
-  }
+  await openByTouch(page)
 
   expect((await getState(page)).opened).toBe(true)
   watcher.assertClean()
@@ -255,5 +262,22 @@ test('touches on the bench do not reach the lock', async ({ page }) => {
     globalThis.__shearline?.renderOnce()
   })
   expect(await page.evaluate(() => globalThis.__shearline?.getScreen())).toBe('bench')
+  watcher.assertClean()
+})
+
+test('holding the COUNTER pad counter-rotates, and lifting the finger stops it', async ({ page }) => {
+  // D-221's touch answer to the right mouse button, asserted end to end (docs/SOLVER_PORT.md stage 3).
+  const watcher = await bootGame(page)
+  await loadLock(page, PRACTICE, 3)
+  await setManual(page, true)
+  await setWrench(page, 5)
+  const cx = COUNTER_PAD.x + COUNTER_PAD.w / 2
+  const cy = COUNTER_PAD.y + COUNTER_PAD.h / 2
+  await touch(page, 'pointerdown', cx, cy, 7)
+  await advanceSeconds(page, 0.2)
+  expect((await page.evaluate(() => globalThis.__shearline!.getInput())).counter).toBe(true)
+  await touch(page, 'pointerup', cx, cy, 7)
+  await advanceSeconds(page, 0.2)
+  expect((await page.evaluate(() => globalThis.__shearline!.getInput())).counter ?? false).toBe(false)
   watcher.assertClean()
 })

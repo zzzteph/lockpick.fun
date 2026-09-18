@@ -107,7 +107,12 @@ export function mirrorRect(r: TouchRect, mirrored: boolean): TouchRect {
  * It starts at 260 rather than 220 because pause now sits at the top of this gutter (D-133), and it
  * still ends at 532 — clear of the state word at 552.
  */
-export const LIFT_PAD: TouchRect = { x: 1548, y: 260, w: 132, h: 272 }
+// D-221: the right gutter was the "drag to lift" hint strip, but lifting works by dragging the pin
+// itself (the drag is x-agnostic and starts anywhere off the lock), so the owner asked to reclaim
+// the space — "I can drag with my finger" — for the counter-rotation the desktop's right button
+// gives and touch had no way to reach ("counter rotation is not possible on mobile"). Same rect,
+// new job: hold it to ease the plug back, the dip verb (D-203/D-204) as an explicit control.
+export const COUNTER_PAD: TouchRect = { x: 1548, y: 260, w: 132, h: 272 }
 
 /**
  * Pause is in the **pick** hand's gutter, not the wrench hand's — DECISIONS D-133.
@@ -124,6 +129,13 @@ export const LIFT_PAD: TouchRect = { x: 1548, y: 260, w: 132, h: 272 }
  * whichever way round the lock is held.
  */
 export const PAUSE_PAD: TouchRect = { x: STAGE_W - 162, y: 96, w: 132, h: 132 }
+
+/**
+ * The pick gun's STRIKE button, in the right gutter where the lift strip would be — the gun has no
+ * lift, so the thumb that would drag a pin taps to strike instead. A solid pad: it is a button you
+ * press, not somewhere to drag.
+ */
+export const STRIKE_PAD: TouchRect = { x: STAGE_W - 202, y: 300, w: 172, h: 300 }
 
 /**
  * Withdrawing the pick takes the top of the wrench's gutter, where pause used to be.
@@ -193,6 +205,8 @@ export interface TouchState {
   liftOriginY: number
   /** Lift the pin was already at when the drag began, mm — so a second drag resumes, not jumps. */
   liftOriginMm: number
+  /** The pointer id held on the counter-rotation pad, or null (D-221). */
+  counterPointer: number | null
   /** Pressure step 0..TENSION_STEPS, where 0 is "wrench off". */
   step: number
   /** True once anything has arrived from a touch device: the controls are drawn only then. */
@@ -207,6 +221,7 @@ export function createTouchState(): TouchState {
     liftPointer: null,
     liftOriginY: 0,
     liftOriginMm: 0,
+    counterPointer: null,
     step: 0,
     active: false,
   }

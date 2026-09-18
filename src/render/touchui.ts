@@ -10,8 +10,9 @@
 
 import { TENSION_STEPS } from '../ui/input'
 import {
-  LIFT_PAD,
+  COUNTER_PAD,
   PAUSE_PAD,
+  STRIKE_PAD,
   WITHDRAW_PAD,
   WRENCH_SLIDER,
   mirrorRect,
@@ -76,7 +77,7 @@ export function drawTouchControls(
   vp: Viewport,
   p: Palette,
   touch: TouchState,
-  opts: { tensionHeld: boolean; mirrored?: boolean } = { tensionHeld: false },
+  opts: { tensionHeld: boolean; mirrored?: boolean; gun?: boolean } = { tensionHeld: false },
 ): void {
   if (!touch.active) return
   const { ctx } = vp
@@ -89,39 +90,20 @@ export function drawTouchControls(
    */
   const flip = opts.mirrored ?? false
   const slider = mirrorRect(WRENCH_SLIDER, flip)
-  const lift = mirrorRect(LIFT_PAD, flip)
 
   pad(vp, p, mirrorRect(PAUSE_PAD, flip), 'pause')
 
   /**
-   * The lift strip, opposite the wrench.
-   *
-   * Drawn as a dashed outline rather than a solid pad because it is not a button — it is somewhere
-   * to *drag*, and a solid frame beside a solid wrench slider would read as a second thing to
-   * press. The caption is the whole of the discoverability: nobody would find "you may drag here
-   * instead" on their own, and the alternative is a tutorial line for a control that should
-   * explain itself.
+   * The right gutter, opposite the wrench. The gun puts its STRIKE button here; picking puts the
+   * COUNTER pad — hold it to ease the plug back (D-221). It replaced the old "drag to lift" hint
+   * strip: lifting is a drag on the pin itself, so the space was free for the counter-rotation the
+   * desktop's right button gives ("counter rotation is not possible on mobile"). A solid pad, not a
+   * dashed hint, because unlike the lift it IS a button you hold.
    */
-  ctx.save()
-  ctx.setLineDash([10, 8])
-  ctx.lineWidth = STROKE.hairline
-  ctx.strokeStyle = touch.liftPointer !== null ? p.ink : p.rule
-  ctx.strokeRect(snapX(vp, lift.x, 1), snapY(vp, lift.y, 1), lift.w, lift.h)
-  ctx.restore()
-  {
-    const s = typeFor(vp, TYPE.dimension)
-    label(ctx, 'drag', lift.x + lift.w / 2, lift.y + lift.h / 2 - s * 0.7, {
-      font: font(s),
-      size: s,
-      color: p.inkLight,
-      align: 'center',
-    })
-    label(ctx, 'to lift', lift.x + lift.w / 2, lift.y + lift.h / 2 + s * 0.6, {
-      font: font(s),
-      size: s,
-      color: p.inkLight,
-      align: 'center',
-    })
+  if (opts.gun) {
+    pad(vp, p, mirrorRect(STRIKE_PAD, flip), 'strike')
+  } else {
+    pad(vp, p, mirrorRect(COUNTER_PAD, flip), 'counter', touch.counterPointer !== null)
   }
 
   label(ctx, 'wrench', slider.x + slider.w / 2, slider.y - 12, {

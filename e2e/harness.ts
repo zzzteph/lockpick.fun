@@ -409,7 +409,7 @@ export async function captureStage(
  */
 export async function setAssist(
   page: Page,
-  assist: 'training' | 'easy' | 'medium' | 'hard',
+  assist: 'training' | 'normal',
 ): Promise<void> {
   await page.evaluate((level) => {
     const h = globalThis.__shearline
@@ -516,13 +516,57 @@ export async function relieve(page: Page, below = 0.45, timeoutMs = 3000): Promi
   return strain
 }
 
+/**
+ * Hold Space until the pin answers — the click of a set, a false set, or a jam — then let go.
+ *
+ * On a solver lock (D-223) there is no target height to aim at: the rate sim's `setLift` is in
+ * millimetres the solver's bodies do not share. A player holds Space and listens, and the game
+ * pauses the hand at the click itself (`CLICK_PAUSE`), so this does exactly that.
+ */
+export async function pushUntilClick(page: Page, chamber: number, timeoutMs = 2500): Promise<string> {
+  const before = (await getState(page)).chambers[chamber]?.state ?? 'FREE'
+  await page.keyboard.down('Space')
+  const deadline = Date.now() + timeoutMs
+  let now = before
+  while (Date.now() < deadline) {
+    now = (await getState(page)).chambers[chamber]?.state ?? 'FREE'
+    if (now === 'SET' || now === 'OVERSET' || (now === 'FALSE_SET' && before !== 'FALSE_SET')) break
+    await page.waitForTimeout(16)
+  }
+  await page.keyboard.up('Space')
+  await page.waitForTimeout(60)
+  return now
+}
+
 /** Move to a chamber and push it to a height — the two-step motion, in one call. */
 export async function workChamber(page: Page, chamber: number, liftMm: number): Promise<void> {
   await moveTo(page, chamber)
+  if (await page.evaluate(() => globalThis.__shearline!.sideFrame() !== null)) {
+    await pushUntilClick(page, chamber)
+    return
+  }
   await liftTo(page, liftMm)
   // Only when it has actually built up: the check is one round trip and costs nothing otherwise.
   const { pickStrain } = await getState(page)
   if (pickStrain > 0.45) await relieve(page)
+}
+
+/**
+ * Open a lock the 2.5D solver steps (docs/SOLVER_PORT.md) — D-223.
+ *
+ * The scripted hands below were written against the rate sim: they lift to `setLift` plus half the
+ * capture window, heights in the rate sim's millimetres that the solver's bodies do not share, so on
+ * a solver lock they push forever and open nothing. The game's own "solve it for me" walk
+ * (`solverWalk.ts`, unit-tested across the roster) is the maintained hand for these locks, and it
+ * drives the live session through `advance`, so every event and payout still flows. Returns null on
+ * a lock the rate sim still steps (wheels, sidebars, multi-row…), where the old hands still apply.
+ */
+export async function solverOpen(page: Page): Promise<boolean | null> {
+  return page.evaluate(() => {
+    const h = globalThis.__shearline!
+    if (!h.sideFrame()) return null
+    return h.solveCurrentLock()
+  })
 }
 
 /**
@@ -533,6 +577,7 @@ export async function workChamber(page: Page, chamber: number, liftMm: number): 
  * and anything else that has to get past the pick screen. Two copies of it would drift.
  */
 export async function openCurrentLock(page: Page, tension = 0.45): Promise<HookStateType> {
+  if ((await solverOpen(page)) !== null) return getState(page)
   await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: tension })
   await stepTicks(page, 60)
   for (let round = 0; round < 40; round += 1) {

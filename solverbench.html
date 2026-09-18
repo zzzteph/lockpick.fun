@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SOLVERBENCH — the game bench on the 2.5D solver</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #14171a;
+        overflow: hidden;
+        font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      #stage {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+        cursor: crosshair;
+      }
+      #sliders {
+        position: fixed;
+        left: 12px;
+        bottom: 12px;
+        display: flex;
+        gap: 18px;
+        padding: 8px 12px;
+        background: rgba(20, 23, 26, 0.85);
+        color: #d8dde3;
+        font-size: 12px;
+        border: 1px solid #3a4148;
+        border-radius: 4px;
+      }
+      #sliders label {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      #sliders input {
+        width: 160px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="stage"></canvas>
+    <div id="sliders">
+      <label>tension <span id="tensionVal">0.25</span><input id="tension" type="range" min="0" max="1" step="0.01" value="0.25" /></label>
+      <label>hand x <span id="handXVal">-4</span><input id="handX" type="range" min="-6" max="30" step="0.05" value="-4" /></label>
+      <label>hand y (tip above rest) <span id="handYVal">0</span><input id="handY" type="range" min="-1" max="4" step="0.02" value="0" /></label>
+    </div>
+    <script type="module" src="/src/physlab/solverbench.ts"></script>
+  </body>
+</html>

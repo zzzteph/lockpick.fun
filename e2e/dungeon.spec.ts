@@ -89,7 +89,7 @@ async function dState(page: Page): Promise<DState | null> {
 async function startFrozen(
   page: Page,
   seed: number,
-  difficulty: 'training' | 'easy' | 'medium' | 'hard',
+  difficulty: 'training' | 'normal',
 ): Promise<void> {
   await page.evaluate(
     ({ s, d }) => {
@@ -160,7 +160,7 @@ async function browserWalk(page: Page, steps: [number, number][]): Promise<strin
 test('the crawl runs through the live screen: moves, clock, fog, audit', async ({ page }) => {
   const watcher = await bootGame(page, { frames: 3 })
   await setManual(page, true)
-  await startFrozen(page, SEED, 'easy')
+  await startFrozen(page, SEED, 'normal')
 
   const start = await dState(page)
   expect(start?.phase).toBe('crawl')
@@ -236,7 +236,7 @@ test('a locked thing routes to the real pick screen, and the open pays back into
 
   const watcher = await bootGame(page, { frames: 3 })
   await setManual(page, true)
-  await startFrozen(page, seed, 'easy')
+  await startFrozen(page, seed, 'normal')
 
   const walked = await browserWalk(page, path as [number, number][])
   expect(walked).toBe('beside')
@@ -375,7 +375,7 @@ test('the GATE ends the run: pick through its door, kneel at it, and the score b
 
   const watcher = await bootGame(page, { frames: 3 })
   await setManual(page, true)
-  await startFrozen(page, seed, 'medium')
+  await startFrozen(page, seed, 'normal')
 
   for (let i = 0; i < legs.length; i += 1) {
     const walked = await browserWalk(page, legs[i] as [number, number][])
@@ -426,7 +426,7 @@ test('the GATE ends the run: pick through its door, kneel at it, and the score b
   const out = await dState(page)
   expect(out?.phase).toBe('won')
   const save = await page.evaluate(() => globalThis.__shearline!.getSave())
-  expect(save.gauntletBest?.medium ?? 0).toBe(out?.score ?? -1)
+  expect(save.gauntletBest?.normal ?? 0).toBe(out?.score ?? -1)
   expect(out?.score ?? 0).toBeGreaterThan(0)
   watcher.assertClean()
 })

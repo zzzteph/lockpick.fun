@@ -44,8 +44,8 @@ import { holdFor, pick, tensionOnly } from '../sim/fixtures'
 const CONFIG = makeConfig({ tools: PERFECT_TOOLS, featherEnabled: false })
 
 describe('the teaching locks', () => {
-  it('are seven, and every one is a legal lock', () => {
-    expect(TUTORIAL_LOCKS).toHaveLength(7)
+  it('are eight, and every one is a legal lock', () => {
+    expect(TUTORIAL_LOCKS).toHaveLength(8)
     for (const def of TUTORIAL_LOCKS) {
       expect(() => validateLockDef(def)).not.toThrow()
     }
@@ -127,11 +127,12 @@ describe('the teaching locks', () => {
 })
 
 describe('the lessons', () => {
-  it('are the course in order: premise, hands, failure, pressure, the liars, then wheels', () => {
+  it('are the course in order: premise, hands, failure, pressure, the liars, wheels, then the gun', () => {
     // `lesson-rotate` leads because rotation is the premise the others assume; the original
     // three keep their ids because the save file records ids. Pressure comes before the
-    // security pins because both of their lessons lean on it. The wheel pack closes the course:
-    // it assumes the binding-order hunt the whole cylinder curriculum just taught (D-167).
+    // security pins because both of their lessons lean on it. The wheel pack closes the pick
+    // course (it assumes the binding-order hunt the cylinder curriculum just taught, D-167), and
+    // the snap gun comes last of all (D-217): a different tool entirely, taught once picking is known.
     expect(LESSONS.map((l) => l.id)).toEqual([
       'lesson-rotate',
       'lesson-1',
@@ -140,6 +141,7 @@ describe('the lessons', () => {
       'lesson-3',
       'lesson-serrated',
       'lesson-wheels',
+      'lesson-gun',
     ])
     expect(LESSONS.map((l) => l.lock.slug)).toEqual(TUTORIAL_LOCKS.map((d) => d.slug))
   })

@@ -107,3 +107,28 @@ test('E and W step the pressure dial by whole steps, clamped, pick screen only',
   expect(await step()).toBe(10)
   watcher.assertClean()
 })
+
+test('C held counter-rotates on the pick screen (the Deck sends it from L4) — D-223', async ({
+  page,
+}) => {
+  const watcher = await bootGame(page, { frames: 3, path: '/?deck=1' })
+  await setManual(page, true)
+  const counter = async (): Promise<boolean> =>
+    (await page.evaluate(() => globalThis.__shearline!.getInput())).counter ?? false
+  // Off the pick screen the key is inert.
+  await page.evaluate(() => globalThis.__shearline!.goto('menu'))
+  await page.keyboard.down('KeyC')
+  expect(await counter()).toBe(false)
+  await page.keyboard.up('KeyC')
+
+  await loadLock(page, 22, 5)
+  await stepTicks(page, 5)
+  expect(await counter()).toBe(false)
+  await page.keyboard.down('KeyC')
+  await stepTicks(page, 2)
+  expect(await counter()).toBe(true)
+  await page.keyboard.up('KeyC')
+  await stepTicks(page, 2)
+  expect(await counter()).toBe(false)
+  watcher.assertClean()
+})

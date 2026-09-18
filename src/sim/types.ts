@@ -158,7 +158,10 @@ export interface ToolStats {
  * Replaces the old `guided | standard | expert | blind`, which took things away in a different
  * order and never took away the picture of where your own hand was. See DECISIONS D-046.
  */
-export type AssistMode = 'training' | 'easy' | 'medium' | 'hard'
+// D-218: the ladder is two rungs now, at the owner's word — "only two of them". Training shows
+// the coloured x-ray (state colours, the target window); Normal shows the same geometry with the
+// colour narration off. Medium and Hard (only-the-pin-under-the-tip, and no-pins) are gone.
+export type AssistMode = 'training' | 'normal'
 
 export interface SimConfig {
   readonly tools: ToolStats
@@ -177,6 +180,16 @@ export interface SimInput {
   readonly tensionHeld: boolean
   /** Wheel-set tension level, 0..1, before tool clamping. */
   readonly tensionLevel: number
+  /**
+   * Where the tip is along the keyway, in chambers from pin 1 — fractional between pins. The
+   * mouse's free move (docs/SOLVER_PORT.md); absent, the tip is at `chamber`'s centre. Only the
+   * contact solver reads it; the rate sim quantises to `chamber` as it always has.
+   */
+  readonly pickAt?: number
+  /** The right button on top of the wrench: counter-rotation (the solver's receding stop). */
+  readonly counter?: boolean
+  /** The pick gun: one strike this frame — flick the pins up (solver only; see `Engine.strike`). */
+  readonly strike?: boolean
 }
 
 export const NEUTRAL_INPUT: SimInput = {
@@ -308,6 +321,11 @@ export interface Chamber {
   readonly dragFactor: number
   /** True once this chamber has produced at least one false set this attempt. */
   hasFalseSet: boolean
+  /**
+   * Solver only (D-223): an overset held long enough to WEDGE (D-220) — the pick can no longer
+   * free it, only dropping the wrench does. Absent on the rate sim, where every overset jams.
+   */
+  jammed?: boolean
 }
 
 export interface AttemptStats {

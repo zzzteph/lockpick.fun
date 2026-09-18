@@ -189,6 +189,22 @@ export class Progress {
   }
 
   /**
+   * How many times a lock has been bumped open with the pick gun — D-217.
+   *
+   * Its own ledger, kept clear of `records`: a bump earns no rank and moves no tier curve, so
+   * the pick roster's "opened" state must never colour the gun bench and vice versa.
+   */
+  gunOpens(slug: string): number {
+    return this.data.gunOpens[slug] ?? 0
+  }
+
+  /** Tally one gun open and persist. No rank, no achievements, no play-day — just the count. */
+  recordGunOpen(slug: string): void {
+    this.data.gunOpens[slug] = (this.data.gunOpens[slug] ?? 0) + 1
+    this.save()
+  }
+
+  /**
    * Distinct locks in a tier opened **well enough to count** — rank D or better (D-091).
    *
    * It used to be "opened at all", which meant a tier could be unlocked by flailing at five locks
@@ -255,7 +271,13 @@ export class Progress {
     if (here < 0) return null
     const rotated = [...ALL_LOCKS.slice(here + 1), ...ALL_LOCKS.slice(0, here)]
     const available = rotated.filter((d) => this.isTierUnlocked(d.tier))
-    return available.find((d) => !this.hasOpened(d.slug)) ?? available[0] ?? null
+    // Stay in the same family (D-221): finishing a cylinder sends you to the next cylinder, not
+    // across to the combination shelf — a different page and a different lock entirely. Owner:
+    // "after tier 1 … next lock goes with the wheels, not tier 2." Only cross families when the
+    // one you are in has nothing left to offer.
+    const kin = available.filter((d) => d.family === def.family)
+    const pool = kin.length > 0 ? kin : available
+    return pool.find((d) => !this.hasOpened(d.slug)) ?? pool[0] ?? null
   }
 
   /** Apply a finished attempt. Returns what it earned, or null when the lock was not opened. */

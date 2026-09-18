@@ -10,7 +10,7 @@ import {
   makeConfig,
   validateLockDef,
 } from '../../src/sim'
-import { CODES_COMPACT_PER_PAGE, codesPageCount } from '../../src/ui/shell'
+import { CODES_COMPACT_PER_PAGE, GUN_LOCKS, codesPageCount } from '../../src/ui/shell'
 import { shareableCode } from '../../src/game/sharecode'
 import { LESSONS } from '../../src/game/tutorial'
 import type { Viewport } from '../../src/render/viewport'
@@ -34,6 +34,24 @@ describe('the roster is data — CONTENT.md §1', () => {
     expect(new Set(ALL_LOCKS.map((d) => d.id)).size).toBe(ALL_LOCKS.length)
     const deferred = new Set(DEFERRED_LOCKS.map((d) => d.id))
     for (const d of ALL_LOCKS) expect(deferred.has(d.id), `lock ${d.id} is both`).toBe(false)
+  })
+
+  it('the pick gun offers exactly six locks, every one all-standard pins (D-217)', () => {
+    // The owner's ask: "lockpicking gun should have only 6 locks." And every one must be a lock
+    // the gun can actually open — it catches standard drivers only (security pins ride the strike
+    // back down), so a spooled or serrated lock on this shelf would be a lock the tool cannot pop.
+    expect(GUN_LOCKS).toHaveLength(6)
+    expect(new Set(GUN_LOCKS).size).toBe(6)
+    for (const slug of GUN_LOCKS) {
+      const def = findLock(slug)
+      expect(def, `gun lock "${slug}" must exist`).toBeDefined()
+      if (!def) continue
+      expect(def.family, slug).toBe('pin-tumbler')
+      expect(def.pins.every((p) => p === 'standard'), `${slug} has a non-standard pin`).toBe(true)
+      // Single-row cylinders only — the side view the gun draws is one keyway.
+      expect(def.rows ?? 1, slug).toBe(1)
+      expect(def.doubleSided ?? false, slug).toBe(false)
+    }
   })
 
   it('gives a reason for every deferral, traceable to where it was decided', () => {

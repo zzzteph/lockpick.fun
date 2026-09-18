@@ -275,7 +275,7 @@ export function generateDeltas(rng: RngState, n: number, spread: number): number
 export const DEFAULT_CONFIG: SimConfig = {
   tools: STARTER_TOOLS,
   featherEnabled: false,
-  assist: 'easy',
+  assist: 'normal',
 }
 
 export function makeConfig(patch: Partial<SimConfig> & { tools?: ToolStats }): SimConfig {

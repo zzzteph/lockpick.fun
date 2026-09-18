@@ -7,12 +7,12 @@
  * becomes true, and one loop asserts that every id in `ACHIEVEMENTS` appears in it and fires.
  * Adding one without a scenario fails the suite.
  *
- * Thirteen, not the forty `CONTENT.md §3` lists nor the thirty-four this suite once counted:
+ * Ten, not the forty `CONTENT.md §3` lists nor the thirty-four this suite once counted:
  * `rake-and-run` and `rake-master` went with the rake (D-058), the shop and disc-detainer cuts
- * took their plates (D-088, D-104), and D-164 was the owner's launch cut down to the spine. The
- * counts below are asserted against the catalogue as it now is — a spec number kept as a target
- * after the content behind it was removed is a test that fails for the right reason and gets
- * "fixed" by putting the content back.
+ * took their plates (D-088, D-104), D-164 was the owner's launch cut down to the spine, and D-218
+ * took the three assist-ladder plates with Medium and Hard. The counts below are asserted against
+ * the catalogue as it now is — a spec number kept as a target after the content behind it was
+ * removed is a test that fails for the right reason and gets "fixed" by putting the content back.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -31,12 +31,6 @@ import type { LockDef } from '../../src/sim'
 
 // ── Builders ────────────────────────────────────────────────────────────────────────────
 
-function lockOf(pred: (d: LockDef) => boolean, what: string): LockDef {
-  const def = ALL_LOCKS.find(pred)
-  if (!def) throw new Error(`no lock matching ${what}`)
-  return def
-}
-
 function attempt(patch: Partial<AttemptOutcome> & { lock: LockDef }): AttemptOutcome {
   return {
     opened: true,
@@ -50,7 +44,7 @@ function attempt(patch: Partial<AttemptOutcome> & { lock: LockDef }): AttemptOut
     maxTension: 0.5,
     minTensionWhileHeld: 0.4,
     securityPinsSet: 0,
-    assist: 'easy',
+    assist: 'normal',
     challenges: [],
     ...patch,
   }
@@ -89,18 +83,6 @@ const SCENARIOS: Record<string, () => AchievementContext> = {
   specialist: () => ({ outcome: null, save: opened(locksInTier(4)) }),
   'master-of-the-bench': () => ({ outcome: null, save: opened(ALL_LOCKS) }),
 
-  'expert-hands': () => ({
-    outcome: attempt({ lock: ALL_LOCKS[0] as LockDef, assist: 'medium' }),
-    save: save(),
-  }),
-  'blind-faith': () => ({
-    outcome: attempt({ lock: ALL_LOCKS[0] as LockDef, assist: 'hard' }),
-    save: save(),
-  }),
-  'blind-master': () => {
-    const def = lockOf((d) => d.tier >= 3, 'a Tier 3+ lock')
-    return { outcome: attempt({ lock: def, assist: 'hard' }), save: save() }
-  },
   'under-par': () => {
     const def = ALL_LOCKS[0] as LockDef
     return { outcome: attempt({ lock: def, seconds: def.par - 1 }), save: save() }
@@ -126,12 +108,12 @@ const SCENARIOS: Record<string, () => AchievementContext> = {
 // ── The suite ───────────────────────────────────────────────────────────────────────────
 
 describe('the achievement catalogue', () => {
-  it('is the thirteen of the launch cut', () => {
-    // Was 38, then 34 (D-088, D-104), now 13: the owner's D-164 cut, made while entering the
-    // Steamworks rows, kept the progression ladder, the difficulty and rank feats, the editor's
-    // front door and one long-haul oddity. The number is asserted so the next cut or addition
-    // has to come here and say so.
-    expect(ACHIEVEMENTS).toHaveLength(13)
+  it('is the ten that survived the ladder cut', () => {
+    // Was 38, then 34 (D-088, D-104), 13 at the D-164 launch cut, now 10: D-218 collapsed the
+    // assist ladder to two rungs and took the three plates that named the removed Medium and Hard
+    // (Expert Hands, Hard Won, Hard Master) with it. The number is asserted so the next cut or
+    // addition has to come here and say so.
+    expect(ACHIEVEMENTS).toHaveLength(10)
   })
 
   it('has unique ids and names', () => {
@@ -273,15 +255,6 @@ describe('the conditions are not accidentally always true', () => {
       const def = ALL_LOCKS[0] as LockDef
       return { outcome: attempt({ lock: def, seconds: def.par + 1 }), save: save() }
     },
-    'expert-hands': () => ({
-      outcome: attempt({ lock: ALL_LOCKS[0] as LockDef, assist: 'easy' }),
-      save: save(),
-    }),
-    'blind-master': () => ({
-      // Hard, but on a Tier 1 lock — the tier is the half that must not be forgotten.
-      outcome: attempt({ lock: lockOf((d) => d.tier === 1, 'a Tier 1 lock'), assist: 'hard' }),
-      save: save(),
-    }),
     'flawless-tier': () => {
       // Every Tier 1 lock opened, but one of them at rank A — the standard is S across the tier.
       const locks = locksInTier(1)
@@ -308,11 +281,10 @@ describe('the conditions are not accidentally always true', () => {
 
   it('never fires an attempt-shaped achievement on a failed attempt', () => {
     const def = ALL_LOCKS[0] as LockDef
-    const failed = attempt({ lock: def, opened: false, seconds: 1, assist: 'hard' })
+    const failed = attempt({ lock: def, opened: false, seconds: 1, assist: 'normal' })
     const earned = newlyEarned({ outcome: failed, save: save() })
     expect(earned.map((a) => a.id)).not.toContain('under-par')
-    expect(earned.map((a) => a.id)).not.toContain('blind-faith')
-    expect(earned.map((a) => a.id)).not.toContain('expert-hands')
+    expect(earned.map((a) => a.id)).not.toContain('flawless-tier')
   })
 })
 
@@ -323,7 +295,7 @@ describe('outcomeFrom carries what the achievements need', () => {
       opened: true,
       time: 12.5,
       chambers: [],
-      config: { assist: 'hard' as const },
+      config: { assist: 'normal' as const },
     }
     const stats = {
       setOrder: [0, 1],
@@ -342,7 +314,7 @@ describe('outcomeFrom carries what the achievements need', () => {
     expect(o.feathers).toBe(3)
     expect(o.maxTension).toBeCloseTo(0.82)
     expect(o.minTensionWhileHeld).toBeCloseTo(0.11)
-    expect(o.assist).toBe('hard')
+    expect(o.assist).toBe('normal')
     expect(o.challenges).toEqual(['no-resets'])
   })
 
@@ -364,7 +336,7 @@ describe('outcomeFrom carries what the achievements need', () => {
     }
     const o = outcomeFrom(
       def,
-      { opened: true, time: 0, chambers: [], config: { assist: 'easy' as const } } as never,
+      { opened: true, time: 0, chambers: [], config: { assist: 'normal' as const } } as never,
       stats,
     )
     // Infinity leaking through would read as "held very hard the whole time" to any consumer

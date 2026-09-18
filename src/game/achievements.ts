@@ -149,38 +149,13 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
     test: ({ save }) => allOpened(save, ALL_LOCKS),
   },
 
-  // ── Mastery (5) ──
+  // ── Mastery (2) ──
   //
   // The technique column stood here — eight plates from *Single Pin Purist* to *Surgeon* —
-  // and went with D-164. What stays is the ladder a player actually climbs: the two harder
-  // assist levels, beating par, and holding the S standard across a whole tier.
-  {
-    id: 'expert-hands',
-    name: 'Expert Hands',
-    // The plate said "Expert mode" and the test asked for `medium`, because D-046 renamed the
-    // four levels and the *text* was not renamed with them. A trophy that tells the player to do
-    // something Settings does not offer is a trophy nobody can go and get on purpose.
-    condition: 'Open any lock on Medium',
-    group: 'mastery',
-    reachable: always,
-    test: ({ outcome: o }) => o !== null && o.opened && o.assist === 'medium',
-  },
-  {
-    id: 'blind-faith',
-    name: 'Hard Won',
-    condition: 'Open any lock on Hard',
-    group: 'mastery',
-    reachable: always,
-    test: ({ outcome: o }) => o !== null && o.opened && o.assist === 'hard',
-  },
-  {
-    id: 'blind-master',
-    name: 'Hard Master',
-    condition: 'Open a Tier 3 or higher lock on Hard',
-    group: 'mastery',
-    reachable: () => ALL_LOCKS.some((d) => d.tier >= 3),
-    test: ({ outcome: o }) => o !== null && o.opened && o.lock.tier >= 3 && o.assist === 'hard',
-  },
+  // and went with D-164. The two assist-level plates (Expert Hands on Medium, Hard Won/Hard
+  // Master on Hard) went with D-218, which cut Medium and Hard themselves: a trophy that names
+  // a level Settings no longer offers is one nobody can go and get. What stays is beating par
+  // and holding the S standard across a whole tier.
   {
     id: 'under-par',
     name: 'Under Par',

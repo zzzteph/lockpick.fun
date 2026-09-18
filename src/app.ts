@@ -33,6 +33,8 @@ import {
   type StorageLike,
 } from './game/save'
 import { Session } from './game/session'
+import { solverCanRun } from './game/solverStepper'
+import { walkSolver } from './game/solverWalk'
 import {
   currentLine,
   lessonById,
@@ -41,6 +43,8 @@ import {
   type LessonRun,
 } from './game/tutorial'
 import { drawCutaway, driverFill } from './render/cutaway'
+import { drawFrontView } from './render/frontview'
+import { SIDE_PX, SIDE_SHEAR_Y, atForX, drawSideView, sideBounds, sideFrame } from './render/sideview'
 import { drawGrid, text } from './render/draw'
 import {
   cameraDrift,
@@ -62,7 +66,7 @@ import {
   toolTip,
   type FaceLayout,
 } from './render/faceon'
-import { BENCH_LINK, drawHud } from './render/hud'
+import { BENCH_LINK, drawHud, keyLegendBottom } from './render/hud'
 import {
   canSkip,
   cardVisible,
@@ -145,7 +149,7 @@ import {
 import { assemblyBounds } from './render/layout'
 import { startRecording, stopRecording } from './render/probe'
 import {
-  LIFT_PAD,
+  COUNTER_PAD,
   PAUSE_PAD,
   WITHDRAW_PAD,
   WRENCH_SLIDER,
@@ -173,6 +177,7 @@ import {
   outwardLinksOn,
   reportLink,
   drawBench,
+  GUN_SHELF,
   drawCodes,
   drawEditor,
   drawMenu,
@@ -265,6 +270,12 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
    * browser is also how a test reaches this mode honestly.
    */
   const deckMode = new URLSearchParams(window.location.search).has('deck')
+  /** The work band the solver's mouse scheme listens over: between the header and the footer. */
+  const WORK_TOP = 160
+  const WORK_BOTTOM = 160
+  /** The drawn open turn's end and rate (the bench's): 0.75 of the game's open angle at 45°/s. */
+  const OPEN_SHOW_THETA = 0.75 * THETA_OPEN
+  const OPEN_TURN_RATE = 45 * (Math.PI / 180)
   let palette: Palette = THEMES[progress.data.settings.theme]
 
   let config = makeConfig({ tools: STARTER_TOOLS })
@@ -275,6 +286,23 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   let previousScreen: ScreenName = 'menu'
   let session: Session | null = null
   let layout: CutawayLayout = computeLayout(1, 0)
+  /**
+   * The pick gun (snap gun) is in hand — this lock was started from the bench's gun shelf. It adds
+   * one control, STRIKE (`g` / an on-screen button), that flicks the pins up; the wrench and the
+   * luck do the rest. Only pin tumblers the solver runs can be gunned.
+   */
+  let gunMode = false
+  /** A strike is queued for the next tick (set by the trigger, cleared once the sim has taken it). */
+  let strikeQueued = false
+  /** The gun needle's flick, 0..1 — snaps to 1 on a strike and eases back, for the visible jump. */
+  let gunFlick = 0
+  // ── The solver's screen (docs/SOLVER_PORT.md): the bench's side and front views ──
+  /** The pin the front view shows: the one under the tip, kept while the pick is out. */
+  let frontChamber = 0
+  /** The drawn open turn once the lock is open, rad; -1 until then (the solver stops at the open). */
+  let openTheta = -1
+  /** The key legend as drawn this frame, so the front view can sit under it. */
+  let legendKeys: readonly (readonly [string, string])[] = []
   // Non-null exactly when the current lock is drawn and driven face-on rather than in the
   // side cutaway — the disc detainers and the tubulars (`SIMULATION.md §10`).
   let face: FaceLayout | null = null
@@ -346,13 +374,6 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   let benchTier: number | undefined
   /** Which of the help screen's three pages is showing (D-103). */
   let helpPage = 0
-  /**
-   * How long the player has been FIGHTING a caught wheel — pull held, some wheel frozen
-   * in a false gate (D-214). Feeds the sealed rungs' rescue hint: on medium and hard the
-   * catch is invisible by design (D-173/D-191), and the dungeon report that started the
-   * whole wheels arc was a player stuck exactly here with nothing on screen saying why.
-   */
-  let caughtFightSeconds = 0
 
   const eventLog: SimEvent[] = []
   const eventWaiters: { type: string; resolve: () => void }[] = []
@@ -439,7 +460,10 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     const l = lessonById(id)
     if (!l) throw new Error(`Unknown lesson "${id}"`)
     lesson = beginLesson(l)
-    startLock(l.lock, seed)
+    // A gun lesson (D-217) puts the gun in hand, not the pick — the steps read generic state, so
+    // the same lines teach whichever tool the player is given, but the gun lesson must actually
+    // hand them the gun for its "strike" line to mean anything.
+    startLock(l.lock, seed, false, l.gun === true)
   }
 
   function finishLesson(): void {
@@ -647,8 +671,14 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     goto('streak')
   }
 
-  function startLock(def: LockDef, seed = seedFor(def), inspect = false): void {
+  function startLock(def: LockDef, seed = seedFor(def), inspect = false, gun = false): void {
     inspecting = inspect
+    frontChamber = 0
+    openTheta = -1
+    // The pick gun is in hand only if this lock was started from the gun shelf AND the solver can
+    // run it (a wheel pack or anything without solver bodies is never gunned).
+    gunMode = gun && solverCanRun(def)
+    strikeQueued = false
     // Every road onto the bench clears the flag; `dealStreakLock` raises it again after this
     // returns. A bench lock started mid-mode must never feed the chain.
     streakPick = false
@@ -656,7 +686,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     // Wheel packs kill the wrench keys outright (D-213): a shackle has one pull, and a
     // dead key must not quietly rewrite the pressure the next pin lock opens at.
     input.wheelPack = def.family === 'combination'
-    caughtFightSeconds = 0
+    input.gunMode = gunMode
     layout = computeLayout(def.bitting.length, 0, def.rows ?? 1, mirrored())
     const kind = faceKindFor(def.family)
     face = kind ? computeFaceLayout(def.bitting.length, kind, 0) : null
@@ -678,7 +708,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   const actions: ShellActions = {
     goto,
     startLock: (def) => {
-      startLock(def, seedFor(def), inspectNext)
+      startLock(def, seedFor(def), inspectNext, benchTier === GUN_SHELF)
     },
     toggleInspect: () => {
       inspectNext = !inspectNext
@@ -1175,6 +1205,15 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       // A tick per step of the wrench. This is the gearing's counterpart: the drag was made slower
       // to buy precision, and the detent is what gives the hand something back for it (D-131).
       onWrenchStep: () => haptics.detent(),
+      onStrike: () => {
+        // The pick gun's trigger reaches the sim only when the gun is in hand (the bench's gun
+        // shelf started this lock) and the solver is running it.
+        if (gunMode && session?.engine) {
+          strikeQueued = true
+          gunFlick = 1
+          audio.click()
+        }
+      },
     },
   )
   applySettings()
@@ -1199,7 +1238,9 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     }
     if (padlock && session) return input.readPadlock(padlock, session.view.chambers)
     if (face && session) return input.readFace(face, session.view.chambers)
-    return input.read(layout, maxLift())
+    const base = input.read(layout, maxLift())
+    // The pick gun's strike rides on the pin-tumbler read only, and only while the gun is in hand.
+    return gunMode && strikeQueued ? { ...base, strike: true } : base
   }
 
   /** Advance the keyboard's held controls. Called once a frame, before the input is read. */
@@ -1213,6 +1254,15 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       face || padlock ? null : layout,
       screen === 'pick' && session !== null ? padlock : null,
     )
+    // The solver's side view on screen: the mouse moves the pick over it and holds the wrench on it.
+    const eng = screen === 'pick' && session && !face && !padlock ? session.engine : null
+    if (eng) {
+      const side = sideFrame(eng)
+      input.setSolverFrame({
+        atForX: (x) => atForX(eng, side, x),
+        overLock: (_x, y) => y >= WORK_TOP && y <= LOGICAL_HEIGHT - WORK_BOTTOM,
+      })
+    } else input.setSolverFrame(null)
     input.tick(seconds, chambers?.length ?? 0, ceiling)
   }
 
@@ -1337,6 +1387,21 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       goto('streak')
       return
     }
+    /**
+     * A gun open is bumped, not picked — D-217. It earns no rank, no achievements and no tier
+     * curve, so it never reaches `completeAttempt`: it writes only to the gun ledger, which the
+     * gun bench reads instead of the pick record. The payoff still plays (a pop is a pop), but
+     * it lands back on the bench, not a results panel — there is no rank to report. `outcome`
+     * and `result` stay cleared so the settle routing below sends it home, not to `results`.
+     */
+    if (gunMode) {
+      progress.recordGunOpen(session.def.slug)
+      status = `${session.def.name} — bumped open.`
+      outcome = undefined
+      result = undefined
+      startOpenSequence(sequence, 0, 0)
+      return
+    }
     const base = outcomeFrom(session.def, session.state, session.state.stats, { challenges })
     const met = progress.challengesMetBy(base, challenges)
     outcome = { ...base, challenges: met }
@@ -1351,15 +1416,6 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   /** Any key or a click skips, once the sequence has run long enough to allow it. */
   function wantsSkip(keys: Set<string>, clicked: boolean): boolean {
     return clicked || keys.size > 0
-  }
-
-  /**
-   * How far the pick tip is into the lock, for Hard mode's readout: the lift of the chamber it
-   * is under. Zero when the pick is out — there is no depth to report.
-   */
-  function pickDepthMm(view: SimState): number {
-    const c = view.pickChamber >= 0 ? view.chambers[view.pickChamber] : undefined
-    return c ? c.keyLift : 0
   }
 
   function pickGapMm(view: SimState, inp: SimInput): number {
@@ -1576,6 +1632,10 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       // Once the lock is open the simulation is done; the sequence owns the screen until it
       // settles, and only then does the player land on the results page.
       if (!session.state.opened) absorb(session.advance(seconds, inp))
+      // The strike was a one-frame signal: the tick(s) this frame have taken it, so it is spent.
+      strikeQueued = false
+      // The needle's flick eases back over ~200 ms (the strike window), for the visible jump.
+      if (gunFlick > 0) gunFlick = Math.max(0, gunFlick - seconds / 0.2)
       updateFx(fx, seconds)
       audio.update(session.state, Math.max(seconds, 1 / 240))
       const view = session.syncView()
@@ -1585,16 +1645,16 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
         updateSubtitles(subtitles, seconds, counter, view.thetaVelocity)
       }
       if (lesson) updateLesson(lesson, view, seconds)
-      // The rescue clock (D-214): counting only while the pull is held AND some wheel is
-      // frozen in a false gate — the one state a sealed pack gives no channel for. Any
-      // release or state change zeroes it, because the release IS the cure.
-      if (session.def.family === 'combination' && screen === 'pick') {
-        const fighting =
-          view.tension >= T_MIN_HOLD && view.chambers.some((c) => c.state === 'FALSE_SET')
-        caughtFightSeconds = fighting ? caughtFightSeconds + seconds : 0
-      }
       layout = computeLayout(view.chambers.length, view.theta, session.def.rows ?? 1, mirrored())
       if (face) face = computeFaceLayout(view.chambers.length, face.kind, view.theta)
+      // The open turn, drawn: the solver stops the moment the plug is free, and the front view
+      // turns the plug on to the banner's angle (the bench's `OPEN_TURN_RATE`).
+      if (session.engine) {
+        if (view.opened) {
+          if (openTheta < 0) openTheta = session.engine.theta()
+          openTheta = Math.min(OPEN_SHOW_THETA, openTheta + OPEN_TURN_RATE * seconds)
+        } else openTheta = -1
+      }
       if (sequence.running) {
         const ticks = updateOpenSequence(sequence, seconds)
         for (let i = 0; i < ticks; i += 1) audio.creditTick(i)
@@ -1623,8 +1683,17 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       // straight onward. The lesson itself is banked and cleared HERE, not at the open (D-208),
       // so the wheel lesson's working x-ray stays on stage for the whole payoff.
       if (view.opened && isSettled(sequence)) {
+        // A gun *lesson* is still a lesson: it banks through `finishLesson` and returns to the
+        // tutorial, so read the lesson flag before `finishLesson` clears it.
+        const wasLesson = lesson !== null
         finishLesson()
-        goto(outcome ? 'results' : 'tutorial')
+        // A gun *bench* open (D-217) has no rank and no lesson card: its payoff lands back on the
+        // bench, where the shelf card now reads the gun ledger. Checked before the pick split
+        // because a bump sets no `outcome` and would otherwise fall through to the tutorial.
+        if (gunMode && !wasLesson) {
+          session = null
+          goto('bench')
+        } else goto(outcome ? 'results' : 'tutorial')
       }
     } else {
       updateFx(fx, seconds)
@@ -1770,19 +1839,16 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
 
     const assist = activeAssist()
     /**
-     * The four levels, as a ladder of what the drawing is allowed to show — re-rungs by the
-     * owner in D-166 (each one step gentler than D-046's ladder, and the hand never vanishes:
-     * *"in hard level - I still want to see the lockpick"*).
+     * Two rungs now (D-218, "only two of them"), and the difference is colour, not what is drawn.
+     * Both show every pin at its real height; Training narrates in colour (state colours, the
+     * target window, the state word), Normal draws the same geometry plain. The masking rungs —
+     * Medium's one-pin-under-the-tip and Hard's no-pins — are gone, so nothing hides a chamber.
      *
-     * `training` gets the real cutaway, annotated. `easy` gets the same cutaway with the
-     * narration off — every pin, real shapes, but no state colour, pattern or word. `medium`
-     * gets one pin — the one under the tip — drawn plain so its type stays hidden. `hard` gets
-     * no pins at all: your pick, the meter, and the depth readout.
+     * `colored` is the whole ladder: Training and every lesson (a lesson teaches in colour) get it,
+     * Normal does not. Wheel packs are the one exception, coloured on both rungs — the teal gate
+     * and amber tooth ARE how a wheel is read (D-207/D-211), so they never go plain.
      */
-    const felt =
-      assist === 'training' || assist === 'easy'
-        ? undefined
-        : { active: assist === 'medium' ? view.pickChamber : -1 }
+    const colored = lesson !== null || assist === 'training'
     const showPick = true
 
     ctx.save()
@@ -1792,41 +1858,38 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       // The combination padlock, drawn as the thing you hold (D-167). No tool overlay: the
       // active wheel's focus ring is the hand, and the shackle is the wrench.
       drawPadlock(vp, palette, view, padlock, {
+        // The wheel x-ray is on at both rungs now (D-218). D-173 had sealed real packs above
+        // training, D-207 reopened the lesson, D-211 reopened the low rungs — and D-218 cut the
+        // sealed rungs (Medium, Hard) outright, so every mode that survives shows the pack from
+        // two sides. The teal clear gate and amber binding tooth ARE how a wheel is read
+        // (D-207/D-211), so wheels never go plain the way pins do on Normal.
         activeChamber: view.pickChamber,
-        // The x-ray ladder, re-rung by the owner three times. D-173 sealed every real
-        // pack ("there should be NO helping wheels both in EASY or training modes");
-        // D-207 reopened the LESSON, the same owner having met his own sealed pack as a
-        // student ("I did not understand how to find the correct spot for a single
-        // wheel"); and D-211 reopened the low rungs — "Why this only in tutorial?…
-        // training and simple level shoul have xray, while medium an hardd" — sealed.
-        // So lessons, training and easy see the lock from two sides (the flat face plus
-        // the picked wheel side-on); medium and hard stay sealed, and since D-191 even
-        // the seat sound is gone there: only the drag says so.
-        showTargets: lesson !== null || assist === 'training' || assist === 'easy',
-        // Full colour wherever the x-ray shows — the teal clear gate and the amber
-        // binding tooth ARE the teaching (D-207/D-211). Plain everywhere sealed.
-        plainStates: lesson === null && assist !== 'training' && assist !== 'easy',
+        showTargets: true,
+        plainStates: false,
         fx,
       })
     } else if (face) {
       drawFaceOn(vp, palette, view, face, {
         activeChamber: view.pickChamber,
-        showTargets: assist === 'training',
+        showTargets: colored,
         fx,
         chamberNoun: session.def.family === 'radial-slider' ? 'slider' : 'pin',
         // The ladder on a face: geometry stays (the face is the outside of the lock), the
-        // narration goes. Training alone keeps the colour language (D-166).
-        plainStates: assist !== 'training',
+        // narration goes. Colour on Training and in lessons; plain on Normal (D-166/D-218).
+        plainStates: !colored,
       })
       drawFaceTool(vp, palette, face, view, inp)
+    } else if (session.engine) {
+      // The solver's side view, drawn from its bodies (the bench's; docs/SOLVER_PORT.md).
+      // `colored` carries the ladder: Training/lessons narrate in colour, Normal draws it plain.
+      drawSideView(vp, palette, session.engine, sideFrame(session.engine), gunMode, gunFlick, colored)
     } else {
       drawCutaway(vp, palette, view, layout, {
         activeChamber: view.pickChamber,
-        showTargets: assist === 'training',
+        showTargets: colored,
         fx,
         touchActive: input.touch.active,
-        plainStates: assist === 'easy',
-        ...(felt ? { felt } : {}),
+        plainStates: !colored,
       })
       // The pick is drawn where the *hand* is, sliding along the keyway, rather than snapped
       // to the chamber the simulation quantised it to. Scripted input has no hand, so it
@@ -1853,7 +1916,8 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       lesson: lesson !== null,
       // The face locks draw a dial and the padlock a body, not the side cutaway — their
       // gutters are never crowded.
-      ...(face || padlock ? {} : { assemblyLeft: assemblyBounds(layout).x }),
+      ...(face || padlock ? {} : { assemblyLeft: session.engine ? sideFrame(session.engine).x0 : assemblyBounds(layout).x }),
+      ...(session.engine ? { plugOpen: session.engine.openAngle() } : {}),
       // The payoff owns the rank band from the moment the lock opens (D-100).
       payoff: sequence.running,
       // The meter is on at every level: it is the substitute for touch, and the higher levels
@@ -1864,29 +1928,21 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       // going quiet, and a meter that still says BINDING would hand the colour channel back
       // through the side door. The number stays silent until you lean on the pin (D-076).
       // …and for wheels not even training: the column's word would name a seated wheel,
-      // which is the "helping" the owner struck at every level (D-173).
-      showStateWord: !shackle && assist === 'training',
-      showBinding: !shackle && assist === 'training',
+      // which is the "helping" the owner struck at every level (D-173). The word rides `colored`,
+      // so a lesson narrates and Normal stays quiet (D-218).
+      showStateWord: !shackle && colored,
+      showBinding: !shackle && colored,
       /**
-       * Easy keeps a bare set/not-set count, because how many pins you have done is something a
-       * real picker remembers rather than something the lock tells them — and with the pins drawn
-       * only under the tip, taking the dots away too meant the *default* level had no progress
-       * indicator of any kind. That was never asked for. Medium and Hard have none by design.
+       * Normal keeps a bare set/not-set count, because how many pins you have done is something a
+       * real picker remembers rather than something the lock tells them (D-218; it was Easy's rule).
+       * Training keeps the full dots as part of its x-ray language.
        *
-       * Wheels are stricter: a teal dot on a seated wheel literally names a correct digit, and
-       * the owner's rule is that above training a wheel pack shows nothing anywhere —
-       * "easy == medium == hard". Training keeps the full dots as part of its x-ray language.
+       * Wheels are stricter: a teal dot on a seated wheel literally names a correct digit, so a
+       * wheel pack shows no dots at any assist (D-173) — a counted dot is a decoded digit.
        */
-      // Wheels show NO dots at any assist (D-173) — a counted dot is a decoded digit.
-      pinDots: shackle
-        ? 'none'
-        : assist === 'training'
-          ? 'full'
-          : assist === 'easy'
-            ? 'progress'
-            : 'none',
-      // Depth is a pick reading; nothing is inserted into a wheel pack.
-      depthMm: !shackle && assist === 'hard' ? pickDepthMm(view) : null,
+      pinDots: shackle ? 'none' : colored ? 'full' : 'progress',
+      // Depth was Hard's readout, and Hard is gone (D-218): no depth line on either rung.
+      depthMm: null,
       /**
        * Carrying the hook high is a real control now, so the legend has to say so — D-139.
        *
@@ -1895,7 +1951,23 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
        * whatever it passes (D-138). A control the player cannot discover is the same as no control,
        * and this one is invisible: it is the absence of a thing the game has always done for you.
        */
-      keys: shackle
+      keys: (legendKeys = gunMode
+        ? // The pick gun: hold the wrench, strike; the pins jump and a lucky few catch each bump.
+          input.touch.active
+          ? ([
+              ['strike', 'the button'],
+              ['slider', 'tension'],
+            ] as const)
+          : ([
+              [deckMode ? 'A' : 'space', 'strike the pins'],
+              [deckMode ? 'R2' : 'Q', 'tension wrench'],
+              [deckMode ? 'L1 R1' : '1-0', 'wrench pressure'],
+              ...(streakPick
+                ? ([[deckMode ? 'Y' : 'R', 'skip lock']] as const)
+                : ([[deckMode ? 'Y' : 'R', 'restart']] as const)),
+              [deckMode ? 'start' : 'esc', 'pause'],
+            ] as const)
+        : shackle
         ? // A wheel pack has no keyway to carry a hook along: choose a wheel, turn it, pull.
           input.touch.active
           ? ([
@@ -1924,6 +1996,15 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
             ['slider', 'tension'],
           ] as const)
         : ([
+            // The mouse over the solver's side view (docs/SOLVER_PORT.md): the bench's scheme.
+            // Not on the Deck, which has no mouse.
+            ...(session.engine && !deckMode
+              ? ([
+                  ['mouse', 'move the pick'],
+                  ['click', 'hold = wrench'],
+                  ['r-click', 'hold too = counter-rotate'],
+                ] as const)
+              : ([] as const)),
             ['← →', 'move'],
             [deckMode ? 'A' : 'space', 'lift'],
             [deckMode ? 'A+← →' : 'space+← →', 'carry it'],
@@ -1955,7 +2036,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
               ? ([[deckMode ? 'Y' : 'R', 'skip lock']] as const)
               : ([[deckMode ? 'Y' : 'R', 'restart']] as const)),
             [deckMode ? 'start' : 'esc', 'pause'],
-          ] as const),
+          ] as const)),
       // The gutters belong to the pads while a finger is down, whatever the layout (D-160).
       touchActive: input.touch.active,
       benchHot: overBenchLink,
@@ -1974,29 +2055,26 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
        * broken pick with the wrench released is a perfectly ordinary state to be in, so "it only
        * shows when the wrench is off" does not make the row any less crowded (D-101).
        */
-      tensionHint: input.touch.active
-        ? // Which edge depends on the hand the lock is held in (D-130), and "drag" rather than
-          // "slide to" because the wrench moves from where it is now, not to where you touched.
-          `drag the ${shackle ? 'shackle' : 'wrench'} up the ${mirrored() ? 'right' : 'left'} edge`
-        : shackle
-          ? `hold [${deckMode ? 'R2' : 'Q'}] to pull the shackle`
-          : `hold [${deckMode ? 'R2' : 'Q'}] to turn the wrench`,
+      tensionHint: gunMode
+        ? input.touch.active
+          ? 'drag up for tension, then tap strike'
+          : `hold [${deckMode ? 'R2' : 'Q'}] for tension, then [${deckMode ? 'A' : 'space'}] to strike`
+        : input.touch.active
+          ? // Which edge depends on the hand the lock is held in (D-130), and "drag" rather than
+            // "slide to" because the wrench moves from where it is now, not to where you touched.
+            `drag the ${shackle ? 'shackle' : 'wrench'} up the ${mirrored() ? 'right' : 'left'} edge`
+          : shackle
+            ? `hold [${deckMode ? 'R2' : 'Q'}] to pull the shackle`
+            : `hold [${deckMode ? 'R2' : 'Q'}] to turn the wrench`,
       // Teach the grip that makes this playable one-handed-per-control, until it has happened.
-      // Outranked by the caught-wheel rescue (D-214): on the sealed rungs a wheel frozen in a
-      // false gate is invisible by design, and a player four seconds into fighting one needs
-      // the way out more than any coaching. Lessons, training and easy already SHOW the catch
-      // in the x-ray, so the line belongs to medium and hard alone — and it clears the moment
-      // the pull is eased, because the release is the cure it names.
-      ...(shackle &&
-      lesson === null &&
-      (assist === 'medium' || assist === 'hard') &&
-      caughtFightSeconds > 4
-        ? { heldHint: 'a wheel is caught in a false gate — ease the shackle right off to free it' }
-        : session && pickedButUnturned(session.state)
-          ? { heldHint: shackle ? 'every wheel is seated — pull through' : 'every pin is up — turn harder' }
-          : input.touch.active && !input.usedBothThumbs
-            ? { heldHint: 'keep that thumb there — lift with the other' }
-            : {}),
+      // The caught-wheel rescue line (D-214) is gone with the sealed rungs it belonged to (D-218):
+      // it existed because Medium and Hard hid the catch, and both surviving rungs SHOW it in the
+      // x-ray, so nobody is fighting a frozen wheel blind any more.
+      ...(session && pickedButUnturned(session.state)
+        ? { heldHint: shackle ? 'every wheel is seated — pull through' : 'every pin is up — turn harder' }
+        : input.touch.active && !input.usedBothThumbs && !gunMode
+          ? { heldHint: 'keep that thumb there — lift with the other' }
+          : {}),
       shackle,
       par: session.def.par,
       mirrored: mirrored(),
@@ -2005,9 +2083,28 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       strain: { amount: view.pickStrain, bent: view.pickBent, broken: view.pickBroken },
     })
 
+    if (session.engine && !padlock && !face) {
+      // The front view: the pin under the tip seen from the face, in the left gutter under the
+      // key legend — right of the wrench slider while a finger is down. Drawn at the open turn
+      // once the lock is open, with the key pins turning with the plug.
+      if (view.pickChamber >= 0) frontChamber = view.pickChamber
+      const x = input.touch.active ? 180 : 24
+      const y = keyLegendBottom(vp, legendKeys.length) + 16
+      const side = sideFrame(session.engine)
+      drawFrontView(
+        vp,
+        palette,
+        session.engine,
+        Math.min(frontChamber, view.chambers.length - 1),
+        { x, y, w: side.x0 - x - 20, h: LOGICAL_HEIGHT - WORK_BOTTOM - 10 - y },
+        view.opened && openTheta >= 0 ? openTheta : session.engine.theta(),
+        colored,
+      )
+    }
     drawTouchControls(vp, palette, input.touch, {
       tensionHeld: view.tension >= T_MIN_HOLD,
       mirrored: mirrored(),
+      gun: gunMode,
     })
 
     if (progress.data.settings.subtitles) drawSubtitles(vp, palette, subtitles)
@@ -2046,7 +2143,8 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   function loadLock(key: number | string, seed = 1): void {
     const def = findLock(key)
     if (!def) throw new Error(`Unknown lock "${String(key)}"`)
-    startLock(def, seed)
+    // The gun shelf is honoured here too, so a harness can put the gun in hand via `benchTier`.
+    startLock(def, seed, false, benchTier === GUN_SHELF)
   }
 
   // ── Test hook (VERIFICATION.md §3) ────────────────────────────────────────────────────
@@ -2075,12 +2173,6 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       // Everything else that runs per frame runs here too. A harness that advanced only the
       // simulation would report a tutorial that never noticed the player doing anything.
       if (lesson) updateLesson(lesson, session.state, 1 / 120)
-      if (session.def.family === 'combination' && screen === 'pick') {
-        const fighting =
-          session.state.tension >= T_MIN_HOLD &&
-          session.state.chambers.some((c) => c.state === 'FALSE_SET')
-        caughtFightSeconds = fighting ? caughtFightSeconds + 1 / 120 : 0
-      }
       if (progress.data.settings.subtitles) {
         let counter = 0
         for (const c of session.state.chambers) {
@@ -2113,7 +2205,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     const rects: Box[] = [...ui.registeredRects()]
     if (input.touch.active && screen === 'pick') {
       const flip = mirrored()
-      for (const r of [WRENCH_SLIDER, PAUSE_PAD, WITHDRAW_PAD, LIFT_PAD]) {
+      for (const r of [WRENCH_SLIDER, PAUSE_PAD, WITHDRAW_PAD, COUNTER_PAD]) {
         rects.push(mirrorRect(r, flip))
       }
     }
@@ -2144,7 +2236,9 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
       isCompact(vp) && screen === 'pick' && session
         ? padlock
           ? padlockAuditBox(padlock)
-          : (faceBox() ?? assemblyBounds(layout))
+          : session.engine
+            ? sideBounds(session.engine, sideFrame(session.engine))
+            : (faceBox() ?? assemblyBounds(layout))
         : null
     return {
       findings: auditLayout(drawn, vp.scale, rects, lock),
@@ -2165,6 +2259,12 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   }
   hook.getState = (): HookState => snapshot()
   hook.getGeometry = (): HookGeometry => geometry()
+  hook.sideFrame = () => {
+    const eng = session?.engine ?? null
+    if (!eng) return null
+    const side = sideFrame(eng)
+    return { x0: side.x0, x1: side.x1, firstChamberX: eng.sol.params.firstChamberX, pitch: eng.sol.params.pitch, sidePx: SIDE_PX, shearY: SIDE_SHEAR_Y }
+  }
   /**
    * Where a chamber and a lift would appear on screen, in client coordinates.
    *
@@ -2456,6 +2556,12 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     // comes up, and the loop below must keep reading the session it was actually driving.
     const live = session
     if (!live || live.state.opened) return live?.state.opened ?? false
+    if (live.engine) {
+      // The solver has no tape to replay: a scripted hand walks the lock the bench's way
+      // (docs/SOLVER_PORT.md), through `advance`, so every event reaches its listeners.
+      walkSolver(live, absorb, { maxSeconds: 180 })
+      return live.state.opened
+    }
     const r = solveLock(live.def, live.seed, currentConfig(), { maxSeconds: 180 })
     if (!r.opened) return false
     // Tick by tick, exactly as `stepTicks` does — a segment fed to `advance` as one big span

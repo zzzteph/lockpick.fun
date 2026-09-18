@@ -238,7 +238,7 @@ test('the fine trim is Training only, and the legend does not claim it elsewhere
   page,
 }) => {
   const watcher = await bootGame(page, { frames: 3 })
-  await setAssist(page, 'easy')
+  await setAssist(page, 'normal')
   await loadLock(page, 1, 3)
   await expect
     .poll(async () => (await getState(page)).pickChamber, { timeout: 5000 })

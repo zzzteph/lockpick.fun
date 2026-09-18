@@ -47,7 +47,7 @@ describe('the shell chamber holds a fully overlifted stack', () => {
     for (const def of ALL_LOCKS) {
       const state = createSimState(def, 1, {
         tools: PERFECT_TOOLS,
-        assist: 'medium',
+        assist: 'normal',
         featherEnabled: false,
       })
       const layout = computeLayout(state.chambers.length, 0, def.rows ?? 1)

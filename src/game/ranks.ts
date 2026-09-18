@@ -76,9 +76,7 @@ export function secondsLeftInRank(elapsed: number, par: number): number | null {
  */
 export const ASSIST_PAR_SCALE: Record<AssistMode, number> = {
   training: 0.6,
-  easy: 1.0,
-  medium: 1.5,
-  hard: 2.5,
+  normal: 1.0,
 }
 
 /** The par an attempt is actually judged against, once the assist level has had its say. */

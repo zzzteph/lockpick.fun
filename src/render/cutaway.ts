@@ -79,6 +79,17 @@ export interface CutawayOptions {
    * and the overset crimson all silenced. The geometry keeps talking; the narration stops.
    */
   readonly plainStates?: boolean
+  /**
+   * Radians of driver tilt per chamber. A pinched spool cants about the shear line; the physics
+   * prototype feeds this so a false set is drawn as an angled pin rather than an upright one.
+   * Absent (or 0) everywhere in the shipped game, which draws its pins straight.
+   */
+  readonly chamberTilt?: readonly number[]
+  /**
+   * Draw the rotation gauge in the lower gutter — the default. The physics prototype passes
+   * `false` and puts its own face-on view of the plug there instead.
+   */
+  readonly rotationGauge?: boolean
 }
 
 /** In blind mode, only the chamber under the tip is drawn at all. */
@@ -777,7 +788,20 @@ export function drawCutaway(
     if (c.kind === 'wafer') {
       drawWafer(vp, p, layout, c, opts.fx, recessed, opts.showTargets)
     } else {
-      drawDriver(vp, p, layout, c, opts.fx, recessed, opts.showTargets, opts.felt !== undefined, opts.plainStates ?? false)
+      // A pinched spool cants about the shear line. Only the driver cants — the key pin has
+      // dropped away beneath it (D-042), so it is drawn upright.
+      const tilt = opts.chamberTilt?.[c.index] ?? 0
+      if (tilt !== 0) {
+        const px = shellChamberX(layout, c.index)
+        ctx.save()
+        ctx.translate(px, shearY)
+        ctx.rotate(tilt)
+        ctx.translate(-px, -shearY)
+        drawDriver(vp, p, layout, c, opts.fx, recessed, opts.showTargets, opts.felt !== undefined, opts.plainStates ?? false)
+        ctx.restore()
+      } else {
+        drawDriver(vp, p, layout, c, opts.fx, recessed, opts.showTargets, opts.felt !== undefined, opts.plainStates ?? false)
+      }
       drawKeyPin(vp, p, layout, c, opts.plainStates ?? false)
     }
     ctx.restore()
@@ -803,16 +827,18 @@ export function drawCutaway(
    * that the **dial** is not the part D-135 measured as the cost. The caption stack stays gone;
    * the plug's face, turning by the real angle with the three arcs to compare, returns (D-157).
    */
-  drawRotationGauge(
-    vp,
-    p,
-    layout,
-    state.theta,
-    state.thetaDemand,
-    state.thetaMax,
-    pickedButUnturned(state),
-    isCompact(vp),
-  )
+  if (opts.rotationGauge !== false) {
+    drawRotationGauge(
+      vp,
+      p,
+      layout,
+      state.theta,
+      state.thetaDemand,
+      state.thetaMax,
+      pickedButUnturned(state),
+      isCompact(vp),
+    )
+  }
   drawChamberLabels(vp, p, layout, state, opts.activeChamber)
   /**
    * The anatomy key — SHELL, PLUG, KEYWAY, the shear line and the pin-stack legend — is a

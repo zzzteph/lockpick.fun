@@ -413,6 +413,11 @@ const READOUTS: readonly Entry[] = [
       'How hard the wrench turns the plug — keys 1 to 10. Past the notch, set pins hold while you work.',
   },
   {
+    term: 'counter-rotation',
+    blurb:
+      'Easing the plug back a hair while you lift — hold C, the right mouse button, or the COUNTER pad. It frees a pin a spool has trapped.',
+  },
+  {
     term: 'plug',
     blurb: 'How far the plug has turned. Past the notch, it opens.',
   },
@@ -448,7 +453,7 @@ const STATES: readonly Entry[] = [
   },
   {
     term: 'overset',
-    blurb: 'Too far — the key pin is jammed into the shell. Only a reset frees it.',
+    blurb: 'Too far past the line. Back off quickly and it drops; keep pushing and it jams until you drop the wrench.',
   },
 ]
 

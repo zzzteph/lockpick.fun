@@ -23,7 +23,7 @@ import {
   stepForDrag,
   targetAt,
   tensionForTouchStep,
-  LIFT_PAD,
+  COUNTER_PAD,
   mirrorRect,
   yForStep,
 } from '../../src/ui/touch'
@@ -210,7 +210,7 @@ describe('where a touch lands', () => {
     for (const r of [WRENCH_SLIDER, WITHDRAW_PAD]) {
       expect(r.x + r.w, 'the wrench hand works down the left gutter').toBeLessThan(200)
     }
-    for (const r of [PAUSE_PAD, LIFT_PAD]) {
+    for (const r of [PAUSE_PAD, COUNTER_PAD]) {
       expect(r.x, 'the pick hand works down the right one').toBeGreaterThan(LOGICAL_WIDTH - 500)
     }
   })
@@ -271,10 +271,10 @@ describe('the two hands', () => {
   })
 
   it('mirrors every control together, so the hands never end up split', () => {
-    for (const r of [WRENCH_SLIDER, WITHDRAW_PAD, PAUSE_PAD, LIFT_PAD]) {
+    for (const r of [WRENCH_SLIDER, WITHDRAW_PAD, PAUSE_PAD, COUNTER_PAD]) {
       const m = mirrorRect(r, true)
       // Same distance from its own edge as the original was from the other edge.
-      expect(STAGE_W - m.x - m.w, r === LIFT_PAD ? 'lift' : 'control').toBe(r.x)
+      expect(STAGE_W - m.x - m.w, r === COUNTER_PAD ? 'counter' : 'control').toBe(r.x)
       expect(m.y).toBe(r.y)
       expect(m.h).toBe(r.h)
     }
@@ -283,7 +283,7 @@ describe('the two hands', () => {
   it('keeps the lift strip opposite the wrench in both hands', () => {
     for (const flip of [false, true]) {
       const w = mirrorRect(WRENCH_SLIDER, flip)
-      const l = mirrorRect(LIFT_PAD, flip)
+      const l = mirrorRect(COUNTER_PAD, flip)
       const apart = Math.abs(w.x - l.x)
       expect(apart, `flip=${flip}: the two controls must be on opposite sides`).toBeGreaterThan(
         STAGE_W / 2,
@@ -294,14 +294,14 @@ describe('the two hands', () => {
   it('gives every control a target an adult finger can hit', () => {
     // A finger pad is about 9mm. At the scale a phone renders this stage — roughly 0.35 — 132
     // logical px is about 46 CSS px, which is above both Apple's 44pt and Material's 48dp floors.
-    for (const r of [WRENCH_SLIDER, WITHDRAW_PAD, PAUSE_PAD, LIFT_PAD]) {
+    for (const r of [WRENCH_SLIDER, WITHDRAW_PAD, PAUSE_PAD, COUNTER_PAD]) {
       expect(r.w).toBeGreaterThanOrEqual(132)
       expect(r.h).toBeGreaterThanOrEqual(74)
     }
   })
 
   it('never lets a control overlap another', () => {
-    const rects = [WRENCH_SLIDER, WITHDRAW_PAD, PAUSE_PAD, LIFT_PAD]
+    const rects = [WRENCH_SLIDER, WITHDRAW_PAD, PAUSE_PAD, COUNTER_PAD]
     for (let i = 0; i < rects.length; i += 1) {
       for (let j = i + 1; j < rects.length; j += 1) {
         const a = rects[i]

@@ -32,7 +32,7 @@ function outcome(patch: Partial<AttemptOutcome> & { lock: AttemptOutcome['lock']
     maxTension: 0.5,
     minTensionWhileHeld: 0.4,
     securityPinsSet: 0,
-    assist: 'easy',
+    assist: 'normal',
     challenges: [],
     ...patch,
   }
@@ -41,14 +41,12 @@ function outcome(patch: Partial<AttemptOutcome> & { lock: AttemptOutcome['lock']
 describe('rank — the only currency there is (D-091)', () => {
   it('is measured against the lock par, scaled by the assist level', () => {
     const def = lock('kestrel-pro-cylinder')
-    // Easy is 1.0, so the raw par applies.
-    expect(rankEarned(def.par * 0.3, def.par, 'easy')).toBe(0)
-    expect(rankEarned(def.par, def.par, 'easy')).toBe(3)
-    // Hard buys 2.5x the clock, so the same run ranks better.
-    expect(rankEarned(def.par, def.par, 'hard')).toBe(0)
-    // Training shows everything and is held to a tighter clock.
+    // Normal is 1.0, so the raw par applies.
+    expect(rankEarned(def.par * 0.3, def.par, 'normal')).toBe(0)
+    expect(rankEarned(def.par, def.par, 'normal')).toBe(3)
+    // Training shows everything and is held to a tighter clock (0.6x), so the same run ranks worse.
     expect(rankEarned(def.par * 0.5, def.par, 'training')).toBeGreaterThan(
-      rankEarned(def.par * 0.5, def.par, 'easy'),
+      rankEarned(def.par * 0.5, def.par, 'normal'),
     )
   })
 
@@ -223,7 +221,7 @@ describe('records and credits', () => {
     const storage = new MemoryStorage()
     const first = Progress.fresh(storage)
     first.completeAttempt(outcome({ lock: lock('brasswell-no1-luggage'), seconds: 20, oversets: 0 }))
-    first.updateSettings({ assist: 'medium' })
+    first.updateSettings({ assist: 'normal' })
 
     const second = new Progress(storage)
     expect(second.data).toEqual(first.data)

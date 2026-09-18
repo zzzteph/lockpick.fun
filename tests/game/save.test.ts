@@ -179,7 +179,7 @@ describe('export and import', () => {
     data.achievements.push('first-blood', 'push-through')
     data.tutorial.push('tension-and-lift')
     data.playDays['2026-07-29'] = 3
-    data.settings.assist = 'medium'
+    data.settings.assist = 'normal'
     data.settings.sensitivity = 1.15
     return data
   }

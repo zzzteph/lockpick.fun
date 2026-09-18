@@ -32,9 +32,7 @@ import {
 /** What the chosen assist multiplies the banked score by — the 10/50/100/250 table's heirs. */
 export const DUNGEON_DIFFICULTY_FACTOR: Record<AssistMode, number> = {
   training: 0.1,
-  easy: 0.5,
-  medium: 1,
-  hard: 2.5,
+  normal: 0.5,
 }
 
 /**

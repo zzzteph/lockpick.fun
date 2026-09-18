@@ -660,8 +660,9 @@ export function drawMenu(c: ShellContext): void {
   }
   // First of the entries, by the owner's word ("must be on very first on the menu") — the run
   // mode is the game's headline act, and the row order says so. Display name "Lock dungeon" is
-  // also the owner's; the code keeps `gauntlet` as the internal id, the same arrangement as
-  // blind-faith wearing "Hard Won" (D-046's lesson is about what the player reads). D-165.
+  // also the owner's; the code keeps `gauntlet` as the internal id — a display name and an
+  // internal id are allowed to diverge, because what the player reads is the one that matters
+  // (D-046's lesson). D-165.
   if (button(vp, p, ui, entry(0), 'Lock dungeon')) actions.goto('gauntlet')
   // Beside the dungeon, deliberately: the two run modes share a row on a phone, so "the ways
   // to play that are not the bench" read as one shelf. Display name "Lock blitz" is the
@@ -920,6 +921,28 @@ const BENCH_CARD_H = 250
  * sentinel in `benchTier`.
  */
 const WHEELS_SHELF = 0
+/**
+ * The pick-gun shelf — a bench section like `WHEELS_SHELF`, but a TECHNIQUE rather than a family:
+ * the same pin-tumbler locks, played with the snap gun (strike the pins, a few lucky bumps open
+ * it) instead of the pick. A negative sentinel, so it never collides with a real tier (1–4) or the
+ * wheels shelf (0). Starting a lock from here puts the gun in hand for that attempt. Owner: "add
+ * the pick gun to the game as a tool, but only on the bench as an option, like the wheels section."
+ */
+export const GUN_SHELF = -1
+/**
+ * The pick gun's six locks — D-217. Exactly six, and every one all-standard pins: the gun only
+ * catches standard drivers (security pins ride the strike back down, by design), so a shelf that
+ * offered a spooled or serrated lock would offer a lock the tool cannot open. Ordered by pin
+ * count (2·3·4·4·5·5) so the shelf reads as a difficulty run. Owner: "only 6 locks."
+ */
+export const GUN_LOCKS: readonly string[] = [
+  'clear-practice-cutaway',
+  'brasswell-no1-luggage',
+  'brasswell-bike-padlock',
+  'northgate-shed-padlock',
+  'northgate-5-pin-cabinet',
+  'kestrel-door-cylinder',
+]
 /** Bench card height on a phone: two columns and three rows have to fit above the status line. */
 const COMPACT_CARD_H = 210
 
@@ -1273,7 +1296,8 @@ export function drawBench(c: ShellContext): void {
   // where they left off, and it saves a click on every visit for everybody past the first hour.
   const fallback = openTiers[openTiers.length - 1] ?? tiers[0] ?? 1
   const tier =
-    c.benchTier !== undefined && (tiers.includes(c.benchTier) || c.benchTier === WHEELS_SHELF)
+    c.benchTier !== undefined &&
+    (tiers.includes(c.benchTier) || c.benchTier === WHEELS_SHELF || c.benchTier === GUN_SHELF)
       ? c.benchTier
       : fallback
   /*
@@ -1304,9 +1328,30 @@ export function drawBench(c: ShellContext): void {
    * seven-CSS-pixel type.
    */
   const tierSize = typeFor(vp, TYPE.body)
-  const tierBox = boxForCaption(vp, 'tier 4', tierSize, { w: 96, h: 40 })
   const tierGap = isCompact(vp) ? 14 : 12
   const tierLeft = isCompact(vp) ? BENCH_LEFT : BENCH_LEFT + 90
+  const inspectBox = boxForCaption(vp, 'Inspecting', tierSize, { w: 190, h: 40 })
+  const inspectX = LOGICAL_WIDTH - MARGIN - 28 - inspectBox.w
+  /*
+   * The strip's captions, longest that fits — DECISIONS D-223. With the pick-gun shelf (D-217) the
+   * row ran into Inspect on the two smallest phones ("PICK GUN" over "INSPECT"). So it shortens
+   * before it collides: the shelves to `combo` / `gun` first, then the tiers to their bare numbers.
+   */
+  const captionSets = [
+    { tier: (t: number) => `tier ${t}`, widest: 'tier 4', wheels: 'combination', gun: 'pick gun' },
+    { tier: (t: number) => `tier ${t}`, widest: 'tier 4', wheels: 'combo', gun: 'gun' },
+    { tier: (t: number) => `${t}`, widest: '4', wheels: 'combo', gun: 'gun' },
+  ]
+  const measure = (c: (typeof captionSets)[number]) => {
+    const tierBox = boxForCaption(vp, c.widest, tierSize, { w: c.widest.length > 1 ? 96 : 56, h: 40 })
+    const wheelsBox = boxForCaption(vp, c.wheels, tierSize, { w: c.wheels.length > 5 ? 200 : 96, h: 40 })
+    const gunBox = boxForCaption(vp, c.gun, tierSize, { w: c.gun.length > 3 ? 120 : 72, h: 40 })
+    const end = tierLeft + tiers.length * (tierBox.w + tierGap) + wheelsBox.w + tierGap + gunBox.w
+    return { c, tierBox, wheelsBox, gunBox, end }
+  }
+  const fitted =
+    captionSets.map(measure).find((m) => m.end + tierGap <= inspectX) ?? measure(captionSets[captionSets.length - 1]!)
+  const { tierBox } = fitted
   tiers.forEach((t, i) => {
     const open = taughtBasics && progress.isTierUnlocked(t)
     const rect: Rect = {
@@ -1315,7 +1360,7 @@ export function drawBench(c: ShellContext): void {
       w: tierBox.w,
       h: tierBox.h,
     }
-    if (button(vp, p, ui, rect, `tier ${t}`, { primary: t === tier })) actions.benchTier(t)
+    if (button(vp, p, ui, rect, fitted.c.tier(t), { primary: t === tier })) actions.benchTier(t)
     /*
      * The per-tier "locked" captions go on a phone — DECISIONS D-134.
      *
@@ -1334,18 +1379,24 @@ export function drawBench(c: ShellContext): void {
       })
     }
   })
-  // The wheels shelf, at the end of the strip: the second family's own page (D-167). The button
+  // The combination shelf, at the end of the strip: the second family's own page (D-167). Named
+  // "combination" not "wheels" at the owner's word (D-221) — "wheels" is the part, the family is
+  // the lock; "code" was the other option but it collides with the share-code feature. The button
   // reads open once the basics are taught — the cards inside gate themselves by their own tier.
   {
-    const wheelsBox = boxForCaption(vp, 'wheels', tierSize, { w: 96, h: 40 })
     const rect: Rect = {
       x: tierLeft + tiers.length * (tierBox.w + tierGap),
       y: y - 22,
-      w: wheelsBox.w,
+      w: fitted.wheelsBox.w,
       h: tierBox.h,
     }
-    if (button(vp, p, ui, rect, 'wheels', { primary: tier === WHEELS_SHELF })) {
+    if (button(vp, p, ui, rect, fitted.c.wheels, { primary: tier === WHEELS_SHELF })) {
       actions.benchTier(WHEELS_SHELF)
+    }
+    // The pick-gun shelf, right after wheels: the same pin locks, played with the snap gun.
+    const gunRect: Rect = { x: rect.x + rect.w + tierGap, y: rect.y, w: fitted.gunBox.w, h: tierBox.h }
+    if (button(vp, p, ui, gunRect, fitted.c.gun, { primary: tier === GUN_SHELF })) {
+      actions.benchTier(GUN_SHELF)
     }
   }
   /**
@@ -1360,14 +1411,13 @@ export function drawBench(c: ShellContext): void {
    * put it straight through the third lesson card. Beside the tier buttons it sits with the other
    * control that changes what this screen is showing. See DECISIONS D-103.
    */
-  const inspectBox = boxForCaption(vp, 'Inspecting', tierSize, { w: 190, h: 40 })
   if (
     button(
       vp,
       p,
       ui,
       {
-        x: LOGICAL_WIDTH - MARGIN - 28 - inspectBox.w,
+        x: inspectX,
         y: y - 22,
         w: inspectBox.w,
         h: Math.max(inspectBox.h, tierBox.h),
@@ -1389,10 +1439,16 @@ export function drawBench(c: ShellContext): void {
     // The wheels shelf mixes tiers, so its page is open once the basics are taught and each
     // card gates itself by its own tier below (D-167).
     const onShelf = tier === WHEELS_SHELF
-    const unlocked = taughtBasics && (onShelf || progress.isTierUnlocked(tier))
+    const onGun = tier === GUN_SHELF
+    const unlocked = taughtBasics && (onShelf || onGun || progress.isTierUnlocked(tier))
     const locks = onShelf
       ? ALL_LOCKS.filter((d) => d.family === 'combination')
-      : ALL_LOCKS.filter((d) => d.tier === tier && d.family !== 'combination')
+      : onGun
+        ? // The gun shelf: the six curated all-standard locks, in list order (D-217).
+          GUN_LOCKS.map((slug) => ALL_LOCKS.find((d) => d.slug === slug)).filter(
+            (d): d is LockDef => d !== undefined,
+          )
+        : ALL_LOCKS.filter((d) => d.tier === tier && d.family !== 'combination')
     if (!unlocked) {
       /*
        * On a phone this line and the "tier N — M locks, after the first lesson" note under it were
@@ -1466,6 +1522,11 @@ export function drawBench(c: ShellContext): void {
           })
         }
         const record = progress.record(def.slug)
+        // The gun bench keeps its own ledger (D-217): a bump is not a pick, so a gun card never
+        // reads the roster's "opened" record — that was the "marked as opened before" bug — and
+        // it carries no rank letter, because a bump earns no rank.
+        const gunOpens = onGun ? progress.gunOpens(def.slug) : 0
+        const showRank = !onGun && record.opens > 0
         const readable = readableAccents(p)
 
         /**
@@ -1481,7 +1542,7 @@ export function drawBench(c: ShellContext): void {
          * label on a box, so the box wins — the alternative is truncating it, and half a lock name
          * is worse than a slightly smaller whole one.
          */
-        const nameRoom = rect.w - (record.opens > 0 ? 110 : 44)
+        const nameRoom = rect.w - (showRank ? 110 : 44)
         // …and capped by the card's *height* too. At the compact scale a heading is 42px in a
         // 210px card, which crowds the glyph and the record line into each other even when it fits
         // across (D-128).
@@ -1526,7 +1587,20 @@ export function drawBench(c: ShellContext): void {
           })
         })
 
-        if (record.opens > 0) {
+        if (onGun) {
+          // The gun card's whole status: how many times this lock has been bumped, or an
+          // invitation to try. No rank, no best time — a bump is timed by luck, not skill.
+          text(
+            ctx,
+            gunOpens > 0 ? `bumped ${gunOpens}x` : 'not yet bumped',
+            rect.x + 22,
+            rect.y + rect.h - 20,
+            {
+              font: font(typeFor(vp, TYPE.body)),
+              color: gunOpens > 0 ? readable.teal : p.inkLight,
+            },
+          )
+        } else if (record.opens > 0) {
           text(
             ctx,
             `opened ${record.opens}x  ·  best ${record.bestTime?.toFixed(1) ?? '—'}s`,
@@ -2086,7 +2160,7 @@ export function drawSettings(c: ShellContext): void {
   // to its right, and at 580 every blurb wrapped to two lines whose descenders touched the label
   // underneath (D-103).
   // The blurb goes on a phone: it is two lines of prose across 1100px, and the right-hand 880 of
-  // that is now the switch column. The four mode names are the choice; the prose explains it.
+  // that is now the switch column. The two mode names are the choice; the prose explains it.
   // 76, not 70: at 70 the blurb's ascenders came within 3px of the control's bottom edge, which
   // is a graze, not a gap — the crowding rule (D-156) asks for six.
   if (!compact)
@@ -2372,7 +2446,7 @@ export function drawPause(c: ShellContext): void {
 // ── The Lock streak (D-205) ──────────────────────────────────────────────────────────────
 
 /** The four difficulties, briefing order — the same ladder the dungeon's briefing offers. */
-const STREAK_DIFFICULTIES = ['training', 'easy', 'medium', 'hard'] as const
+const STREAK_DIFFICULTIES = ['training', 'normal'] as const
 
 /**
  * The final score, stamped big — the results screen's letter language doing scoreboard duty.
@@ -2653,7 +2727,7 @@ export function drawStreak(c: ShellContext): void {
 // ── The Gauntlet (D-165) ────────────────────────────────────────────────────────────────
 
 /** The four difficulties, briefing order — the same ladder Settings offers, reused verbatim. */
-const GAUNTLET_DIFFICULTIES = ['training', 'easy', 'medium', 'hard'] as const
+const GAUNTLET_DIFFICULTIES = ['training', 'normal'] as const
 
 /** The guide's topic pages (D-196) — one subject each, "relaxed" by the owner's word. */
 export const GUIDE_PAGE_COUNT = 4

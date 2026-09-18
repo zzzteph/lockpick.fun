@@ -196,6 +196,15 @@ export interface SaveData {
    * *finished* runs write here: the run itself is never persisted, so there is no resume.
    */
   streakBest: Partial<Record<AssistMode, StreakScore>>
+  /**
+   * How many times each lock has been *bumped* open with the pick gun, by slug — D-217.
+   *
+   * A separate ledger from `records`, on purpose: a bump is not a pick, it earns no rank and
+   * feeds no tier curve, and the gun bench must never read a lock as "opened before" just
+   * because it was picked on the roster. This counts gun opens and nothing else. Additive:
+   * absent on an older save, it normalises to empty below with no version step.
+   */
+  gunOpens: Record<string, number>
 }
 
 export function newSave(): SaveData {
@@ -209,6 +218,7 @@ export function newSave(): SaveData {
     customLocks: [],
     gauntletBest: {},
     streakBest: {},
+    gunOpens: {},
     // Any odd 32-bit value; the mixer below does the work of spreading it.
     lockSalt: (Math.floor(Math.random() * 0xffffffff) | 1) >>> 0,
   }
@@ -312,11 +322,15 @@ export const MIGRATIONS: Record<number, Migration> = {
    * the default and silently move the player up or down the ladder.
    */
   2: (old) => {
+    // D-046's four names, folded straight onto the two rungs D-218 left: guided was Training;
+    // standard/expert/blind were the three the cut removed, and all land on Normal. The final
+    // normaliser below catches the intermediate `easy|medium|hard` names too, from any save
+    // written between the two decisions.
     const RENAMED: Record<string, string> = {
       guided: 'training',
-      standard: 'easy',
-      expert: 'medium',
-      blind: 'hard',
+      standard: 'normal',
+      expert: 'normal',
+      blind: 'normal',
     }
     const settings = isRecord(old['settings']) ? { ...old['settings'] } : {}
     const was = settings['assist']
@@ -348,6 +362,19 @@ export class SaveError extends Error {
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/**
+ * Fold any assist name a save has ever carried onto the two rungs D-218 left.
+ *
+ * `training` survives; `easy`, `medium` and `hard` (and any garbage) all become `normal`, which is
+ * the honest landing for every removed rung — the picture stays, the colour goes. Returns null for
+ * a value that names nothing, so a caller can drop a dead score key rather than inventing one.
+ */
+function normalizeAssist(v: unknown): AssistMode | null {
+  if (v === 'training') return 'training'
+  if (v === 'normal' || v === 'easy' || v === 'medium' || v === 'hard') return 'normal'
+  return null
 }
 
 /** A best run is a non-negative score and open count, or it is nothing. */
@@ -414,6 +441,12 @@ export function migrate(raw: unknown): SaveData {
     settings: {
       ...DEFAULT_SETTINGS,
       ...(isRecord(data['settings']) ? (data['settings'] as Partial<SettingsData>) : {}),
+      // The assist rung is folded onto the two D-218 kept, from any save the migrations did not
+      // already normalise (a settings blob carrying a stray `easy|medium|hard`): a name that means
+      // nothing falls back to the default rather than dropping the player onto a level that is gone.
+      assist:
+        (isRecord(data['settings']) ? normalizeAssist(data['settings']['assist']) : null) ??
+        DEFAULT_SETTINGS.assist,
     },
     tutorial: Array.isArray(data['tutorial']) ? data['tutorial'].map(String) : [],
     playDays: isRecord(data['playDays'])
@@ -428,9 +461,13 @@ export function migrate(raw: unknown): SaveData {
     // Non-numeric entries are dropped rather than trusted — a best is a number or it is nothing.
     gauntletBest: isRecord(data['gauntletBest'])
       ? Object.fromEntries(
-          Object.entries(data['gauntletBest']).filter(
-            ([, v]) => typeof v === 'number' && Number.isFinite(v) && v >= 0,
-          ),
+          Object.entries(data['gauntletBest'])
+            .filter(([, v]) => typeof v === 'number' && Number.isFinite(v) && v >= 0)
+            // Fold the score's rung onto the two D-218 kept (D-218): an `easy` best becomes a
+            // `normal` best, `medium`/`hard` bests land there too, and a key that names nothing is
+            // dropped. A best is a number to beat, so collapsing two onto one is no loss worth guarding.
+            .map(([k, v]) => [normalizeAssist(k), v] as const)
+            .filter((e): e is readonly [AssistMode, number] => e[0] !== null),
         )
       : {},
     // The blitz bests arrive by the same road every new field has (D-205): absent — including
@@ -439,8 +476,20 @@ export function migrate(raw: unknown): SaveData {
     streakBest: isRecord(data['streakBest'])
       ? Object.fromEntries(
           Object.entries(data['streakBest'])
-            .map(([k, v]) => [k, coerceStreakScore(v)] as const)
-            .filter((e): e is readonly [string, StreakScore] => e[1] !== null),
+            // Same rung-folding as the gauntlet bests (D-218): key onto the two kept, drop a name
+            // that means nothing.
+            .map(([k, v]) => [normalizeAssist(k), coerceStreakScore(v)] as const)
+            .filter((e): e is readonly [AssistMode, StreakScore] => e[0] !== null && e[1] !== null),
+        )
+      : {},
+    // The gun ledger (D-217) arrives by the same road: absent on any save older than the pick
+    // gun, it starts empty. Only finite, non-negative counts survive — a bump tally is a count
+    // or it is nothing.
+    gunOpens: isRecord(data['gunOpens'])
+      ? Object.fromEntries(
+          Object.entries(data['gunOpens'])
+            .map(([k, v]) => [k, Number(v)] as const)
+            .filter(([, v]) => Number.isFinite(v) && v > 0),
         )
       : {},
     // A save from before D-073 has no salt; give it one rather than defaulting everybody to the

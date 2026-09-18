@@ -12,6 +12,7 @@ import {
   scriptPin,
   setInput,
   setManual,
+  solverOpen,
   stepTicks,
 } from './harness'
 
@@ -51,6 +52,7 @@ async function focusState(
 
 /** Work every binding chamber to the middle of its window until the lock opens. */
 async function openIt(page: Page, tension = 0.45, rounds = 40): Promise<void> {
+  if ((await solverOpen(page)) !== null) return
   await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: tension })
   await stepTicks(page, 60)
   for (let i = 0; i < rounds; i += 1) {
@@ -154,18 +156,18 @@ test('a lesson teaches with one line at a time, driven by what the player does',
 // ── Assist modes ────────────────────────────────────────────────────────────────────────
 
 /**
- * The assist ladder buys **time**, not money (D-091).
+ * The assist ladder buys **time**, not money (D-091), and it is two rungs now (D-218).
  *
- * It used to assert credit multipliers of 0.6 / 1.0 / 1.5 / 2.5. The same four numbers now scale
- * the par a rank is measured against, so the assertion is the same shape with the sign flipped:
- * a *lower* rank index is better, and a harder mode should never rank the same run worse.
+ * It used to assert credit multipliers across four modes. Two survive: Training is held to a
+ * tighter clock (0.6× par) than Normal (1.0×), so the *same* run can never rank better on Training
+ * than on Normal — a lower rank index is better, and Training's index is never below Normal's.
  */
-test('all four assist modes work, and a harder one is never ranked worse', async ({ page }) => {
+test('both assist modes work, and Training is never ranked better than Normal', async ({ page }) => {
   const watcher = await bootGame(page, { frames: 3 })
   await setManual(page, true)
 
   const ranks: Record<string, number> = {}
-  for (const mode of ['training', 'easy', 'medium', 'hard'] as const) {
+  for (const mode of ['training', 'normal'] as const) {
     await settings(page, { assist: mode })
     // A fresh save each time, so every run is judged on its own and nothing is a carried-over best.
     const save = await page.evaluate(() => globalThis.__shearline?.getSave())
@@ -182,25 +184,23 @@ test('all four assist modes work, and a harder one is never ranked worse', async
     ranks[mode] = after?.records['clear-practice-cutaway']?.bestRank ?? 9
   }
 
-  // Lower index = better rank. Training is held to a tighter clock than Easy; Medium and Hard get
-  // progressively more of it, so neither can come out *worse* than the mode below it.
-  expect(ranks['training'] ?? 9).toBeGreaterThanOrEqual(ranks['easy'] ?? 9)
-  expect(ranks['medium'] ?? 9).toBeLessThanOrEqual(ranks['easy'] ?? 9)
-  expect(ranks['hard'] ?? 9).toBeLessThanOrEqual(ranks['medium'] ?? 9)
+  // Lower index = better rank. Training is held to the tighter clock, so it can never rank the
+  // same run *better* than Normal does.
+  expect(ranks['training'] ?? 9).toBeGreaterThanOrEqual(ranks['normal'] ?? 9)
   watcher.assertClean()
 })
 
-test('blind mode is completable with the sound off, on the meter and subtitles', async ({
+test('normal mode is completable with the sound off, on the meter and subtitles', async ({
   page,
 }) => {
   const watcher = await bootGame(page, { frames: 3 })
   await setManual(page, true)
-  await settings(page, { assist: 'hard', muted: true, subtitles: true })
+  await settings(page, { assist: 'normal', muted: true, subtitles: true })
   await loadLock(page, PRACTICE, 5)
 
   await openIt(page)
   const state = await getState(page)
-  expect(state.opened, 'blind has to be beatable, or the mode is a joke').toBe(true)
+  expect(state.opened, 'normal has to be beatable, or the mode is a joke').toBe(true)
 
   // The subtitle track carried the information the sound would have.
   const captions = await page.evaluate(() => globalThis.__shearline?.subtitles() ?? [])
@@ -335,10 +335,10 @@ test('@screenshot phase-12 guided mode', async ({ page }) => {
   watcher.assertClean()
 })
 
-test('@screenshot phase-12 blind mode', async ({ page }) => {
+test('@screenshot phase-12 normal mode', async ({ page }) => {
   const watcher = await bootGame(page, { frames: 3 })
   await setManual(page, true)
-  await settings(page, { assist: 'hard', subtitles: true })
+  await settings(page, { assist: 'normal', subtitles: true })
   await loadLock(page, SPOOL_TRAINER, 3)
   await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: 0.42 })
   await stepTicks(page, 60)

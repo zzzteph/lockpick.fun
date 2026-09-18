@@ -191,7 +191,7 @@ const SCREENS: { name: string; arrange: (page: Page) => Promise<void> }[] = [
     // The key-or-pick choice over a live crawl (D-177).
     name: 'gauntlet-unlock',
     arrange: async (p) => {
-      await p.evaluate(() => globalThis.__shearline!.startDungeonRun(4242, 'easy'))
+      await p.evaluate(() => globalThis.__shearline!.startDungeonRun(4242, 'normal'))
       await p.evaluate(() => globalThis.__shearline!.dungeonForceUnlock())
       await renderOnce(p)
     },
@@ -199,7 +199,7 @@ const SCREENS: { name: string; arrange: (page: Page) => Promise<void> }[] = [
   {
     name: 'gauntlet-crawl',
     arrange: async (p) => {
-      await p.evaluate(() => globalThis.__shearline!.startDungeonRun(4242, 'easy'))
+      await p.evaluate(() => globalThis.__shearline!.startDungeonRun(4242, 'normal'))
       await p.evaluate(() => {
         const h = globalThis.__shearline!
         // Frozen and hand-clocked: strides are cadence-gated in real time (D-180), so
@@ -229,9 +229,7 @@ const SCREENS: { name: string; arrange: (page: Page) => Promise<void> }[] = [
           ...h.getSave(),
           streakBest: {
             training: { score: 999, opens: 333 },
-            easy: { score: 128, opens: 51 },
-            medium: { score: 64, opens: 25 },
-            hard: { score: 12, opens: 4 },
+            normal: { score: 128, opens: 51 },
           },
         })
       })

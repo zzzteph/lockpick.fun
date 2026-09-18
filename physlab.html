@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PHYSLAB — the bench</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #14171A;
+        overflow: hidden;
+        font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      #stage {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+        cursor: crosshair;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="stage"></canvas>
+    <script type="module" src="/src/physlab/main.ts"></script>
+  </body>
+</html>

@@ -40,15 +40,15 @@ describe('the scoring', () => {
 
   it('banks a finished run per difficulty, keeping the better one', () => {
     const p = Progress.fresh(new MemoryStorage())
-    expect(p.noteStreakRun('easy', { score: 9, opens: 5 })).toBe(true)
-    expect(p.data.streakBest['easy']).toEqual({ score: 9, opens: 5 })
+    expect(p.noteStreakRun('normal', { score: 9, opens: 5 })).toBe(true)
+    expect(p.data.streakBest['normal']).toEqual({ score: 9, opens: 5 })
     // A worse run leaves the board alone.
-    expect(p.noteStreakRun('easy', { score: 7, opens: 7 })).toBe(false)
-    expect(p.data.streakBest['easy']).toEqual({ score: 9, opens: 5 })
+    expect(p.noteStreakRun('normal', { score: 7, opens: 7 })).toBe(false)
+    expect(p.data.streakBest['normal']).toEqual({ score: 9, opens: 5 })
     // Difficulties keep separate boards.
-    expect(p.noteStreakRun('hard', { score: 3, opens: 1 })).toBe(true)
-    expect(p.data.streakBest['easy']).toEqual({ score: 9, opens: 5 })
-    expect(p.data.streakBest['hard']).toEqual({ score: 3, opens: 1 })
+    expect(p.noteStreakRun('training', { score: 3, opens: 1 })).toBe(true)
+    expect(p.data.streakBest['normal']).toEqual({ score: 9, opens: 5 })
+    expect(p.data.streakBest['training']).toEqual({ score: 3, opens: 1 })
   })
 
   it('prints the clock as m:ss, floored at zero', () => {
@@ -69,23 +69,28 @@ describe('the save', () => {
     expect('streak' in migrated).toBe(false)
   })
 
-  it('round-trips the bests and refuses half-remembered ones', () => {
+  it('round-trips the bests, folds the old rungs onto Normal, and refuses half-remembered ones', () => {
     const s = newSave()
-    s.streakBest = { easy: { score: 21, opens: 9 }, hard: { score: 4, opens: 1 } }
+    s.streakBest = { training: { score: 21, opens: 9 }, normal: { score: 4, opens: 1 } }
     const back = migrate(JSON.parse(JSON.stringify(s)))
     expect(back.streakBest).toEqual(s.streakBest)
+
+    // A pre-D-218 save's `easy` best is Normal now; `training` is left where it is.
+    const folded = migrate({
+      ...JSON.parse(JSON.stringify(newSave())),
+      streakBest: { easy: { score: 17, opens: 6 } },
+    })
+    expect(folded.streakBest['normal']).toEqual({ score: 17, opens: 6 })
 
     const mangled = migrate({
       ...JSON.parse(JSON.stringify(newSave())),
       streakBest: {
-        easy: { score: 21.9, opens: 9.2 },
-        medium: { score: -3, opens: 1 },
-        hard: { score: 'lots', opens: 1 },
+        training: { score: 21.9, opens: 9.2 },
+        normal: { score: 'lots', opens: 1 },
       },
     })
-    expect(mangled.streakBest['easy']).toEqual({ score: 21, opens: 9 })
-    expect(mangled.streakBest['medium']).toBeUndefined()
-    expect(mangled.streakBest['hard']).toBeUndefined()
+    expect(mangled.streakBest['training']).toEqual({ score: 21, opens: 9 })
+    expect(mangled.streakBest['normal']).toBeUndefined()
   })
 })
 

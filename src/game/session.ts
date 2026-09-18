@@ -19,14 +19,28 @@ import {
   type SimInput,
   type SimState,
 } from '../sim'
+import { createSolverStepper, solverCanRun, type Stepper } from './solverStepper'
+import type { Engine } from '../physics/engine'
 
 /** Never simulate more than this much real time in one frame, or a stall becomes a spiral. */
 const MAX_CATCHUP_SECONDS = 0.25
+
+/**
+ * What steps the state. The 2.5D contact solver (`src/physics`, `'solver'`) is the game's
+ * physics for every lock it has bodies for — the pin tumblers; the 1-D rate sim (`src/sim`,
+ * `'rate'`) steps the rest (wheel packs) and is what a test asks for by name. Same `SimState`,
+ * same events, same input; the renderer and the game logic cannot tell them apart.
+ * Owner, 2026-09-17: "I do not want to have a physics switch — just embed the new thing
+ * everywhere." See docs/SOLVER_PORT.md.
+ */
+export type Physics = 'rate' | 'solver'
 
 export class Session {
   state: SimState
   /** An interpolated copy for rendering. Never step this. */
   readonly view: SimState
+  /** The solver behind `state` when `physics` is `'solver'`; the rate sim steps `state` directly otherwise. */
+  private solver: Stepper | null = null
 
   private accumulator = 0
   private prevTheta = 0
@@ -49,18 +63,32 @@ export class Session {
     readonly def: LockDef,
     public seed: number,
     private config: SimConfig,
+    readonly physics: Physics = 'solver',
   ) {
-    this.state = createSimState(def, seed, config)
+    this.state = this.fresh(seed)
     this.view = cloneSimState(this.state)
     this.prevLifts = this.state.chambers.map((c) => c.lift)
     this.prevKeyLifts = this.state.chambers.map((c) => c.keyLift)
     this.prevCounter = this.state.chambers.map(() => 0)
   }
 
+  /**
+   * A new state for `seed`: the rate sim's own, or the solver's `SimState` with the solver
+   * standing behind it (`solverCanRun` decides; a lock the solver has no bodies for falls back).
+   */
+  private fresh(seed: number): SimState {
+    if (this.physics === 'solver' && solverCanRun(this.def)) {
+      this.solver = createSolverStepper(this.def, seed, this.config)
+      return this.solver.state
+    }
+    this.solver = null
+    return createSimState(this.def, seed, this.config)
+  }
+
   /** Restart this lock with a fresh tolerance seed (the `R` key). */
   restart(seed: number = this.seed + 1): void {
     this.seed = seed
-    this.state = createSimState(this.def, seed, this.config)
+    this.state = this.fresh(seed)
     this.accumulator = 0
     this.prevTheta = 0
     this.prevLifts = this.state.chambers.map((c) => c.lift)
@@ -79,12 +107,18 @@ export class Session {
     let ran = 0
     while (this.accumulator >= DT) {
       this.captureprev()
-      step(this.state, input, DT)
+      if (this.solver) this.solver.step(input, DT)
+      else step(this.state, input, DT)
       this.accumulator -= DT
       ran += 1
     }
     if (ran === 0) return []
     return drainEvents(this.state)
+  }
+
+  /** The contact solver behind this attempt, or null on a lock the rate sim steps. */
+  get engine(): Engine | null {
+    return this.solver ? this.solver.engine : null
   }
 
   /** Fraction of a tick elapsed since the last step, for interpolation. */

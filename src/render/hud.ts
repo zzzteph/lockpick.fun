@@ -174,6 +174,12 @@ export interface HudOptions {
    * than re-derived, because the layout knows about rows and mirroring and a guess does not.
    */
   readonly assemblyLeft?: number
+  /**
+   * Where the plug opens, rad, when it is not the rate sim's `THETA_OPEN`: the contact solver
+   * opens a pin lock at 1–2° and says where (`Engine.openAngle`). The bar spans it, the notch
+   * sits on it, and "past the notch it opens" stays true.
+   */
+  readonly plugOpen?: number
   /** What to press to start over once the pick has snapped — differs by input scheme. */
   readonly restartHint: string
   /**
@@ -1059,7 +1065,8 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
       size: ts(TYPE.dimension),
       color: turningBack ? readableAccents(p).crimson : p.inkLight,
     })
-    const turned = clamp01(state.theta / THETA_OPEN)
+    const open = opts.plugOpen ?? THETA_OPEN
+    const turned = clamp01(state.theta / (open / OPEN_THETA_FRACTION))
     meter(vp, p, plugX, footerY + FOOTER_PAD + 14, plugW, turned, turningBack ? readableAccents(p).crimson : p.ink, {
       height: BAR_H,
     })
@@ -1169,6 +1176,15 @@ export function drawHud(vp: Viewport, p: Palette, state: SimState, opts: HudOpti
  * gone it has three, so the meters that stayed got the height back rather than the page getting
  * emptier. See DECISIONS D-115.
  */
+/**
+ * The y the key legend's last row ends at, for `rows` rows — an upper bound (the legend shrinks
+ * its type to fit the gutter, which only shortens the rows). The front view sits under it.
+ */
+export function keyLegendBottom(vp: Viewport, rows: number): number {
+  const size = typeFor(vp, TYPE.body)
+  return MARGIN + HEADER_H + 52 + rows * Math.max(34, size + 14)
+}
+
 function drawKeyLegend(
   vp: Viewport,
   p: Palette,

@@ -10,7 +10,7 @@
  */
 
 import type { SaveData as SaveDataShape } from './game/save'
-import type { SimEvent, SimInput, ToolStats } from './sim'
+import type { AssistMode, SimEvent, SimInput, ToolStats } from './sim'
 
 export type { SaveDataShape }
 
@@ -219,6 +219,11 @@ export interface DevHook {
   getState(): HookState
   /** Rendered pin rectangles, for asserting the view against the sim numerically. */
   getGeometry(): HookGeometry
+  /**
+   * The solver's side view on screen, logical px — where a pin's centre is along the keyway — or
+   * null on a lock the rate sim steps (docs/SOLVER_PORT.md).
+   */
+  sideFrame(): { x0: number; x1: number; firstChamberX: number; pitch: number; sidePx: number; shearY: number } | null
   /** Client coordinates the mouse should be at to ask for this chamber and lift. */
   pointerFor(chamber: number, liftMm: number): { x: number; y: number }
   events(): SimEvent[]
@@ -336,7 +341,7 @@ export interface DevHook {
 
   // ── The Lock dungeon (docs/DUNGEON.md) ──
   /** Begin a run on a known floor — determinism is what makes the clearing e2e honest. */
-  startDungeonRun(seed: number, difficulty: 'training' | 'easy' | 'medium' | 'hard'): void
+  startDungeonRun(seed: number, difficulty: AssistMode): void
   /** Open or close the dungeon guide; `page` picks a topic page (D-196) — the sweep's road. */
   dungeonGuide(open: boolean, page?: number): void
   /** Spend a skeleton key on the lock being offered the choice. */

@@ -33,8 +33,8 @@ export const STREAK_SECONDS = 300
  *
  * A bench lock is *your* copy — same binding order every sitting (D-073) — and its par assumes
  * you can learn it. A dealt lock exists for one attempt, so the knowledge the bench par prices
- * in simply is not available. 1.5× is the assist ladder's own gap between Easy and Medium: the
- * house rate for picking blind-er than usual.
+ * in simply is not available. 1.5× is the house rate for a lock you meet cold: half again the
+ * clock a learnable copy would allow.
  */
 export const STREAK_TIME_BONUS = 1.5
 

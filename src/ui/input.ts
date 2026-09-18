@@ -15,7 +15,9 @@ import { shackleGrabRect, wheelAtPoint, type PadlockLayout } from '../render/pad
 import { chamberAtX, yToMm, type CutawayLayout } from '../render/layout'
 import { clientToLogical, type Viewport } from '../render/viewport'
 import {
+  COUNTER_PAD,
   PAUSE_PAD,
+  STRIKE_PAD,
   WITHDRAW_PAD,
   mirrorRect,
   createTouchState,
@@ -112,10 +114,37 @@ export const DEFAULT_INPUT_SETTINGS: InputSettings = {
   fineLift: false,
 }
 
+/**
+ * The solver's side view on screen — docs/SOLVER_PORT.md. x → chambers along the keyway
+ * (fractional between pins), and where "over the lock" is: the mouse moves the pick freely
+ * over it and any button held there is the wrench, the bench's scheme.
+ */
+export interface SolverFrame {
+  atForX(x: number): number
+  overLock(x: number, y: number): boolean
+}
+
+/**
+ * How far the mouse must move after an arrow snap (or a Space snap) before it takes the pick
+ * back, logical px. A snap parks the tip on a pin the mouse is not over; without a dead zone a
+ * one-pixel wobble would yank it away.
+ */
+const RETAKE_PX = 8
+/**
+ * A push goes under the nearest pin: within this many chambers of a centre the tip snaps to it
+ * on Space (1.5 mm of the solver's 4.2 mm pitch), because a hook on a cone's slope lifts nothing
+ * useful and the eye cannot judge a millimetre.
+ */
+const SNAP_AT = 1.5 / 4.2
+/** Where the tip stops counting as "under pin 1" on the way out, chambers from pin 1's centre. */
+const OUT_AT = -0.5
+
 export interface InputHooks {
   onRestart?: () => void
   onPause?: () => void
   onLoadout?: () => void
+  /** The pick gun's trigger — one strike (the app decides whether the gun is in hand). */
+  onStrike?: () => void
   /**
    * A click at logical `(x, y)`, delivered **synchronously inside the pointer event**.
    *
@@ -242,6 +271,19 @@ export class InputController {
   /** Chamber the current lift drag is working, kept apart from `keyChamber` while dragging. */
   private touchChamber = -1
   private touchLift = 0
+  // ── The mouse over the solver's side view (docs/SOLVER_PORT.md) ──
+  private solverFrame: SolverFrame | null = null
+  /** True while the mouse owns the pick's position; an arrow or Space snap takes it until the mouse moves. */
+  private mouseDrives = false
+  /** Where the mouse has the tip, chambers from pin 1 (fractional); below `OUT_AT` is out of the lock. */
+  private mouseAt = -1
+  private snapPointerX = 0
+  /** A mouse button held over the lock: the wrench. */
+  private mousePressing = false
+  /** The right button on top of it: counter-rotation. */
+  private counterHeld = false
+  /** C, held: counter-rotation from the keyboard (and the Deck, through Steam Input) — D-223. */
+  private counterKeyDown = false
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -286,11 +328,17 @@ export class InputController {
       const p = clientToLogical(this.vp, e.clientX, e.clientY)
       this.pointerX = p.x
       this.pointerY = p.y
+      if (e.pointerType !== 'touch') this.mouseMove(p.x, p.y, e.buttons)
+    })
+    // No context menu on the canvas: the right button is a control (counter-rotation).
+    this.on(this.canvas, 'contextmenu', (e) => {
+      e.preventDefault()
     })
     this.on(this.canvas, 'pointerdown', (e) => {
       const p = clientToLogical(this.vp, e.clientX, e.clientY)
       this.pointerX = p.x
       this.pointerY = p.y
+      if (e.pointerType !== 'touch') this.mouseDown(p.x, p.y, e.buttons)
       // The shackle press (D-188): any pointer, mouse included. A press that lands on the
       // hook is the PULL and nothing else — it must not also grab a wheel or the wrench.
       if (this.playing && this.padlockLayout) {
@@ -309,6 +357,11 @@ export class InputController {
     })
     this.on(window, 'pointerup', (e) => {
       this.shacklePressed = false
+      if (e.pointerType !== 'touch') {
+        // Letting go of the right button alone keeps the wrench (the left is still down).
+        this.mousePressing = this.mousePressing && e.buttons !== 0
+        this.counterHeld = this.mousePressing && (e.buttons & 2) !== 0
+      }
       /**
        * A horizontal swipe pages the reference screens — DECISIONS D-131.
        *
@@ -363,10 +416,18 @@ export class InputController {
           e.preventDefault()
           this.tensionKeyDown = true
           break
+        case 'KeyC':
+          if (this.playing) this.counterKeyDown = true
+          break
         case 'Space':
-          // "Push the pick up", applied to whatever chamber the arrows have the tip on. Held, not
-          // toggled — see `tick`.
+          // The pick gun has no lift, so its bump lives on Space too (owner: "I want to bump with
+          // the space"), alongside G. Otherwise Space is "push the pick up" — held, not toggled.
           e.preventDefault()
+          if (this.gunMode) {
+            if (!e.repeat) this.hooks.onStrike?.()
+            break
+          }
+          if (!e.repeat) this.snapToNearest()
           this.spaceDown = true
           break
         case 'ArrowLeft':
@@ -418,6 +479,11 @@ export class InputController {
         case 'KeyR':
           this.hooks.onRestart?.()
           break
+        case 'KeyG':
+          // The pick gun's trigger. A tap, not a hold — one strike per press. The app ignores it
+          // unless the gun is in hand (started from the bench's gun shelf).
+          if (this.playing && !e.repeat) this.hooks.onStrike?.()
+          break
         case 'Escape':
           this.hooks.onPause?.()
           break
@@ -432,10 +498,14 @@ export class InputController {
     this.on(window, 'keyup', (e) => {
       if (e.code === 'Space') this.spaceDown = false
       if (e.code === 'KeyQ') this.tensionKeyDown = false
+      if (e.code === 'KeyC') this.counterKeyDown = false
     })
     this.on(window, 'blur', () => {
       this.spaceDown = false
       this.tensionKeyDown = false
+      this.mousePressing = false
+      this.counterHeld = false
+      this.counterKeyDown = false
     })
   }
 
@@ -456,6 +526,62 @@ export class InputController {
     this.playing = playing
     this.layout = layout
     this.padlockLayout = padlock
+    if (!playing) {
+      this.mouseDrives = false
+      this.mousePressing = false
+      this.counterHeld = false
+    }
+  }
+
+  /** The solver's side view is on screen (or not): the mouse scheme listens only while it is. */
+  setSolverFrame(frame: SolverFrame | null): void {
+    this.solverFrame = frame
+    if (!frame) {
+      this.mouseDrives = false
+      this.mousePressing = false
+      this.counterHeld = false
+    }
+  }
+
+  // ── The mouse over the lock (docs/SOLVER_PORT.md): the bench's scheme ──
+  private mouseMove(x: number, y: number, buttons: number): void {
+    const f = this.solverFrame
+    if (!f || !this.playing || this.touch.active) return
+    // A second button pressed while the first is held arrives here, not as a pointerdown.
+    this.counterHeld = this.mousePressing && (buttons & 2) !== 0
+    if (!f.overLock(x, y)) return
+    if (!this.mouseDrives && Math.abs(x - this.snapPointerX) < RETAKE_PX) return
+    this.mouseDrives = true
+    this.mouseAt = f.atForX(x)
+  }
+
+  private mouseDown(x: number, y: number, buttons: number): void {
+    const f = this.solverFrame
+    if (!f || !this.playing || this.touch.active) return
+    // Any button, held over the lock, is the wrench; the right button on top of it counter-rotates.
+    if (f.overLock(x, y)) this.mousePressing = true
+    this.counterHeld = this.mousePressing && (buttons & 2) !== 0
+  }
+
+  /** Space with the mouse driving: within `SNAP_AT` of a pin's centre the tip snaps to it. */
+  private snapToNearest(): void {
+    if (!this.mouseDrives) return
+    const nearest = Math.round(this.mouseAt)
+    if (nearest < 0 || nearest > this.chamberLimit) return
+    if (Math.abs(this.mouseAt - nearest) > SNAP_AT || this.mouseAt === nearest) return
+    this.mouseAt = nearest
+    this.keyChamber = nearest
+    this.mouseDrives = false
+    this.snapPointerX = this.pointerX
+  }
+
+  /** The chamber under x on the lock as drawn — the solver's side view when it is up, else the cutaway. */
+  private chamberAt(layout: CutawayLayout, x: number): number {
+    const f = this.solverFrame
+    if (!f) return chamberAtX(layout, x)
+    const at = f.atForX(x)
+    if (at < OUT_AT || at > this.chamberLimit + 0.5) return -1
+    return Math.max(0, Math.min(this.chamberLimit, Math.round(at)))
   }
 
   private playing = false
@@ -510,6 +636,19 @@ export class InputController {
       this.hooks.onPause?.()
       return
     }
+    // The pick gun's strike pad — a tap triggers one strike (gun mode only).
+    if (this.gunMode && inRect(mirrorRect(STRIKE_PAD, flip), x, y)) {
+      this.hooks.onStrike?.()
+      return
+    }
+    // The counter-rotation pad — hold it to ease the plug back (D-221), the desktop right button's
+    // job on touch. Picking only: in gun mode this gutter is the strike pad. Checked before the
+    // off-lock lift fallback so a hold here counter-rotates instead of starting a lift drag.
+    if (!this.gunMode && inRect(mirrorRect(COUNTER_PAD, flip), x, y)) {
+      this.touch.counterPointer = id
+      if (this.touch.wrenchPointer !== null) this.usedBothThumbs = true
+      return
+    }
     if (inRect(mirrorRect(WITHDRAW_PAD, flip), x, y)) {
       this.withdraw()
       this.touchChamber = -1
@@ -553,7 +692,7 @@ export class InputController {
     // does, so tapping along a row of pins can never shove one of them (D-051, D-059).
     const layout = this.layout
     if (!layout) return
-    const chamber = chamberAtX(layout, x)
+    const chamber = this.chamberAt(layout, x)
     /**
      * Off the lock: lift whatever is already selected — DECISIONS D-130.
      *
@@ -608,7 +747,7 @@ export class InputController {
     // deliberately does (D-138).
     const layout = this.layout
     if (layout && !this.padlockLayout) {
-      const over = chamberAtX(layout, x)
+      const over = this.chamberAt(layout, x)
       if (over >= 0 && over !== this.touchChamber) this.touchChamber = over
     }
     // A wheel WRAPS through the seam under the thumb (D-193); a pin stops at its ends.
@@ -633,6 +772,11 @@ export class InputController {
       }
       this.touch.wrenchPointer = null
       this.wrenchDragged = false
+      return
+    }
+    if (id === this.touch.counterPointer) {
+      // The counter-rotation finger lifts: the plug stops easing back (D-221).
+      this.touch.counterPointer = null
       return
     }
     if (id !== this.touch.liftPointer) return
@@ -678,6 +822,12 @@ export class InputController {
    * chamber order — and the only thing that has two directions is the arrow on the keycap.
    */
   private stepChamber(delta: number): void {
+    if (this.mouseDrives) {
+      // An arrow snaps from where the mouse has the tip; the mouse takes it back once it moves.
+      this.keyChamber = Math.max(0, Math.min(this.chamberLimit, Math.round(this.mouseAt)))
+      this.mouseDrives = false
+      this.snapPointerX = this.pointerX
+    }
     if (this.keyChamber < 0) {
       // The pick starts *out* of the lock. The first arrow press inserts it at the mouth.
       this.keyChamber = 0
@@ -787,6 +937,8 @@ export class InputController {
     this.keyChamber = -1
     this.keyLift = 0
     this.keyTrim = 0
+    this.mouseDrives = false
+    this.mouseAt = -1
   }
 
   nudgeTension(delta: number): void {
@@ -808,6 +960,8 @@ export class InputController {
    * here must also change nothing later.
    */
   wheelPack = false
+  /** The pick gun is in hand (the bench's gun shelf): a tap on the strike pad triggers a strike. */
+  gunMode = false
 
   stepTension(dir: 1 | -1): void {
     this.setTensionLevel(tensionForStep(stepForTension(this.settings.tensionLevel) + dir))
@@ -824,12 +978,23 @@ export class InputController {
       return {
         chamber: this.touchChamber,
         liftTarget: clamp(this.touchLift, 0, maxLift),
+        // The held counter pad eases the plug back (D-221) — the touch answer to the mouse's
+        // right button, which the desktop branch below reads from `counterHeld`.
+        ...(this.touch.counterPointer !== null ? { counter: true } : {}),
         ...this.hands(),
       }
     }
+    const mouse = this.mouseDrives && this.solverFrame !== null
+    const chamber = mouse
+      ? this.mouseAt >= OUT_AT
+        ? Math.max(0, Math.min(this.chamberLimit, Math.round(this.mouseAt)))
+        : -1
+      : this.keyChamber
     return {
-      chamber: this.keyChamber,
+      chamber,
       liftTarget: clamp(this.requestedLift, 0, maxLift),
+      ...(mouse ? { pickAt: this.mouseAt } : {}),
+      ...(this.counterHeld || this.counterKeyDown ? { counter: true } : {}),
       ...this.hands(),
     }
   }
@@ -946,7 +1111,8 @@ export class InputController {
       }
     }
     return {
-      tensionHeld: this.settings.tensionToggle ? this.toggled : this.tensionKeyDown,
+      // Q (or the toggle), or a mouse button held over the lock (docs/SOLVER_PORT.md).
+      tensionHeld: (this.settings.tensionToggle ? this.toggled : this.tensionKeyDown) || this.mousePressing,
       tensionLevel: this.settings.tensionLevel,
     }
   }

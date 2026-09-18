@@ -10,6 +10,7 @@ import {
   setInput,
   setManual,
   stepTicks,
+  solverOpen,
 } from './harness'
 
 /**
@@ -115,9 +116,11 @@ test('@screenshot phase-14 the open, in full', async ({ page }) => {
   // The taught hand since D-203: cruise at the default (0.4 sat under the disturbed hold bar,
   // and a fixed two-second lean after each capture walked the earlier sets off their ledges),
   // dip only onto a lying chamber, and stop pushing the moment a pin clicks.
-  await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: 0.489 })
-  await stepTicks(page, 60)
-  for (let i = 0; i < 20; i += 1) {
+  // On the solver (D-223) the game's own walk is the hand; the loop below is the rate sim's.
+  const solved = await solverOpen(page)
+  if (solved === null) await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: 0.489 })
+  if (solved === null) await stepTicks(page, 60)
+  for (let i = 0; i < 20 && solved === null; i += 1) {
     const s = await getState(page)
     if (s.opened) break
     const b = s.bindingChamber
