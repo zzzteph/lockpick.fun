@@ -194,6 +194,9 @@ describe('the solver walk — what "solve it for me" does on a solver lock', () 
       expect(failed.filter((slug) => !KNOWN_AUTOSOLVER_HARD.includes(slug))).toEqual([])
       expect(failed.length).toBeLessThanOrEqual(KNOWN_AUTOSOLVER_HARD.length)
     },
-    600_000,
+    // Thirty minutes, not ten (D-229): twenty locks walked back to back take ~2.5 min on a desk
+    // machine but 11 on GitHub's runner under `--coverage` (658 s, timed out at 600). The cap is
+    // there to catch a walk that never ends, which thirty minutes catches as well as ten (D-127).
+    1_800_000,
   )
 })
