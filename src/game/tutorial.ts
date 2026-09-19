@@ -198,7 +198,7 @@ export const LESSON_SERRATED_LOCK: LockDef = {
   toleranceQuality: 1.2,
   keyway: 'standard',
   par: 150,
-  note: 'One serrated pin, in the middle. Count the lies.',
+  note: 'One serrated pin, in the middle. It will lie to you once.',
 }
 
 /**
@@ -584,31 +584,34 @@ export const LESSONS: readonly Lesson[] = [
      */
     id: 'lesson-serrated',
     title: 'The serrated pin',
-    teaches: 'Every tooth clicks like a set, and grips the climb.',
+    // Rewritten for the solver (D-227): its serrated pin catches ONE tooth and holds it — the old
+    // "four lies on the way up" and a step that waited for a second false set could not happen, so
+    // the lesson could not be finished. It teaches what the pin does now: a tooth clicks like a set,
+    // and you ease off it and lift through.
+    teaches: 'A tooth clicks like a set. Ease off it and lift through.',
     lock: LESSON_SERRATED_LOCK,
     steps: [
       {
         id: 'start',
-        line: 'The middle pin is serrated. Work the lock and listen for clicks that lie.',
+        line: 'The middle pin is serrated. Work the lock and listen for a click that lies.',
         done: (s) => s.stats.falseSetsEntered > 0,
       },
       {
-        id: 'lie',
-        line: 'That catch is a serration on the plug edge, not the shear line. Keep going.',
-        done: (s) => s.stats.falseSetsEntered >= 2,
-        hint: 'Keep lifting the same pin, gently. Each tooth catches once on the way up.',
-        hintAfter: 10,
-      },
-      {
         id: 'grind',
-        line: 'Feel it drag — every tooth grips. Ease the wrench and the climb frees up.',
+        line: {
+          kb: 'That click was a tooth, not the line. Hold C to ease the plug, and lift it again.',
+          deck: 'That click was a tooth, not the line. Hold L4 to ease the plug, and lift it again.',
+        },
         done: (s) => s.chambers.some((c) => c.profile.grooveCount >= 3 && c.state === 'SET'),
-        hint: 'Drop to pressure 3 while you lift. The grip scales with how hard you turn.',
+        hint: {
+          kb: 'Hard turning pins the tooth. Hold C while you lift, or drop the pressure a step (W).',
+          deck: 'Hard turning pins the tooth. Hold L4 while you lift, or drop the pressure (L1).',
+        },
         hintAfter: 10,
       },
       {
         id: 'open',
-        line: 'Four lies, one truth: the real set is the one where the plug moves. Turn it.',
+        line: 'One lie, one truth: the real set is the one that stays. Turn it.',
         done: (s) => s.opened,
       },
     ],

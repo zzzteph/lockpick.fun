@@ -64,6 +64,15 @@ export const COUNTER_RATE = 0.3 * (Math.PI / 180)
 /** A dip has to be at least this much of the dial to count (a step is 0.09). */
 const DIP_MIN = 0.04
 /**
+ * How long a dip counter-rotates before the lower pressure simply becomes the wrench — D-226.
+ * Without a limit a dip never ended: the plug was carried forward only at a level with no
+ * counter, so a player who eased the pressure from 9 to 5 on purpose (the pressure lesson's own
+ * move, the spool technique) had the plug eased back for good — nothing bound again until the
+ * wrench came fully off. A second covers the dip-and-climb push; for a held counter-rotation there
+ * is the counter control itself (C, the COUNTER pad, the right button).
+ */
+const DIP_SECONDS = 1.0
+/**
  * How long the click holds the hand, s (the bench's `CLICK_PAUSE`). A hand that pushes on
  * through the click over-pushes: the key pin wedges in the housing's mouth and the pin reads
  * OVERSET (`OVER_HOLD`). Under a keyboard's ramp or a finger's drag the command runs on, so the
@@ -104,6 +113,8 @@ export function createSolverStepper(def: LockDef, seed: number, config: SimConfi
   let lastChamber = -1
   /** The dial level the plug was last carried forward at; a held level below it counter-rotates. */
   let holdLevel = 0
+  /** Seconds the current dip has counter-rotated (D-226). */
+  let dipFor = 0
   let lastTheta = 0
   let lastCounter = 0
   let tipXCmd = OUT_X
@@ -153,6 +164,13 @@ export function createSolverStepper(def: LockDef, seed: number, config: SimConfi
       const tension = held ? solverTension(level) : 0
       if (!held) holdLevel = 0
       else if (level > holdLevel) holdLevel = level
+      // A dip counter-rotates for `DIP_SECONDS`, then the eased pressure is simply the wrench.
+      const dipping = held && level < holdLevel - DIP_MIN
+      dipFor = dipping ? dipFor + dt : 0
+      if (dipFor > DIP_SECONDS) {
+        holdLevel = level
+        dipFor = 0
+      }
       // The dip, or the right button on top of the wrench (the bench's control, on a mouse).
       const counter = held && (level < holdLevel - DIP_MIN || input.counter === true) ? COUNTER_RATE : 0
 

@@ -390,7 +390,7 @@ const PINS: readonly (readonly [PinTypeName, string])[] = [
   ['spool-slim', 'A narrower waist — the same lie, with less of it to feel.'],
   ['spool-deep', 'A deep waist that bites. The plug gives a long way first.'],
   ['spool-double', 'Two waists. Push through one and it lies to you again.'],
-  ['serrated', 'Four shallow steps — four small false sets on the way up.'],
+  ['serrated', 'Shallow teeth. One catches like a set — ease off and lift through it.'],
   ['mushroom', 'A bevelled shoulder. It shoves your pick out — ease the wrench off.'],
   ['t-pin', 'A square stem. Barely pushes back, but the plug gives a long way.'],
   ['wafer', 'One flat plate. Its gate must sit level with the shear line.'],

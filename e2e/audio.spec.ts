@@ -206,9 +206,12 @@ test('playing the game schedules sounds off the event stream', async ({ page }) 
   const c = state.chambers[b]
   expect(c).toBeDefined()
   if (!c) return
+  // On the solver there is no rate-sim window to aim at: ask for the ceiling and the click stops
+  // the hand (D-226).
+  const solver = await page.evaluate(() => globalThis.__shearline!.sideFrame() !== null)
   await setInput(page, {
     chamber: b,
-    liftTarget: c.setLift + c.captureWindow / 2,
+    liftTarget: solver ? 3.5 : c.setLift + c.captureWindow / 2,
     tensionHeld: true,
     tensionLevel: 0.5,
   })

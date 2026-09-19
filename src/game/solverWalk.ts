@@ -23,6 +23,25 @@ const DT = 1 / 120
  */
 const FIRST_STEP = 5
 const LAST_STEP = 10
+/** The floor the eased push cycles down to at the top of the dial (D-225). */
+const EASE_FLOOR = 5
+/**
+ * Where each attempt starts its wrench — D-225. A lock the walk cannot finish from the default is
+ * dropped and started over from another pressure, the way a hand gives up on a going-nowhere
+ * attempt: the last four of 60 generated tier 3–4 locks each opened from some other start and from
+ * no single one. The outcome is sensitive — the contact solve warm-starts from the last frame, so a
+ * reset never replays a fresh start exactly — so the retries cycle pressures in both styles, the
+ * PATIENT one (see `walkOnce`) first. The first try is the proven default and gets the most time.
+ */
+const RETRIES: readonly { readonly step: number; readonly patient: boolean }[] = [
+  { step: FIRST_STEP, patient: false },
+  ...[4, 8, 3, 7, 6, 9, 5].flatMap((step) => [
+    { step, patient: true },
+    { step, patient: false },
+  ]),
+]
+const FIRST_TRY_SECONDS = 150
+const RETRY_SECONDS = 90
 /** The most the hand asks the tip to rise, mm (the bench's ceiling). */
 const LIFT_CEILING = 3.5
 
@@ -39,7 +58,34 @@ function input(patch: Partial<SimInput>): SimInput {
  * exactly as the frame loop would hand it to audio, haptics and the log.
  */
 export function walkSolver(session: Session, onEvents: (events: readonly SimEvent[]) => void, opts: WalkOptions = {}): boolean {
-  const budget = opts.maxSeconds ?? 180
+  const total = opts.maxSeconds ?? 1500
+  let spent = 0
+  for (let i = 0; i < RETRIES.length && spent < total && !session.state.opened; i += 1) {
+    if (i > 0) {
+      // Start over, as a hand does when a lock is going nowhere: wrench off, pick out — every pin
+      // drops — then again from a different pressure.
+      for (let t = 0; t < 0.6; t += DT) onEvents(session.advance(DT, input({})))
+      spent += 0.6
+    }
+    const cap = Math.min(total - spent, i === 0 ? FIRST_TRY_SECONDS : RETRY_SECONDS)
+    spent += walkOnce(session, onEvents, RETRIES[i]!.step, RETRIES[i]!.patient, cap)
+  }
+  return session.state.opened
+}
+
+/**
+ * One attempt from `firstStep`, within `budget` seconds. Returns the seconds it used. `patient` is
+ * the retry style (D-225): at the top of the dial a false set's push is eased too, the ease goes down
+ * to step 3, and a pin nothing binds is pushed plainly every other try — the counter's roll-back can
+ * knock the last set pin off its ledge (a tier-3 five-pin looped set 3 / lose 3 for a minute).
+ */
+function walkOnce(
+  session: Session,
+  onEvents: (events: readonly SimEvent[]) => void,
+  firstStep: number,
+  patient: boolean,
+  budget: number,
+): number {
   let spent = 0
   const advance = (inp: SimInput, secs: number): void => {
     for (let t = 0; t < secs && spent < budget && !session.state.opened; t += DT) {
@@ -48,12 +94,14 @@ export function walkSolver(session: Session, onEvents: (events: readonly SimEven
     }
   }
   const s = session.state
-  let step = FIRST_STEP
+  let step = firstStep
   let LEVEL = tensionForStep(step)
   let DIP = tensionForStep(step - 1)
   let idle = 0
   /** The eased push's step once the wrench is at the top (D-225). */
   let easeStep = LAST_STEP
+  const easeFloor = patient ? 3 : EASE_FLOOR
+  let stuckTries = 0
   // The wrench on, the pick out: the first pin binds.
   advance(input({ tensionHeld: true, tensionLevel: LEVEL }), 0.6)
   for (let pushes = 0; pushes < 12 * s.chambers.length && spent < budget && !s.opened; pushes += 1) {
@@ -75,8 +123,17 @@ export function walkSolver(session: Session, onEvents: (events: readonly SimEven
       continue
     }
     const setsBefore = s.chambers.filter((c) => c.state === 'SET').length
-    const level = falseSet >= 0 || stuck >= 0 ? DIP : step >= LAST_STEP && idle >= 2 ? tensionForStep(easeStep) : LEVEL
-    const counter = falseSet >= 0 || stuck >= 0
+    if (stuck >= 0) stuckTries += 1
+    const plainStuck = patient && stuck >= 0 && stuckTries % 2 === 0
+    const eased = step >= LAST_STEP && idle >= 2 ? tensionForStep(easeStep) : null
+    const level = plainStuck
+      ? LEVEL
+      : falseSet >= 0
+        ? ((patient ? eased : null) ?? DIP)
+        : stuck >= 0
+          ? DIP
+          : (eased ?? LEVEL)
+    const counter = falseSet >= 0 || (stuck >= 0 && !plainStuck)
     advance(input({ chamber: target, tensionHeld: true, tensionLevel: LEVEL }), 0.3)
     let lift = 0
     let latched = false
@@ -101,7 +158,7 @@ export function walkSolver(session: Session, onEvents: (events: readonly SimEven
       // with it — but each push is made a step lighter than the last, round and round (D-225): a
       // pin pinched hard under the full wrench cannot be lifted at all, and the same push eased
       // sets it (a generated tier-3 five-pin stalled at step 10 for 50 s; one eased push opened it).
-      easeStep = easeStep > FIRST_STEP ? easeStep - 1 : LAST_STEP - 1
+      easeStep = easeStep > easeFloor ? easeStep - 1 : LAST_STEP - 1
     }
   }
   // The open: the pick out, the wrench held — a step heavier each half-second the plug is held
@@ -113,5 +170,5 @@ export function walkSolver(session: Session, onEvents: (events: readonly SimEven
       LEVEL = tensionForStep(step)
     }
   }
-  return s.opened
+  return spent
 }

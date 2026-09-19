@@ -151,6 +151,8 @@ const LIFT_MIN = 0.8
  * walk), so no catalogue lock moves; a shallower cut now plays like that deepest one.
  */
 const SET_LIFT_CAP = 2.225
+/** The plug is home — back in line after the wrench came off — below this, rad (0.05°). D-225. */
+const RESET_HOME = 0.05 * (Math.PI / 180)
 /** The wrench-off return, rad/s: about 30°/s, so a fully turned plug is back in a fifth of a second. */
 const RETURN_RATE = 0.5
 /**
@@ -1285,6 +1287,16 @@ export function createEngine(def: GameLockDef, seed: number, config: SimConfig, 
     // Binding is a wrench-on word: with the wrench off the return torque pinches nothing that
     // deserves the name.
     if (sol.input.tension <= 0) eng.bindingChamber = -1
+    // A reset forgets the attempt (D-225). The bind angles and the last hold were MEASURED on the
+    // attempt the dropped wrench just ended; kept, they judged the next one — a pin read unset
+    // against its old bind angle, the open waited on the old hold — so a lock could be lost after
+    // a reset that would have opened fresh (four generated tier 3–4 locks: each opened from a new
+    // session, none after a reset). Cleared once the wrench is off and the plug is home.
+    if (sol.input.tension <= 0 && th < RESET_HOME) {
+      bindAt.fill(Number.POSITIVE_INFINITY)
+      holdAt = Number.POSITIVE_INFINITY
+      passedNow.fill(false)
+    }
     states.forEach((st, i) => {
       if (st === 'BINDING' && i !== eng.bindingChamber) states[i] = 'FREE'
     })

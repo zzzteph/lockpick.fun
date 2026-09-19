@@ -151,13 +151,7 @@ test('a cylinder is solvable with the kit the player always has', async ({ page 
       await stepTicks(page, 120)
       continue
     }
-    await setInput(page, {
-      chamber: b,
-      liftTarget: c.setLift + c.captureWindow * 0.5,
-      tensionHeld: true,
-      tensionLevel: 0.45,
-    })
-    await stepTicks(page, 240)
+    await scriptPin(page, b, c.setLift + c.captureWindow * 0.5, 0.45, 240)
   }
   expect((await getState(page)).opened).toBe(true)
   watcher.assertClean()
@@ -185,11 +179,15 @@ test('manual play checklist', async ({ page }) => {
   // That arc is the whole lesson this lock exists to teach.
   await pressureStep(page, 9)
   await page.waitForTimeout(250)
+  // The solver's dial (D-226): step 2 is under anything that turns the plug; its dip is step 5.
+  const solver = await page.evaluate(() => globalThis.__shearline!.sideFrame() !== null)
+  const DIP = solver ? 5 : 2
 
   const flex: number[] = []
   const resistance: number[] = []
   let opened = false
   let rounds = 0
+  let overRounds = 0
   const deadline = Date.now() + 40_000
   while (Date.now() < deadline && !opened) {
     const state = await getState(page)
@@ -200,7 +198,7 @@ test('manual play checklist', async ({ page }) => {
     rounds += 1
     // Stalled on a groove? Back the pressure off — the technique the lock is teaching.
     // Step 2 since D-204: the spool wall is ≈0.32 now, and step 3 is a crawl against it.
-    if (rounds === 14) await pressureStep(page, 2)
+    if (rounds === (solver ? 4 : 14)) await pressureStep(page, DIP)
 
     /**
      * Jammed a pin? Drop the wrench, take the reset, start again.
@@ -211,19 +209,29 @@ test('manual play checklist', async ({ page }) => {
      * the checklist should be exercising rather than stalling on. Without this the run ends
      * `FREE,FREE,FREE,OVERSET` and the test reports a failure that is really a missing move.
      */
-    if (state.chambers.some((c) => c.state === 'OVERSET')) {
+    // Only a WEDGED pin on the solver (D-220/D-226): an OVERSET read just after a click settles.
+    // …or any overset that is still there a round later — a spool pushed past its line does not
+    // latch, but it does not come back by itself either; a player sees it red and lets go.
+    overRounds = state.chambers.some((c) => c.state === 'OVERSET') ? overRounds + 1 : 0
+    if (state.chambers.some((c) => c.state === 'OVERSET' && (c.jammed ?? true)) || overRounds >= 2) {
+      overRounds = 0
       await tension(page, false)
       await page.waitForTimeout(400)
       await tension(page, true)
-      // Back to step 2 — the dip this run has already learned; 4 would wall the spools (D-204).
-      await pressureStep(page, 2)
+      // Back to the dip this run has already learned; 4 would wall the spools (D-204).
+      await pressureStep(page, DIP)
       await page.waitForTimeout(200)
       continue
     }
 
     const b = state.bindingChamber
+    // On the solver a spool sitting in its groove reads FREE with nothing binding (the walk's
+    // "stuck" case): a player just pushes the next unset pin, and so does this (D-226).
     const target =
-      b >= 0 ? state.chambers[b] : state.chambers.find((c) => c.state === 'FALSE_SET')
+      b >= 0
+        ? state.chambers[b]
+        : (state.chambers.find((c) => c.state === 'FALSE_SET') ??
+          (solver ? state.chambers.find((c) => c.state !== 'SET') : undefined))
     if (!target) {
       if (state.chambers.every((c) => c.state === 'SET')) await pressureStep(page, 8)
       await page.waitForTimeout(60)

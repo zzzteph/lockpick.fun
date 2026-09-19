@@ -691,6 +691,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     const kind = faceKindFor(def.family)
     face = kind ? computeFaceLayout(def.bitting.length, kind, 0) : null
     padlock = def.family === 'combination' ? computePadlockLayout(def.bitting.length) : null
+    input.solverLock = session.engine !== null && !face && !padlock
     resizeFx(fx, def.bitting.length)
     clearFx(fx)
     eventLog.length = 0
@@ -2559,7 +2560,7 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
     if (live.engine) {
       // The solver has no tape to replay: a scripted hand walks the lock the bench's way
       // (docs/SOLVER_PORT.md), through `advance`, so every event reaches its listeners.
-      walkSolver(live, absorb, { maxSeconds: 180 })
+      walkSolver(live, absorb, { maxSeconds: 1500 })
       return live.state.opened
     }
     const r = solveLock(live.def, live.seed, currentConfig(), { maxSeconds: 180 })
@@ -2625,6 +2626,12 @@ export function startApp(canvas: HTMLCanvasElement, storage: StorageLike = safeS
   hook.lockSlugs = (): string[] => ALL_LOCKS.map((d) => d.slug)
   hook.pickTip = (): { x: number; y: number; chamber: number } => {
     if (!session) return { x: 0, y: 0, chamber: -1 }
+    // A solver lock draws the side view, not the cutaway: report the tip where it is drawn (D-226).
+    if (session.engine) {
+      const f = sideFrame(session.engine)
+      const tip = session.engine.pick()
+      return { x: f.sx(tip.tipX), y: f.sy(tip.tipY), chamber: session.state.pickChamber }
+    }
     const r = pickRender(session.view, layout, currentFlex, currentInput().liftTarget)
     return { x: r.tipX, y: mmToY(layout, r.tipMm), chamber: r.chamber }
   }

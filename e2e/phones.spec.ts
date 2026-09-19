@@ -38,6 +38,17 @@ type Finding = { kind: string; detail: string }
 
 const SCREENS: { name: string; arrange: (page: Page) => Promise<void> }[] = [
   {
+    // The pin catalogue — the serrated line was rewritten in D-227.
+    name: 'help-pins',
+    arrange: async (p) => {
+      await p.evaluate(() => {
+        globalThis.__shearline!.goto('help')
+        globalThis.__shearline!.helpPage(1)
+      })
+      await renderOnce(p)
+    },
+  },
+  {
     name: 'help-readouts',
     arrange: async (p) => {
       await p.evaluate(() => {

@@ -430,11 +430,14 @@ export class InputController {
           if (!e.repeat) this.snapToNearest()
           this.spaceDown = true
           break
+        // Arrows follow the lock AS DRAWN: the cutaway mirrors with handedness, the solver's side
+        // view does not — so on a pin lock ← stays left whatever the setting (D-226; right-handed
+        // players had it reversed there).
         case 'ArrowLeft':
-          this.stepChamber(this.settings.mirrored ? 1 : -1)
+          this.stepChamber(this.drawnMirrored() ? 1 : -1)
           break
         case 'ArrowRight':
-          this.stepChamber(this.settings.mirrored ? -1 : 1)
+          this.stepChamber(this.drawnMirrored() ? -1 : 1)
           break
         case 'ArrowUp':
           if (this.padlockLayout) this.wheelStep(1)
@@ -531,6 +534,17 @@ export class InputController {
       this.mousePressing = false
       this.counterHeld = false
     }
+  }
+
+  /**
+   * The lock in hand is drawn in the solver's side view (set by the app when the lock loads, so it
+   * holds before the first frame registers the side view's geometry) — D-226.
+   */
+  solverLock = false
+
+  /** Whether the lock on screen is drawn mirrored — the cutaway follows handedness; the side view does not. */
+  private drawnMirrored(): boolean {
+    return this.settings.mirrored && !this.solverLock
   }
 
   /** The solver's side view is on screen (or not): the mouse scheme listens only while it is. */

@@ -15,6 +15,7 @@ import {
   moveTo,
   pressureStep,
   tension,
+  workChamber,
 } from './harness'
 
 async function stepUntil(
@@ -50,72 +51,8 @@ async function workBinding(page: Page, windowFraction: number, tension: number):
   return b
 }
 
-test('pick flex is continuous and proportional to resistance', async ({ page }) => {
-  const watcher = await bootGame(page, { frames: 3 })
-  await setManual(page, true)
-  await setTools(page, { tensionPrecision: 0, liftJitter: 0 })
-  await loadLock(page, 2, 5)
-
-  await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: 0.5 })
-  await stepTicks(page, 60)
-  const start = await getState(page)
-  const binding = start.bindingChamber
-  const free = start.chambers.find((c) => c.index !== binding)
-  expect(free).toBeDefined()
-  if (!free) return
-
-  /**
-   * Leaning on each in turn. Resting the tip on a pin at zero lift tells you nothing at all now
-   * (D-056), so both probes apply the same deliberate ${PRESSURE}mm of push and the difference
-   * between them is the pin rather than the hand.
-   */
-  const PROBE = 0.45
-
-  // Pushing on a free pin: light and bouncy, and it rides up to meet you.
-  await setInput(page, {
-    chamber: free.index,
-    liftTarget: PROBE,
-    tensionHeld: true,
-    tensionLevel: 0.5,
-  })
-  await stepTicks(page, 30)
-  const onFree = await getFx(page)
-  const freeState = await getState(page)
-
-  // Pushing on the binding pin at the same height: heavy and dead, and it does not move.
-  await setInput(page, { chamber: binding, liftTarget: PROBE, tensionHeld: true, tensionLevel: 0.5 })
-  await stepTicks(page, 30)
-  const onBinding = await getFx(page)
-  const bindingState = await getState(page)
-
-  expect(bindingState.resistance).toBeGreaterThan(freeState.resistance)
-  expect(onBinding.pickFlex).toBeGreaterThan(onFree.pickFlex)
-  expect(onBinding.pickFlex - onFree.pickFlex).toBeGreaterThan(3)
-
-  // Pushing against the binding pin bends the shaft further still: the gap between where
-  // the tip is and where it was asked to be is the force the player is applying.
-  const c = bindingState.chambers[binding]
-  if (!c) return
-  await setInput(page, {
-    chamber: binding,
-    liftTarget: c.setLift,
-    tensionHeld: true,
-    tensionLevel: 0.5,
-  })
-  await stepTicks(page, 1)
-  const pushing = await getFx(page)
-  expect(pushing.pickFlex).toBeGreaterThan(onBinding.pickFlex)
-
-  // Continuity: no jump larger than a few pixels over a slow sweep.
-  let previous = pushing.pickFlex
-  for (let i = 0; i < 40; i += 1) {
-    await stepTicks(page, 2)
-    const now = (await getFx(page)).pickFlex
-    expect(Math.abs(now - previous), `flex jumped from ${previous} to ${now}`).toBeLessThan(12)
-    previous = now
-  }
-  watcher.assertClean()
-})
+// Retired (D-226): 'pick flex is continuous and proportional to resistance' measured the rate
+// sim's pick flex, a kit-feel stat the solver does not model. Owner: retire, do not rebuild.
 
 test('set feedback lands on every channel within 100ms', async ({ page }) => {
   const watcher = await bootGame(page, { frames: 3 })
@@ -146,7 +83,11 @@ test('set feedback lands on every channel within 100ms', async ({ page }) => {
   await stepTicks(page, 12)
   const after = await getState(page)
   const fxAfter = await getFx(page)
-  expect(after.theta).toBeGreaterThan(atSet.theta)
+  // The solver takes the plug's turn up AT the click, not over the next 100 ms (D-226): there the
+  // claim is that it has turned and holds, not that it is still going.
+  const solver = await page.evaluate(() => globalThis.__shearline!.sideFrame() !== null)
+  if (solver) expect(after.theta).toBeGreaterThanOrEqual(atSet.theta - 1e-4)
+  else expect(after.theta).toBeGreaterThan(atSet.theta)
   expect(fxAfter.shake).toBe(0)
   expect(fxAfter.chambers[b]?.flash).toBeLessThan(fxAtSet.chambers[b]?.flash ?? 1)
   watcher.assertClean()
@@ -236,6 +177,7 @@ test('manual play checklist — human-paced input', async ({ page }) => {
   await tension(page, true)
   await pressureStep(page, 5)
   await page.waitForTimeout(200)
+  const solver = await page.evaluate(() => globalThis.__shearline!.sideFrame() !== null)
 
   const flexSamples: number[] = []
   const resistanceSamples: number[] = []
@@ -286,7 +228,13 @@ test('manual play checklist — human-paced input', async ({ page }) => {
       resistanceSamples.push(now.resistance)
     }
 
-    // Then work the one that was heavy, creeping up on the window the way a person does.
+    // Then work the one that was heavy, creeping up on the window the way a person does — on the
+    // solver, holding Space until it clicks (there is no rate-sim window to creep up on, D-226).
+    if (solver) {
+      await workChamber(page, b, 0)
+      resistanceSamples.push((await getState(page)).resistance)
+      continue
+    }
     await moveTo(page, b)
     for (const fraction of [0.1, 0.3, 0.5]) {
       await liftTo(page, c.setLift + c.captureWindow * fraction)
@@ -303,10 +251,13 @@ test('manual play checklist — human-paced input', async ({ page }) => {
   expect(opened, `states: ${final.chambers.map((c) => c.state).join(',')}`).toBe(true)
 
   // The pick was bending the whole time, and bending by visibly different amounts between
-  // a free pin and the binding one.
-  expect(flexSamples.length).toBeGreaterThan(6)
-  expect(Math.min(...flexSamples)).toBeGreaterThan(0)
-  expect(Math.max(...flexSamples) - Math.min(...flexSamples)).toBeGreaterThan(4)
+  // a free pin and the binding one — the rate sim's pick flex, a kit-feel stat the solver does not
+  // model (retired at the owner's word, D-226).
+  if (!solver) {
+    expect(flexSamples.length).toBeGreaterThan(6)
+    expect(Math.min(...flexSamples)).toBeGreaterThan(0)
+    expect(Math.max(...flexSamples) - Math.min(...flexSamples)).toBeGreaterThan(4)
+  }
   /**
    * Resistance really did swing between light and heavy as the pick worked.
    *

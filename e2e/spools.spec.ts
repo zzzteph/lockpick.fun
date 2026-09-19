@@ -2,14 +2,12 @@ import { expect, test, type Page } from '@playwright/test'
 import {
   bootGame,
   captureStage,
-  getFx,
   getState,
   loadLock,
   renderOnce,
   scriptPin,
   setInput,
   setManual,
-  setTools,
   stepTicks,
   type StateSnapshot,
   pressureStep,
@@ -18,8 +16,6 @@ import {
 } from './harness'
 
 const SPOOL_TRAINER = 13
-const SERRATED_TRAINER = 14
-const DEADBOLT = 16
 
 async function stepUntil(
   page: Page,
@@ -34,6 +30,26 @@ async function stepUntil(
     state = await getState(page)
   }
   return state
+}
+
+/**
+ * One push on the solver, the keyboard's ramp, let go when the pin answers — `scriptPush` with the
+ * counter-rotation chosen by the caller rather than inferred (D-228).
+ */
+async function pushPlain(page: Page, chamber: number, tension: number, counter = false): Promise<void> {
+  await setInput(page, { chamber, liftTarget: 0, tensionHeld: true, tensionLevel: tension })
+  await stepTicks(page, 36)
+  const before = (await getState(page)).chambers[chamber]?.state ?? 'FREE'
+  let lift = 0
+  for (let k = 0; k < 40; k += 1) {
+    lift = Math.min(3.5, lift + (4.2 * 6) / 120)
+    await setInput(page, { chamber, liftTarget: lift, tensionHeld: true, tensionLevel: tension, ...(counter ? { counter: true } : {}) })
+    await stepTicks(page, 6)
+    const now = (await getState(page)).chambers[chamber]?.state ?? 'FREE'
+    if (now === 'SET' || now === 'OVERSET' || (now === 'FALSE_SET' && before !== 'FALSE_SET')) break
+  }
+  await setInput(page, { chamber, liftTarget: 0, tensionHeld: true, tensionLevel: tension })
+  await stepTicks(page, 36)
 }
 
 /** Park every chamber in its first groove, in binding order, without pushing through. */
@@ -60,68 +76,46 @@ async function parkEveryGroove(page: Page, tension: number): Promise<StateSnapsh
   return getState(page)
 }
 
-test('a spool produces a visible false set and pushes the pick back', async ({ page }) => {
+test('a spool produces a visible false set', async ({ page }) => {
+  /**
+   * On the solver (D-228): parked in its groove a spool reads FALSE_SET and the plug has visibly
+   * turned past where the first pin bound. (The rate sim's lift heights, θ as a fraction of its
+   * 0.52 open, its pushback and pick flex — retired kit feel — are not this physics' numbers; what
+   * beats a spool here is pinned below: the counter-rotation A/B.)
+   */
   const watcher = await bootGame(page, { frames: 3 })
   await setManual(page, true)
-  await setTools(page, { tensionPrecision: 0, liftJitter: 0 })
   await loadLock(page, SPOOL_TRAINER, 4)
+  await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: 0.489 })
+  await stepTicks(page, 60)
+  const th0 = (await getState(page)).theta
 
-  const state = await parkEveryGroove(page, 0.35)
-  const spools = state.chambers.filter((c) => c.profile === 'spool')
-  expect(spools.length).toBe(2)
-  expect(spools.every((c) => c.state === 'FALSE_SET')).toBe(true)
-
-  // Visible: the plug has swung clearly past any single chamber's delta — a catch, not an
-  // open-sized sweep, since D-202 cut the pin give to waist size.
-  const maxDelta = Math.max(...state.chambers.map((c) => c.delta))
-  expect(state.theta).toBeGreaterThan(maxDelta * 5)
-  expect(state.theta).toBeGreaterThan(0.1)
-  // Bounded above as well as below: the old open-sized sweep (61% of θ_open) must FAIL here,
-  // or a stale dev server quietly re-serves the pre-D-202 physics and this test still smiles.
-  expect(state.theta / 0.52).toBeLessThan(0.45)
-
-  // The pick is pushed back: park it on a false-set spool and it ends up below the target.
-  const victim = spools[0]
-  if (!victim) return
-  const target = victim.falseSetLifts[0] ?? 0
-  await setInput(page, {
-    chamber: victim.index,
-    liftTarget: target,
-    tensionHeld: true,
-    tensionLevel: 0.85,
-  })
-  await stepTicks(page, 240)
-  const pushed = await getState(page)
-  const c = pushed.chambers[victim.index]
-  expect(c?.counterForce, 'counter-rotation should be active').toBeGreaterThan(0)
-  expect(c?.lift, 'the pin should have been shoved below the target').toBeLessThan(target - 0.05)
-
-  // …and the pick shaft is bowed hard as a result.
-  const fx = await getFx(page)
-  expect(fx.pickFlex).toBeGreaterThan(20)
+  const state = await parkEveryGroove(page, 0.489)
+  const lying = state.chambers.filter((c) => c.profile === 'spool' && c.state === 'FALSE_SET')
+  expect(lying.length, 'a spool parks in its groove').toBeGreaterThan(0)
+  // Visible: a clear fraction of a degree past the first bind.
+  expect(state.theta - th0).toBeGreaterThan(0.15 * (Math.PI / 180))
   watcher.assertClean()
 })
 
 test('@screenshot phase-05 a full false set', async ({ page }) => {
   const watcher = await bootGame(page, { frames: 3 })
   await setManual(page, true)
-  await setTools(page, { tensionPrecision: 0, liftJitter: 0 })
   await loadLock(page, SPOOL_TRAINER, 4)
+  await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: 0.489 })
+  await stepTicks(page, 60)
+  const th0 = (await getState(page)).theta
 
-  const state = await parkEveryGroove(page, 0.35)
+  const state = await parkEveryGroove(page, 0.489)
   expect(state.chambers.some((c) => c.state === 'FALSE_SET')).toBe(true)
-  expect(state.theta / 0.52).toBeGreaterThan(0.18)
-  expect(state.theta / 0.52).toBeLessThan(0.45)
+  // The solver's picture (D-228): the plug turned clearly past the first bind, not the rate sim's
+  // fraction of its 0.52 open.
+  expect(state.theta - th0).toBeGreaterThan(0.15 * (Math.PI / 180))
 
-  // Put the pick on a false-set spool so the pushback is in shot too.
+  // Put the pick on a false-set spool so the push is in shot too.
   const spool = state.chambers.find((c) => c.state === 'FALSE_SET')
   if (spool) {
-    await setInput(page, {
-      chamber: spool.index,
-      liftTarget: (spool.falseSetLifts[0] ?? 0) + 0.35,
-      tensionHeld: true,
-      tensionLevel: 0.55,
-    })
+    await setInput(page, { chamber: spool.index, liftTarget: 1.5, tensionHeld: true, tensionLevel: 0.55 })
     await stepTicks(page, 90)
   }
   await renderOnce(page)
@@ -129,35 +123,37 @@ test('@screenshot phase-05 a full false set', async ({ page }) => {
   watcher.assertClean()
 })
 
-test('a serrated pin lies four times on the way up, on screen', async ({ page }) => {
+test('a serrated pin lies once, and lifting through it with the plug eased sets it', async ({
+  page,
+}) => {
+  /**
+   * The solver's serrated pin (D-227): a tooth catches like a set — ONE false set that holds — and
+   * the pin sets only when the plug is eased off the tooth (counter-rotation) while it is lifted
+   * again. The rate sim's "four lies on the way up" no longer happens; the lesson and help say so.
+   * Played on the lesson's own lock and seed, so it tests exactly what the lesson teaches.
+   */
   const watcher = await bootGame(page, { frames: 3 })
   await setManual(page, true)
-  await setTools(page, { tensionPrecision: 0, liftJitter: 0 })
-  await loadLock(page, SERRATED_TRAINER, 2)
-
-  await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: 0.35 })
+  await page.evaluate(() => globalThis.__shearline!.startLesson('lesson-serrated'))
+  const TENSION = 0.49
+  await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: TENSION })
   await stepTicks(page, 60)
-  const start = await getState(page)
-  const b = start.bindingChamber
-  const c = start.chambers[b]
-  expect(c).toBeDefined()
-  if (!c) return
-  expect(c.profile).toBe('serrated')
-  expect(c.falseSetLifts).toHaveLength(4)
+  const serrated = (await getState(page)).chambers.findIndex((c) => c.profile === 'serrated')
+  expect(serrated).toBeGreaterThanOrEqual(0)
 
   let entries = 0
   let previous = 'FREE'
-  for (let lift = 0; lift <= c.setLift + c.captureWindow * 0.5; lift += 0.02) {
-    await setInput(page, { chamber: b, liftTarget: lift, tensionHeld: true, tensionLevel: 0.35 })
-    await stepTicks(page, 6)
-    const now = await getState(page)
-    const state = now.chambers[b]?.state ?? 'FREE'
-    if (state === 'FALSE_SET' && previous !== 'FALSE_SET') entries += 1
-    previous = state
-    if (state === 'SET' || state === 'OVERSET') break
+  for (let round = 0; round < 12; round += 1) {
+    const s = await getState(page)
+    if (s.chambers[serrated]?.state === 'SET') break
+    const b = s.bindingChamber >= 0 ? s.bindingChamber : serrated
+    await scriptPin(page, b, 0, TENSION, 0)
+    const now = (await getState(page)).chambers[serrated]?.state ?? 'FREE'
+    if (now === 'FALSE_SET' && previous !== 'FALSE_SET') entries += 1
+    previous = now
   }
-  expect(entries).toBe(4)
-  expect((await getState(page)).chambers[b]?.state).toBe('SET')
+  expect(entries, 'the tooth lies once').toBe(1)
+  expect((await getState(page)).chambers[serrated]?.state).toBe('SET')
   watcher.assertClean()
 })
 
@@ -223,67 +219,44 @@ test('a human can open a 4-pin 2-spool lock from the keyboard', async ({ page })
   watcher.assertClean()
 })
 
-test('heavy tension walls a spool that a light hand walks through', async ({ page }) => {
+test('counter-rotation walks a spool through; without it the spools hold the lock shut', async ({
+  page,
+}) => {
+  /**
+   * The solver's spool (D-228), measured: the rate sim's "heavy walls it, light walks through" is
+   * not this physics — tension alone opened the spool trainer on 0 of 16 seeds/levels, and with
+   * the plug eased back under the lift (counter-rotation: C, the pad, the right button) on 9 of 16.
+   * So the lesson the lock teaches is the counter, and that is what this pins, on a seed where the
+   * counter opens it at the default pressure.
+   */
   const watcher = await bootGame(page, { frames: 3 })
   await setManual(page, true)
-  // A five-chamber lock needs a pick that reaches five; this test is about tension, not
-  // reach, so give it the Medium Hook and take the tool noise out.
-  await setTools(page, { tensionMin: 0.05, tensionPrecision: 0, liftJitter: 0, reach: 5 })
 
-  /**
-   * The hand plays the taught style since D-203: cruise at the default for the honest pins,
-   * and take `grooveTension` only onto a chamber that is lying (or is a spool about to). The
-   * old version played the whole lock at the probe tension, which the economy now punishes —
-   * cruising at 0.3 walks your own sets off their ledges, which is the point of D-203, not a
-   * failure of the spool physics this test exists to pin.
-   */
-  async function attempt(grooveTension: number): Promise<StateSnapshot> {
+  async function attempt(counter: boolean): Promise<StateSnapshot> {
     const CRUISE = 0.489
-    await loadLock(page, DEADBOLT, 3)
+    await loadLock(page, SPOOL_TRAINER, 1)
     await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: CRUISE })
     await stepTicks(page, 60)
     for (let round = 0; round < 40; round += 1) {
       const state = await getState(page)
       if (state.opened) break
       const b = state.bindingChamber
-      const target =
-        b >= 0 ? state.chambers[b] : state.chambers.find((c) => c.state === 'FALSE_SET')
-      if (!target) {
+      const fs = state.chambers.findIndex((c) => c.state === 'FALSE_SET')
+      const t = b >= 0 ? b : fs >= 0 ? fs : state.chambers.findIndex((c) => c.state !== 'SET')
+      if (t < 0) {
         await stepTicks(page, 60)
         continue
       }
-      const lying = target.state === 'FALSE_SET' || target.falseSetLifts.length > 0
-      // In slices with an early exit, not one fixed shove: a hand that keeps leaning on a pin
-      // for two seconds AFTER it clicks is the exact camping D-203 charges for, and the old
-      // fixed 240-tick push did precisely that once the spool captured.
-      for (let slice = 0; slice < 8; slice += 1) {
-        await scriptPin(
-          page,
-          target.index,
-          target.setLift + target.captureWindow * 0.5,
-          lying ? grooveTension : CRUISE,
-          30,
-        )
-        const now = await getState(page)
-        const worked = now.chambers[target.index]
-        if (now.opened || worked?.state === 'SET' || worked?.state === 'OVERSET') break
-      }
-      // A breath at cruise between rounds — the other half of the taught style. Back-to-back
-      // dips with no recovery are the one thing the disturbance clock is built to catch, and
-      // this lock is three spools in a row.
-      await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: CRUISE })
-      await stepTicks(page, 30)
+      const lying = state.chambers[t]?.state === 'FALSE_SET'
+      await pushPlain(page, t, CRUISE, counter && lying)
     }
     return getState(page)
   }
 
-  // 0.2, down from 0.3 with D-204: the deadbolt carries a spool-deep, whose wall is ≈0.24
-  // now — the lightest wall in the lock is what the dip has to duck under.
-  const light = await attempt(0.2)
-  expect(light.opened, `light: ${light.chambers.map((c) => c.state).join(',')}`).toBe(true)
-
-  const heavy = await attempt(0.95)
-  expect(heavy.opened).toBe(false)
-  expect(heavy.chambers.some((c) => c.state === 'FALSE_SET')).toBe(true)
+  const eased = await attempt(true)
+  expect(eased.opened, `with the counter: ${eased.chambers.map((c) => c.state).join(',')}`).toBe(true)
+  const plain = await attempt(false)
+  expect(plain.opened, 'tension alone does not beat the spools').toBe(false)
+  expect(plain.stats.falseSetsEntered).toBeGreaterThan(0)
   watcher.assertClean()
 })

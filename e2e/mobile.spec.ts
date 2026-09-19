@@ -474,7 +474,9 @@ test.describe('right-handed', () => {
     })
     const watcher = await bootGame(page, { frames: 3 })
     await setManual(page, true)
-    await loadLock(page, 22, 5)
+    // A cutaway lock (D-226): pin locks draw the solver's side view, which does not mirror, and the
+    // arrows follow it unmirrored; the mirrored cutaway is the rate-sim families' — this sidebar one.
+    await loadLock(page, 27, 5)
 
     const tipX = async (): Promise<number> =>
       page.evaluate(() => globalThis.__shearline!.pickTip().x)

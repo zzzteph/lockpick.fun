@@ -527,6 +527,8 @@ export async function pushUntilClick(page: Page, chamber: number, timeoutMs = 25
   const before = (await getState(page)).chambers[chamber]?.state ?? 'FREE'
   // A false set is worked with the plug eased back under the lift — C, the counter-rotation key.
   const counter = before === 'FALSE_SET'
+  // …with the wrench eased a step too (W, then E back after), as the walk dips a false set.
+  if (counter) await page.keyboard.press('KeyW')
   if (counter) await page.keyboard.down('KeyC')
   await page.keyboard.down('Space')
   const deadline = Date.now() + timeoutMs
@@ -538,6 +540,7 @@ export async function pushUntilClick(page: Page, chamber: number, timeoutMs = 25
   }
   await page.keyboard.up('Space')
   if (counter) await page.keyboard.up('KeyC')
+  if (counter) await page.keyboard.press('KeyE')
   await page.waitForTimeout(60)
   return now
 }

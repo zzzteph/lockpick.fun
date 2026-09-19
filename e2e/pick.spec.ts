@@ -26,7 +26,9 @@ const SHEAR_LINE_MM = 0
 test('rendered pin positions match sim state exactly', async ({ page }) => {
   const watcher = await bootGame(page, { frames: 3 })
   await setManual(page, true)
-  await loadLock(page, 3, 7)
+  // The cutaway's own lock (D-226): pin locks draw the solver's side view from its bodies now, so
+  // the cutaway this checks is the one the rate-sim families still use — the sidebar cylinder.
+  await loadLock(page, 27, 7)
   await setInput(page, { chamber: 1, liftTarget: 0.9, tensionHeld: true, tensionLevel: 0.5 })
   await stepTicks(page, 120)
 
@@ -198,7 +200,9 @@ test('the arrow keys move the pick, and the nudge survives the spring-back', asy
   for (let i = 0; i < 10; i += 1) await page.keyboard.press('ArrowUp')
   await page.waitForTimeout(250)
   const lifted = (await getState(page)).chambers[0]?.lift ?? 0
-  expect(lifted, 'ten taps of ArrowUp must raise the pin').toBeGreaterThan(rest + 0.5)
+  // 0.3, not 0.5, on the solver (D-226): the resting tip sits under the key pin, and the first taps
+  // close that gap before the pin moves — 1.2 mm asked raises it ~0.47 on the practice cutaway.
+  expect(lifted, 'ten taps of ArrowUp must raise the pin').toBeGreaterThan(rest + 0.3)
 
   /**
    * …and it *stays* there. This is the half the old code could never do: a full second with no key
@@ -257,13 +261,14 @@ test('the fine trim is Training only, and the legend does not claim it elsewhere
   // Space still lifts, so the pin is reachable — this is the trim being off, not the lock being
   // stuck or the keyboard being ignored.
   await page.keyboard.down('Space')
-  await page.waitForTimeout(220)
+  // Long enough to close the tip-to-pin gap on the solver and lift past it (D-226).
+  await page.waitForTimeout(450)
+  const held = (await getState(page)).chambers[0]?.lift ?? 0
   await page.keyboard.up('Space')
   expect(
-    (await getState(page)).chambers[0]?.lift ?? 0,
+    held,
     'Space must still lift — only the trim is gated',
   ).toBeGreaterThan(rest + 0.3)
-
   watcher.assertClean()
 })
 
@@ -354,7 +359,9 @@ test('the pick is drawn where the tip is, and slides between chambers', async ({
    * the two chambers partway through a move, and land on the second one at the end.
    */
   const watcher = await bootGame(page, { frames: 3 })
-  await loadLock(page, 6, 3) // Northgate Shed Padlock — four chambers.
+  // The cutaway's pick (D-226): the sidebar cylinder is still drawn in the cutaway; pin locks draw
+  // the solver's side view, whose tip `pickTip` reports from the solver's own pick.
+  await loadLock(page, 27, 3)
 
   const tip = async (): Promise<{ x: number; y: number; chamber: number }> =>
     page.evaluate(() => {
@@ -404,46 +411,5 @@ test('the pick is drawn where the tip is, and slides between chambers', async ({
   watcher.assertClean()
 })
 
-test('a short hook reaches the pins nearest the keyway mouth, which is pin 1', async ({ page }) => {
-  const watcher = await bootGame(page, { frames: 3 })
-  await setManual(page, true)
-  // Six chambers, and a deliberately short hook forced in through the dev hook. The *player's*
-  // kit reaches everything since D-088, so a short reach is now a thing only a test asks for —
-  // but the question this test exists to answer is unchanged: which end does the pick come in?
-  await loadLock(page, 22, 3)
-  await page.evaluate(() => globalThis.__shearline?.setTools({ reach: 3 }))
-
-  const state = await getState(page)
-  expect(state.chambers.length).toBe(6)
-
-  const reachable: number[] = []
-  for (let i = 0; i < state.chambers.length; i += 1) {
-    await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: 0.4 })
-    await stepTicks(page, 30)
-    await setInput(page, { chamber: i, liftTarget: 0.4, tensionHeld: true, tensionLevel: 0.4 })
-    await stepTicks(page, 120)
-    if ((await getState(page)).pickChamber === i) reachable.push(i)
-  }
-
-  // A short hook gets the *front* pins. Pin 1 is the front pin in every lock ever made, so
-  // chamber 0 must be reachable and the deep ones must not — and the drawing has to agree,
-  // which is why the pick enters from the left where chamber 0 is (D-044).
-  expect(reachable, 'a short hook must reach the front pins').toContain(0)
-  expect(reachable.length, 'and must not reach every pin, or the test proves nothing').toBeLessThan(
-    state.chambers.length,
-  )
-  // Contiguous from the mouth inward: no gaps, and never the far end without the near end.
-  expect(reachable).toEqual(reachable.map((_, k) => k))
-
-  // The pick is drawn entering from the same end it can reach: chamber 0's side.
-  const geom = await getGeometry(page)
-  const first = geom.chambers[0]
-  const last = geom.chambers[geom.chambers.length - 1]
-  expect(first).toBeDefined()
-  expect(last).toBeDefined()
-  if (!first || !last) return
-  expect(first.plugX, 'chamber 0 is drawn on the left, where the pick comes in').toBeLessThan(
-    last.plugX,
-  )
-  watcher.assertClean()
-})
+// Retired (D-226): 'a short hook reaches the pins nearest the keyway mouth' tested the kit's
+// `reach` stat, which the solver does not model (and D-088 made unlimited). Owner: retire.
