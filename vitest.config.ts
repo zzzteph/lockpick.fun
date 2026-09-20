@@ -41,10 +41,12 @@ export default defineConfig({
       // VERIFICATION.md §2. Set from Phase 1 on purpose: a threshold added at the end is a
       // threshold you'll be tempted to lower.
       thresholds: {
-        // Re-tightened with D-234 once the rate sim's pin code was CUT, not just fenced (D-233 had
-        // dropped this to 75/80/63 over dead code): the suite measures lines 88.3, functions 89.8,
-        // branches 78.3 over what is left — the wheel packs' path and the shared state.
-        'src/sim/**': { branches: 77, functions: 88, lines: 87 },
+        // D-235 split the two: `src/sim` is the shared lock model (measured lines 94.0, functions
+        // 94.4, branches 80.2) and `src/wheels` is the wheel packs' own engine (82.6 / 80.6 / 76.7),
+        // all of it exercised through the combination locks. Set just under each, as D-234 set the
+        // pair, so a real loss of cover fails rather than drifts.
+        'src/sim/**': { branches: 79, functions: 93, lines: 93 },
+        'src/wheels/**': { branches: 75, functions: 79, lines: 81 },
         'src/game/**': { branches: 70, lines: 80 },
       },
     },

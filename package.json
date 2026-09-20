@@ -1,7 +1,7 @@
 {
   "name": "shear-line",
   "private": true,
-  "version": "5.6.0",
+  "version": "5.6.1",
   "type": "module",
   "description": "SHEAR LINE - a realistic 2D lockpicking simulator",
   "scripts": {
