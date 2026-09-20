@@ -189,6 +189,22 @@ export function drawSideView(
     }
   }
 
+  // ── Magnets (D-230): a block on the spring seat of each magnetic chamber, holding its driver ──
+  sol.chambers.forEach((ch, i) => {
+    if (!eng.magnetic(i)) return
+    const w = boreW * 0.8
+    const h = 12
+    const x = f.sx(ch.x) - w / 2
+    const y = f.sy(P.seatY) - h - 3
+    ctx.save()
+    ctx.fillStyle = colored ? p.crimson : p.steel
+    ctx.fillRect(x, y, w, h)
+    ctx.lineWidth = STROKE.standard
+    ctx.strokeStyle = p.ink
+    ctx.strokeRect(x, y, w, h)
+    ctx.restore()
+  })
+
   // ── Springs, the game's construction: from the seat down to the driver's top ──
   sol.chambers.forEach((ch, i) => {
     const r = eng.readouts[i]!
@@ -232,6 +248,36 @@ export function drawSideView(
     localPath(ctx, ch.key, ch.x, q[k + 1]!, f)
     ctx.fillStyle = keyFill
     ctx.fill()
+    ctx.stroke()
+    ctx.restore()
+  })
+
+  // ── Sidebar gates (D-230): where a set driver's foot must be lifted for the sidebar leg to drop
+  // in. Drawn over the pins, translucent, so the band sits on the key pin it asks for. A physical
+  // cut in the bore, so both rungs draw it — Normal as plain ink ticks on the bore
+  // walls, Training as a violet band that turns teal once the gate is met ──
+  sol.chambers.forEach((ch, i) => {
+    const g = eng.gate(i)
+    if (!g) return
+    const x = f.sx(ch.x) - boreW / 2
+    const top = f.sy(g.hi)
+    const bottom = f.sy(g.lo)
+    ctx.save()
+    if (colored) {
+      ctx.fillStyle = eng.aligned(i) ? p.teal : p.violet
+      ctx.globalAlpha = eng.aligned(i) ? 0.45 : 0.4
+      ctx.fillRect(x, top, boreW, bottom - top)
+      ctx.globalAlpha = 1
+    }
+    ctx.lineWidth = STROKE.standard
+    ctx.strokeStyle = colored ? (eng.aligned(i) ? p.teal : p.violet) : p.ink
+    ctx.beginPath()
+    for (const y of [top, bottom]) {
+      ctx.moveTo(x - 10, y)
+      ctx.lineTo(x, y)
+      ctx.moveTo(x + boreW, y)
+      ctx.lineTo(x + boreW + 10, y)
+    }
     ctx.stroke()
     ctx.restore()
   })

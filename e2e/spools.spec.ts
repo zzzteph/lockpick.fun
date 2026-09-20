@@ -13,6 +13,8 @@ import {
   pressureStep,
   tension,
   workChamber,
+  pause,
+  useSteppedClock,
 } from './harness'
 
 const SPOOL_TRAINER = 13
@@ -159,6 +161,8 @@ test('a serrated pin lies once, and lifting through it with the plug eased sets 
 
 test('a human can open a 4-pin 2-spool lock from the keyboard', async ({ page }) => {
   const watcher = await bootGame(page, { frames: 3 })
+  // Real keys on the game's own clock (D-234): deterministic timing, the flake's whole cause.
+  await useSteppedClock(page, true)
   await loadLock(page, SPOOL_TRAINER, 6)
 
   await tension(page, true)
@@ -174,11 +178,11 @@ test('a human can open a 4-pin 2-spool lock from the keyboard', async ({ page })
   // false set is worked with counter-rotation (C) instead of a feather, so the default step 5.
   const solver = await page.evaluate(() => globalThis.__shearline!.sideFrame() !== null)
   await pressureStep(page, solver ? 5 : 3)
-  await page.waitForTimeout(200)
+  await pause(page, 200)
 
-  const deadline = Date.now() + 45_000
+  let playRounds = 0
   let opened = false
-  while (Date.now() < deadline) {
+  while (playRounds++ < 80) {
     const state = await getState(page)
     if (state.opened) {
       opened = true
@@ -190,9 +194,9 @@ test('a human can open a 4-pin 2-spool lock from the keyboard', async ({ page })
     // click is the pin settling, and dropping the wrench then throws every set away.
     if (state.chambers.some((c) => c.state === 'OVERSET' && (c.jammed ?? true))) {
       await tension(page, false)
-      await page.waitForTimeout(220)
+      await pause(page, 220)
       await tension(page, true)
-      await page.waitForTimeout(220)
+      await pause(page, 220)
       continue
     }
     const b = state.bindingChamber
@@ -202,12 +206,12 @@ test('a human can open a 4-pin 2-spool lock from the keyboard', async ({ page })
       // Nothing binding and nothing false-set: every driver is up and all that is left is to
       // turn the plug. Wind the pressure on (D-048).
       if (state.chambers.every((c) => c.state === 'SET')) await pressureStep(page, 8)
-      await page.waitForTimeout(60)
+      await pause(page, 60)
       continue
     }
     // The arrows drop the pick as they move it, so this is always "down, across, up" (D-051).
     await workChamber(page, target.index, target.setLift + target.captureWindow * 0.5)
-    await page.waitForTimeout(120)
+    await pause(page, 120)
   }
   await tension(page, false)
 

@@ -6,7 +6,7 @@
  * *instance*, so the same lock binds in a different order every time you sit down with it.
  */
 
-import { detentCentre } from './classify'
+import { detentCentre } from './detent'
 import {
   CAPTURE_WINDOW,
   COMBO_DETENT,

@@ -434,17 +434,38 @@ export async function getInput(page: Page): Promise<{
 }
 
 /** Put the wrench on, or take it off. */
+/**
+ * The stepped clock — D-234. The keyboard helpers below press real keys and then WAIT; on the wall
+ * clock, how far a held Space lifts between two looks depends on how fast the browser happens to be,
+ * and a slow frame let a spool sail from its false set straight past the set and over — the two
+ * "human" play tests failed on timing alone, never on the game. With the stepped clock on, the game
+ * is on its manual clock and every wait advances GAME time by exactly that much (`advanceSeconds`
+ * runs the real frame, keyboard ramp and all), so the keys are real and the timing is deterministic.
+ */
+let steppedPage: Page | null = null
+
+export async function useSteppedClock(page: Page, on: boolean): Promise<void> {
+  await setManual(page, on)
+  steppedPage = on ? page : null
+}
+
+/** Wait `ms` — game time on the stepped clock, wall time otherwise. */
+export async function pause(page: Page, ms: number): Promise<void> {
+  if (steppedPage === page) await advanceSeconds(page, ms / 1000)
+  else await page.waitForTimeout(ms)
+}
+
 export async function tension(page: Page, on: boolean): Promise<void> {
   if (on) await page.keyboard.down('KeyQ')
   else await page.keyboard.up('KeyQ')
-  await page.waitForTimeout(40)
+  await pause(page, 40)
 }
 
 /** Choose a pressure step, 1-10. `0` on the keyboard is step 10. */
 export async function pressureStep(page: Page, step: number): Promise<void> {
   const key = step >= 10 ? 'Digit0' : `Digit${step}`
   await page.keyboard.press(key)
-  await page.waitForTimeout(40)
+  await pause(page, 40)
 }
 
 /**
@@ -458,7 +479,7 @@ export async function moveTo(page: Page, chamber: number, tries = 24): Promise<b
     const at = (await getInput(page)).chamber
     if (at === chamber) return true
     await page.keyboard.press(at < chamber ? 'ArrowRight' : 'ArrowLeft')
-    await page.waitForTimeout(30)
+    await pause(page, 30)
   }
   return (await getInput(page)).chamber === chamber
 }
@@ -531,17 +552,17 @@ export async function pushUntilClick(page: Page, chamber: number, timeoutMs = 25
   if (counter) await page.keyboard.press('KeyW')
   if (counter) await page.keyboard.down('KeyC')
   await page.keyboard.down('Space')
-  const deadline = Date.now() + timeoutMs
   let now = before
-  while (Date.now() < deadline) {
+  // Bounded by looks, not the wall clock, so the stepped clock gets the same budget (D-234).
+  for (let look = 0; look < Math.ceil(timeoutMs / 16); look += 1) {
     now = (await getState(page)).chambers[chamber]?.state ?? 'FREE'
     if (now === 'SET' || now === 'OVERSET' || (now === 'FALSE_SET' && before !== 'FALSE_SET')) break
-    await page.waitForTimeout(16)
+    await pause(page, 16)
   }
   await page.keyboard.up('Space')
   if (counter) await page.keyboard.up('KeyC')
   if (counter) await page.keyboard.press('KeyE')
-  await page.waitForTimeout(60)
+  await pause(page, 60)
   return now
 }
 

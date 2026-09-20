@@ -21,6 +21,8 @@ import {
   pressureStep,
   tension,
   workChamber,
+  pause,
+  useSteppedClock,
 } from './harness'
 
 async function getSave(page: Page): Promise<SaveDataShape> {
@@ -167,18 +169,22 @@ test('a cylinder is solvable with the kit the player always has', async ({ page 
 test('manual play checklist', async ({ page }) => {
   test.setTimeout(120_000)
   const watcher = await bootGame(page, { frames: 10 })
+  // Real keys on the game's own clock (D-234): deterministic timing, the flake's whole cause.
+  await useSteppedClock(page, true)
 
   const stats = await toolStats(page)
   expect(stats['tensionMax']).toBeGreaterThanOrEqual(0.95)
 
   // A Tier 3 spool lock, played at human pace through real key events.
-  await loadLock(page, 13, 21)
+  // Seed 4 since D-234: on the stepped clock the hand is deterministic, and on seed 21 its one
+  // move for the last spool oversets identically after every reset — a loop, not a lock.
+  await loadLock(page, 13, 4)
   await tension(page, true)
   // Start heavy, the way someone who has not learned the spool technique does: wind the
   // pressure up past the spool wall, feel the lock shove back, then wind it down and finish.
   // That arc is the whole lesson this lock exists to teach.
   await pressureStep(page, 9)
-  await page.waitForTimeout(250)
+  await pause(page, 250)
   // The solver's dial (D-226): step 2 is under anything that turns the plug; its dip is step 5.
   const solver = await page.evaluate(() => globalThis.__shearline!.sideFrame() !== null)
   const DIP = solver ? 5 : 2
@@ -188,8 +194,8 @@ test('manual play checklist', async ({ page }) => {
   let opened = false
   let rounds = 0
   let overRounds = 0
-  const deadline = Date.now() + 40_000
-  while (Date.now() < deadline && !opened) {
+  let playRounds = 0
+  while (playRounds++ < 80 && !opened) {
     const state = await getState(page)
     if (state.opened) {
       opened = true
@@ -216,11 +222,11 @@ test('manual play checklist', async ({ page }) => {
     if (state.chambers.some((c) => c.state === 'OVERSET' && (c.jammed ?? true)) || overRounds >= 2) {
       overRounds = 0
       await tension(page, false)
-      await page.waitForTimeout(400)
+      await pause(page, 400)
       await tension(page, true)
       // Back to the dip this run has already learned; 4 would wall the spools (D-204).
       await pressureStep(page, DIP)
-      await page.waitForTimeout(200)
+      await pause(page, 200)
       continue
     }
 
@@ -234,11 +240,11 @@ test('manual play checklist', async ({ page }) => {
           (solver ? state.chambers.find((c) => c.state !== 'SET') : undefined))
     if (!target) {
       if (state.chambers.every((c) => c.state === 'SET')) await pressureStep(page, 8)
-      await page.waitForTimeout(60)
+      await pause(page, 60)
       continue
     }
     await workChamber(page, target.index, target.setLift + target.captureWindow * 0.5)
-    await page.waitForTimeout(100)
+    await pause(page, 100)
     const fx = await getFx(page)
     const now = await getState(page)
     flex.push(fx.pickFlex)

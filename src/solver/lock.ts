@@ -171,6 +171,7 @@ export function createLock(def: LockDef, params: Params = DEFAULT_PARAMS): Solve
     time: 0,
     frame: 0,
     strikeForce: new Float64Array(def.chambers.length),
+    magnetHold: new Float64Array(def.chambers.length),
   }
 
   // Start the pick outside the mouth, level, in the middle of the keyway.

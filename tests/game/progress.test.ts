@@ -11,7 +11,9 @@ import {
 } from '../../src/game/progress'
 import { countsForTier, rankEarned } from '../../src/game/ranks'
 import { MemoryStorage, loadSave } from '../../src/game/save'
-import { PERFECT_TOOLS, createSimState, makeConfig, runTape, solveLock } from '../../src/sim'
+import { PERFECT_TOOLS, makeConfig } from '../../src/sim'
+import { Session } from '../../src/game/session'
+import { walkSolver } from '../../src/game/solverWalk'
 
 function lock(slug: string): (typeof ALL_LOCKS)[number] {
   const def = ALL_LOCKS.find((d) => d.slug === slug)
@@ -282,12 +284,11 @@ describe('a real solved attempt feeds the records', () => {
   it('turns a solver run into an outcome, a payout and a record', () => {
     const def = lock('ironhold-spool-trainer')
     const config = makeConfig({ tools: PERFECT_TOOLS, featherEnabled: true })
-    const solved = solveLock(def, 3, config)
-    expect(solved.opened).toBe(true)
-
-    // Replay the solver's tape so we have a genuine finished state, not a hand-built one.
-    const state = createSimState(def, 3, config)
-    runTape(state, solved.tape, { stopOnOpen: true })
+    // Played open on the contact solver by the game's own walk (D-233), so this is a genuine
+    // finished state, not a hand-built one.
+    const session = new Session(def, 3, config)
+    expect(walkSolver(session, () => {}, { maxSeconds: 600 })).toBe(true)
+    const state = session.state
     expect(state.opened).toBe(true)
 
     const attempt = outcomeFrom(def, state, state.stats)

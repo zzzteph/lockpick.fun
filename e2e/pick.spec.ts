@@ -8,9 +8,7 @@ import {
   getGeometry,
   getState,
   loadLock,
-  moveTo,
   pressureStep,
-  renderOnce,
   setAssist,
   scriptPin,
   setInput,
@@ -18,58 +16,15 @@ import {
   stepTicks,
   tension,
   workChamber,
+  pause,
+  useSteppedClock,
 } from './harness'
 
-const KEYWAY_FLOOR = -5.0
 const SHEAR_LINE_MM = 0
 
-test('rendered pin positions match sim state exactly', async ({ page }) => {
-  const watcher = await bootGame(page, { frames: 3 })
-  await setManual(page, true)
-  // The cutaway's own lock (D-226): pin locks draw the solver's side view from its bodies now, so
-  // the cutaway this checks is the one the rate-sim families still use — the sidebar cylinder.
-  await loadLock(page, 27, 7)
-  await setInput(page, { chamber: 1, liftTarget: 0.9, tensionHeld: true, tensionLevel: 0.5 })
-  await stepTicks(page, 120)
-
-  const geom = await getGeometry(page)
-  const state = await getState(page)
-  const { layout } = geom
-  expect(geom.chambers).toHaveLength(state.chambers.length)
-
-  for (const g of geom.chambers) {
-    const sim = state.chambers[g.index]
-    expect(sim).toBeDefined()
-    if (!sim) continue
-
-    // mm -> px is `shearY - mm * mmToPx`. Check the three positions SIMULATION.md §1 names.
-    const expectKeyBottom = layout.shearY - (KEYWAY_FLOOR + sim.lift) * layout.mmToPx
-    const expectKeyTop =
-      layout.shearY - (KEYWAY_FLOOR + sim.keyPinLength + sim.lift) * layout.mmToPx
-    const expectDriverTop =
-      layout.shearY - (KEYWAY_FLOOR + sim.keyPinLength + 4.5 + sim.lift) * layout.mmToPx
-
-    expect(g.keyPin.y + g.keyPin.h).toBeCloseTo(expectKeyBottom, 6)
-    expect(g.keyPin.y).toBeCloseTo(expectKeyTop, 6)
-    expect(g.driver.y + g.driver.h).toBeCloseTo(expectKeyTop, 6)
-    expect(g.driver.y).toBeCloseTo(expectDriverTop, 6)
-
-    // Key pins are narrower than drivers and ride in the plug bore, which slides with θ.
-    expect(g.keyPin.w).toBeLessThan(g.driver.w)
-    expect(g.plugX - g.shellX).toBeCloseTo(layout.ledgeOffset, 9)
-    expect(g.keyPin.x + g.keyPin.w / 2).toBeCloseTo(g.plugX, 6)
-    expect(g.driver.x + g.driver.w / 2).toBeCloseTo(g.shellX, 6)
-  }
-
-  // Chambers are evenly spaced across the assembly.
-  for (let i = 1; i < geom.chambers.length; i += 1) {
-    const a = geom.chambers[i - 1]
-    const b = geom.chambers[i]
-    if (!a || !b) continue
-    expect(b.shellX - a.shellX).toBeCloseTo(layout.pitch, 6)
-  }
-  watcher.assertClean()
-})
+// Retired (D-230): 'rendered pin positions match sim state exactly' checked the old cutaway's
+// geometry against the rate sim. Since the sidebar and magnetic locks moved to the solver no lock
+// draws the cutaway; the side view is drawn from the solver's own bodies and cannot disagree.
 
 test('a set pin reads as captured: driver above the shear line, plug ledge under it', async ({
   page,
@@ -185,20 +140,23 @@ test('the arrow keys move the pick, and the nudge survives the spring-back', asy
   // Training, because the trim is a teaching control and exists on no other level (D-111).
   await setAssist(page, 'training')
   await loadLock(page, 1, 3)
+  // Real keys on the game's own clock (D-235): the pin's rise and fall are timed in game time.
+  await useSteppedClock(page, true)
 
   // No wrench anywhere in this test. Without tension nothing can bind and nothing can capture, so
   // the only thing that can move a pin is the tip under it — which makes the pin's height a direct
   // readout of the input layer and nothing else.
   // The tip travels along the keyway rather than teleporting (D-045), so give it the moment it
   // takes to arrive at the chamber the keyboard already has it pointed at.
-  await expect
-    .poll(async () => (await getState(page)).pickChamber, { timeout: 5000 })
-    .toBe(0)
+  for (let i = 0; i < 100 && (await getState(page)).pickChamber !== 0; i += 1) await pause(page, 50)
+  expect((await getState(page)).pickChamber).toBe(0)
   const rest = (await getState(page)).chambers[0]?.lift ?? 0
 
   // Ten taps up. Space is never pressed — the point is that the trim stands on its own.
   for (let i = 0; i < 10; i += 1) await page.keyboard.press('ArrowUp')
-  await page.waitForTimeout(250)
+  // Long enough for the hand's ramp to finish (D-235): at 250 ms of game time the pin was still on
+  // its way (0.21 mm); on the wall clock that was a race the slow frames lost.
+  await pause(page, 800)
   const lifted = (await getState(page)).chambers[0]?.lift ?? 0
   // 0.3, not 0.5, on the solver (D-226): the resting tip sits under the key pin, and the first taps
   // close that gap before the pin moves — 1.2 mm asked raises it ~0.47 on the practice cutaway.
@@ -214,15 +172,16 @@ test('the arrow keys move the pick, and the nudge survives the spring-back', asy
    * running the gate from a bare clone, where it drifted 0.007. What the assertion means is "it did
    * not sag", and sagging would be measured in whole nudges.
    */
-  await page.waitForTimeout(1000)
+  await pause(page, 1000)
   const sag = Math.abs((await getState(page)).chambers[0]?.lift ?? 0) - lifted
   expect(Math.abs(sag), 'the trim must hold with no key down').toBeLessThan(KEY_LIFT_NUDGE / 2)
 
   // Down again, symmetrically, and the spring takes the pin back.
   for (let i = 0; i < 10; i += 1) await page.keyboard.press('ArrowDown')
-  await page.waitForTimeout(400)
+  await pause(page, 800)
   expect((await getState(page)).chambers[0]?.lift ?? 0).toBeLessThan(rest + 0.2)
 
+  await useSteppedClock(page, false)
   watcher.assertClean()
 })
 
@@ -238,13 +197,14 @@ test('the fine trim is Training only, and the legend does not claim it elsewhere
   const watcher = await bootGame(page, { frames: 3 })
   await setAssist(page, 'normal')
   await loadLock(page, 1, 3)
-  await expect
-    .poll(async () => (await getState(page)).pickChamber, { timeout: 5000 })
-    .toBe(0)
+  // Real keys on the game's own clock (D-235): the pin's rise and fall are timed in game time.
+  await useSteppedClock(page, true)
+  for (let i = 0; i < 100 && (await getState(page)).pickChamber !== 0; i += 1) await pause(page, 50)
+  expect((await getState(page)).pickChamber).toBe(0)
 
   const rest = (await getState(page)).chambers[0]?.lift ?? 0
   for (let i = 0; i < 20; i += 1) await page.keyboard.press('ArrowUp')
-  await page.waitForTimeout(300)
+  await pause(page, 300)
   /**
    * Bounded against the trim's own step rather than to N decimal places.
    *
@@ -262,13 +222,14 @@ test('the fine trim is Training only, and the legend does not claim it elsewhere
   // stuck or the keyboard being ignored.
   await page.keyboard.down('Space')
   // Long enough to close the tip-to-pin gap on the solver and lift past it (D-226).
-  await page.waitForTimeout(450)
+  await pause(page, 450)
   const held = (await getState(page)).chambers[0]?.lift ?? 0
   await page.keyboard.up('Space')
   expect(
     held,
     'Space must still lift — only the trim is gated',
   ).toBeGreaterThan(rest + 0.3)
+  await useSteppedClock(page, false)
   watcher.assertClean()
 })
 
@@ -352,64 +313,8 @@ test('the cutaway rescales without distortion', async ({ page }) => {
   watcher.assertClean()
 })
 
-test('the pick is drawn where the tip is, and slides between chambers', async ({ page }) => {
-  /**
-   * The drawing follows `state.pickPosition` — the simulation's own continuous position along the
-   * keyway (D-045) — rather than the chamber centre or the mouse. So the tip has to be *between*
-   * the two chambers partway through a move, and land on the second one at the end.
-   */
-  const watcher = await bootGame(page, { frames: 3 })
-  // The cutaway's pick (D-226): the sidebar cylinder is still drawn in the cutaway; pin locks draw
-  // the solver's side view, whose tip `pickTip` reports from the solver's own pick.
-  await loadLock(page, 27, 3)
-
-  const tip = async (): Promise<{ x: number; y: number; chamber: number }> =>
-    page.evaluate(() => {
-      const h = globalThis.__shearline
-      if (!h) throw new Error('no hook')
-      return h.pickTip()
-    })
-  /**
-   * Chamber x positions read at the moment of comparison, never cached.
-   *
-   * The plug's bores *slide* as it takes up rotation, so `plugX` is a function of θ and a
-   * reference captured before the wrench went on is already several pixels stale. That is what
-   * this test is about — where the tip is relative to the bores it is riding between — so both
-   * numbers have to come from the same instant.
-   */
-  const bores = async (): Promise<number[]> =>
-    (await getGeometry(page)).chambers.map((c) => c.plugX)
-
-  await tension(page, true)
-  await moveTo(page, 0)
-  await renderOnce(page)
-  const atZero = await tip()
-  const b0 = await bores()
-  expect(atZero.chamber).toBe(0)
-  expect(atZero.x).toBeCloseTo(b0[0] ?? -1, 0)
-
-  // Ask for chamber 1 and catch it in transit: the tip is strictly between the two.
-  await setManual(page, true)
-  await page.keyboard.press('ArrowRight')
-  await stepTicks(page, 4)
-  await renderOnce(page)
-  const moving = await tip()
-  const bm = await bores()
-  const loX = bm[0] ?? 0
-  const hiX = bm[1] ?? 0
-  expect(moving.x).toBeGreaterThan(Math.min(loX, hiX))
-  expect(moving.x).toBeLessThan(Math.max(loX, hiX))
-
-  // Let it arrive.
-  await stepTicks(page, 240)
-  await renderOnce(page)
-  const arrived = await tip()
-  const ba = await bores()
-  expect(arrived.chamber).toBe(1)
-  expect(arrived.x).toBeCloseTo(ba[1] ?? -1, 0)
-  await tension(page, false)
-  watcher.assertClean()
-})
+// Retired (D-230): 'the pick is drawn where the tip is' tested the cutaway's pick; the side view
+// draws the solver's own pick polygon, and `hook.pickTip` reports its tip.
 
 // Retired (D-226): 'a short hook reaches the pins nearest the keyway mouth' tested the kit's
 // `reach` stat, which the solver does not model (and D-088 made unlimited). Owner: retire.

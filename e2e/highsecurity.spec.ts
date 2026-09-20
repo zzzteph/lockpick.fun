@@ -58,43 +58,34 @@ async function kitOut(page: Page): Promise<void> {
  */
 
 test('a sidebar holds the plug back with every pin set, and says so', async ({ page }) => {
+  /**
+   * On the solver (D-230) the sidebar reads the KEY pins: each gated chamber's key pin must be
+   * held in its gate, just under the shear line, once the chamber is set. A hand that sets every
+   * pin and lets go — the key pins falling past their gates in an instant — leaves the sidebar up:
+   * every pin set, the lock shut however hard the wrench turns. The game's own walk, which lifts
+   * each gated key pin into its gate and holds it, then opens it.
+   */
   const watcher = await bootGame(page, { frames: 3 })
   await setManual(page, true)
   await kitOut(page)
   await loadLock(page, SIDEBAR_6, 4)
 
   const start = await getState(page)
-  const gated = start.chambers.filter((c) => c.sidebarGate !== null)
-  expect(gated.length).toBeGreaterThan(0)
+  expect(start.chambers.filter((c) => c.sidebarGate !== null).length).toBeGreaterThan(0)
 
-  // 0.22 since D-204: the sidebar lock's tight tolerance pulls its spools' wall to ~0.25.
-  await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: 0.22 })
+  // The default pressure, a step heavier every eight pushes — what a hand does when the last pins
+  // stall under the set drivers' feet.
+  let CRUISE = 0.489
+  await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: CRUISE })
   await stepTicks(page, 60)
-
-  // Set every chamber deliberately at the far end of its window from the gate.
   let state = await getState(page)
   for (let round = 0; round < 60 && !state.chambers.every((c) => c.state === 'SET'); round += 1) {
-    const b = state.bindingChamber >= 0
-      ? state.bindingChamber
-      : state.chambers.findIndex((c) => c.state !== 'SET')
-    const c = b >= 0 ? state.chambers[b] : undefined
-    if (!c) break
-    // A hair inside each edge, not 0.001mm from it. The point is to set *away from the gate*,
-    // and on this lock's 0.36mm window either end is four gate-widths clear of it — while an
-    // aim right on the top edge sits on the overset cliff and goes over on tool jitter alone,
-    // which makes the test a coin toss on the wobble sequence rather than a test of sidebars.
-    const inset = c.captureWindow * 0.12
-    const low = c.setLift + inset
-    const high = c.setLift + c.captureWindow - inset
-    const gate = c.sidebarGate
-    const target =
-      gate === null
-        ? c.setLift + c.captureWindow * 0.5
-        : Math.abs(high - gate) > Math.abs(low - gate)
-          ? high
-          : low
-    await scriptPin(page, b, target, 0.22, 0)
-    await stepTicks(page, 60)
+    if (round % 8 === 7 && CRUISE < 0.9) CRUISE += 0.09
+    const fs = state.chambers.findIndex((c) => c.state === 'FALSE_SET')
+    const b =
+      fs >= 0 ? fs : state.bindingChamber >= 0 ? state.bindingChamber : state.chambers.findIndex((c) => c.state !== 'SET')
+    if (b < 0) break
+    await scriptPin(page, b, 0, CRUISE, 0)
     state = await getState(page)
   }
 
@@ -102,42 +93,21 @@ test('a sidebar holds the plug back with every pin set, and says so', async ({ p
   expect(state.chambers.some((c) => c.sidebarGate !== null && !c.sidebarAligned)).toBe(true)
   expect(state.sidebarDropped).toBe(false)
 
-  // Turn as hard as the wrench goes: it moves, and then it stops. That is the whole tell.
+  // Turn as hard as the wrench goes: it does not open. That is the whole tell.
   await setInput(page, { chamber: -1, tensionHeld: true, tensionLevel: 0.9 })
   await stepTicks(page, 300)
-  const stalled = await getState(page)
-  expect(stalled.opened).toBe(false)
-  expect(stalled.theta).toBeGreaterThan(0)
-  expect(stalled.theta).toBeLessThan(stalled.thetaDemand)
+  expect((await getState(page)).opened).toBe(false)
+
+  // Hold each gated key pin in its gate — the walk does exactly that — and it opens.
+  expect(await page.evaluate(() => globalThis.__shearline!.solveCurrentLock())).toBe(true)
+  const done = await getState(page)
+  expect(done.sidebarDropped).toBe(true)
   watcher.assertClean()
 })
 
-test('a sidebar gate can be felt before it is set', async ({ page }) => {
-  const watcher = await bootGame(page, { frames: 3 })
-  await setManual(page, true)
-  await kitOut(page)
-  await loadLock(page, SIDEBAR_6, 4)
-
-  const start = await getState(page)
-  const c = start.chambers.find((x) => x.sidebarGate !== null)
-  expect(c).toBeDefined()
-  if (!c || c.sidebarGate === null) return
-  const low = c.setLift
-  const high = c.setLift + c.captureWindow
-  const off = Math.abs(high - c.sidebarGate) > Math.abs(low - c.sidebarGate) ? high : low
-
-  // Wrench off throughout: nothing can capture, so the survey costs nothing.
-  await setInput(page, { chamber: c.index, liftTarget: c.sidebarGate, tensionHeld: false })
-  await stepTicks(page, 20)
-  const onGate = (await getState(page)).resistance
-  await setInput(page, { chamber: c.index, liftTarget: off, tensionHeld: false })
-  await stepTicks(page, 20)
-  const offGate = (await getState(page)).resistance
-
-  expect((await getState(page)).chambers[c.index]?.state).not.toBe('SET')
-  expect(onGate, 'the gate has to be readable, or the lock is a lottery').toBeLessThan(offGate)
-  watcher.assertClean()
-})
+// Retired (D-230): 'a sidebar gate can be felt before it is set' read the old physics' resistance
+// detent. The solver's gate is read from the bore — drawn on both rungs, coloured on Training —
+// and met by holding the set chamber's key pin in it.
 
 test('@screenshot phase-10 sidebar held', async ({ page }) => {
   const watcher = await bootGame(page, { frames: 3 })

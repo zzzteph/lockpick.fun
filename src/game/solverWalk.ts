@@ -116,6 +116,22 @@ function walkOnce(
       // Every pin set: the plug may be free — hold and see, a step heavier if it is held short.
       advance(input({ tensionHeld: true, tensionLevel: LEVEL }), 0.3)
       if (s.opened) break
+      // …unless a sidebar gate is unmet (D-230): lift that set pin slowly up its window until the
+      // leg drops into the gate, then let it down.
+      const eng = session.engine
+      const gated = eng ? s.chambers.findIndex((_, i) => eng.gate(i) !== null && !eng.aligned(i)) : -1
+      if (eng && gated >= 0) {
+        advance(input({ chamber: gated, tensionHeld: true, tensionLevel: LEVEL }), 0.3)
+        let lift = 0
+        for (let t = 0; t < 3 && spent < budget && !s.opened && !eng.aligned(gated); t += DT) {
+          // Up slowly, and hold still once the key pin is in its gate — the leg needs a moment.
+          if (!eng.inGate(gated)) lift = Math.min(LIFT_CEILING, lift + KEY_LIFT_RATE * 0.35 * DT)
+          onEvents(session.advance(DT, input({ chamber: gated, liftTarget: lift, tensionHeld: true, tensionLevel: LEVEL })))
+          spent += DT
+        }
+        advance(input({ chamber: gated, tensionHeld: true, tensionLevel: LEVEL }), 0.4)
+        continue
+      }
       if (step >= LAST_STEP) break
       step += 1
       LEVEL = tensionForStep(step)
@@ -133,7 +149,11 @@ function walkOnce(
         : stuck >= 0
           ? DIP
           : (eased ?? LEVEL)
-    const counter = falseSet >= 0 || (stuck >= 0 && !plainStuck)
+    // A binding SECURITY pin that gave nothing on the last push is caught on a tooth or a waist —
+    // the magnet's case above all (D-230: a magnetic serrated driver held on a tooth stays there),
+    // so it is worked the way a false set is: with the plug eased back under the lift.
+    const caught = falseSet < 0 && stuck < 0 && idle >= 1 && session.def.pins[target] !== 'standard'
+    const counter = falseSet >= 0 || (stuck >= 0 && !plainStuck) || caught
     advance(input({ chamber: target, tensionHeld: true, tensionLevel: LEVEL }), 0.3)
     let lift = 0
     let latched = false

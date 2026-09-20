@@ -203,7 +203,7 @@ import { STREAK_SECONDS, generateStreakLock, streakTierFor } from './game/streak
 // any lock with the same machine that proves the roster openable. ~15KB of prod bundle carrying
 // a dev instrument — accepted, because a DEV-gated import would need a second chunk and the
 // build is deliberately one file (D-037).
-import { solveLock } from './sim/solver'
+import { solveLock } from './wheels'
 import {
   DUNGEON_DIFFICULTY_FACTOR,
   advance as advanceDungeon,

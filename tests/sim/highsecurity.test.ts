@@ -13,29 +13,16 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { ALL_LOCKS, lockBySlug } from '../../src/game/locks'
+import { ALL_LOCKS } from '../../src/game/locks'
 import { KIT } from '../../src/game/tools'
 import {
   DISC_TRAVEL,
-  SIDEBAR_HELD_FRACTION,
-  THETA_OPEN,
-  captureRange,
   createSimState,
   grooveDepthAt,
   makeConfig,
-  measureDifficulty,
-  sidebarAlignedAt,
-  solveLock,
-  type LockDef,
-  type SimState,
 } from '../../src/sim'
+import { measureDifficulty, solveLock } from '../../src/wheels'
 import { PERFECT_CONFIG, holdFor, makeLock, pick, tensionOnly } from './fixtures'
-
-function lock(slug: string): LockDef {
-  const def = lockBySlug(slug)
-  if (!def) throw new Error(`no lock ${slug}`)
-  return def
-}
 
 /**
  * The loadout a player would actually be holding: the specialist tool is a pure gate with no
@@ -56,15 +43,6 @@ function realConfig(): ReturnType<typeof makeConfig> {
  * solver. Raised here rather than globally, so a genuine hang anywhere else still trips it.
  */
 const HEAVY_TIMEOUT = 120_000
-
-/** Seven pins in a circle. Not in the roster any more, still fully modelled (D-088). */
-const TUBULAR_FIXTURE = makeLock({
-  slug: 'fixture-tubular-7',
-  bitting: [3.0, 3.4, 2.8, 3.2, 3.6, 2.9, 3.1],
-  pins: ['standard', 'standard', 'standard', 'standard', 'standard', 'standard', 'standard'],
-  family: 'tubular',
-  toleranceQuality: 1.0,
-})
 
 /**
  * Six discs, one false gate each — the *Vantage Disc Detainer 6* that used to be lock 25.
@@ -119,7 +97,6 @@ const PROTEC_FIXTURE = makeLock({
 })
 
 const discLocks = [DISC_FIXTURE, PROTEC_FIXTURE]
-const sidebars = ALL_LOCKS.filter((d) => d.sidebar !== undefined)
 
 describe('disc detainers', () => {
   it('are gone from the roster, and still a lock the simulation can build (D-104)', () => {
@@ -199,113 +176,7 @@ describe('disc detainers', () => {
   )
 })
 
-/**
- * Tubular locks left the *roster* with D-088 but not the *simulation* — they were never a separate
- * machine, only a pin tumbler bent into a circle by the view, and that is exactly what this proves.
- * From a fixture now, since there is no longer a catalogue entry to point at.
- */
-describe('tubular locks', () => {
-  it('reuse the pin model unchanged', () => {
-    for (const def of [TUBULAR_FIXTURE]) {
-      const s = createSimState(def, 1, PERFECT_CONFIG)
-      // No disc, no wafer: a tubular is the ordinary stack, bent into a circle by the view.
-      expect(s.chambers.every((c) => c.kind === 'pin')).toBe(true)
-      expect(s.chambers.every((c) => c.setLift > 0)).toBe(true)
-    }
-  })
 
-  it(
-    'open across 50 seeds with the one kit — no specialist pick needed any more (D-088)',
-    () => {
-      const r = measureDifficulty(TUBULAR_FIXTURE, realConfig(), 50)
-      expect(r.solved, `${TUBULAR_FIXTURE.slug}: ${r.failures.slice(0, 2).join('; ')}`).toBe(50)
-    },
-    HEAVY_TIMEOUT,
-  )
-})
-
-describe('sidebar locks', () => {
-  it('put every gate inside its chamber capture window', () => {
-    expect(sidebars.length, 'the roster still carries a sidebar cylinder').toBeGreaterThan(0)
-    for (const def of sidebars) {
-      const s = createSimState(def, 1, PERFECT_CONFIG)
-      const gated = s.chambers.filter((c) => c.sidebarGate !== null)
-      expect(gated.length).toBe(def.sidebar?.gatedChambers.length)
-      for (const c of gated) {
-        const { low, high } = captureRange(c)
-        expect(c.sidebarGate as number).toBeGreaterThanOrEqual(low)
-        expect(c.sidebarGate as number).toBeLessThanOrEqual(high)
-        // …and narrower than the window, or it would not be a second condition at all.
-        expect(c.sidebarWidth * 2).toBeLessThan(high - low)
-      }
-    }
-  })
-
-  it('hold the plug back with every pin set, when a gate was missed', () => {
-    const def = lock('halberd-sidebar-cylinder')
-    const s = createSimState(def, 4, PERFECT_CONFIG)
-    setEveryChamber(s, (c) => {
-      if (c.sidebarGate === null) return c.setLift + c.captureWindow * 0.5
-      // Deliberately aim at the far end of the window from the gate.
-      const { low, high } = captureRange(c)
-      return sidebarAlignedAt(c, high - 1e-3) ? low + 1e-3 : high - 1e-3
-    })
-
-    expect(s.chambers.every((c) => c.state === 'SET')).toBe(true)
-    expect(s.chambers.some((c) => c.sidebarGate !== null && !c.sidebarAligned)).toBe(true)
-    expect(s.sidebarDropped).toBe(false)
-    expect(s.opened).toBe(false)
-    // Turned some of the way and stopped: the tell that it is a sidebar and not weak tension.
-    expect(s.theta).toBeGreaterThan(0)
-    expect(s.theta).toBeLessThanOrEqual(THETA_OPEN * SIDEBAR_HELD_FRACTION + 1e-6)
-  })
-
-  it('open when the same lock is set with every gate aligned', () => {
-    const def = lock('halberd-sidebar-cylinder')
-    const s = createSimState(def, 4, PERFECT_CONFIG)
-    setEveryChamber(s, (c) => c.sidebarGate ?? c.setLift + c.captureWindow * 0.5)
-    expect(s.chambers.every((c) => c.state === 'SET')).toBe(true)
-    expect(s.sidebarDropped).toBe(true)
-    holdFor(s, tensionOnly(0.6), 1.2)
-    expect(s.opened).toBe(true)
-  })
-
-  it('let the gate be felt: a gated chamber reads lighter on its gate', () => {
-    const def = lock('halberd-sidebar-cylinder')
-    const s = createSimState(def, 4, PERFECT_CONFIG)
-    const c = s.chambers.find((x) => x.sidebarGate !== null)
-    if (!c) throw new Error('no gated chamber')
-    const gate = c.sidebarGate as number
-    const { low, high } = captureRange(c)
-    const off = sidebarAlignedAt(c, high) ? low : high
-
-    // Wrench off, so nothing can capture while the survey is running.
-    holdFor(s, pick(c.index, gate, 0), 0.12)
-    const onGate = s.resistance
-    holdFor(s, pick(c.index, off, 0), 0.12)
-    const offGate = s.resistance
-    expect(c.state).not.toBe('SET')
-    expect(onGate).toBeLessThan(offGate)
-  })
-
-  it(
-    'open across 50 seeds with the tools a player would bring',
-    () => {
-      for (const def of sidebars) {
-        const r = measureDifficulty(def, realConfig(), 50)
-        expect(r.solved, `${def.slug}: ${r.failures.slice(0, 2).join('; ')}`).toBe(50)
-      }
-    },
-    HEAVY_TIMEOUT,
-  )
-
-  it('are not free — the solver spends blind probes finding the gates', () => {
-    for (const def of sidebars) {
-      const r = measureDifficulty(def, realConfig(), 10)
-      expect(r.meanSearchSteps, `${def.slug}`).toBeGreaterThan(0)
-    }
-  })
-})
 
 describe('the top of the roster', () => {
   it('ends at Tier 4 — cylinders and wheel packs, since D-167 brought a second family', () => {
@@ -322,7 +193,9 @@ describe('the top of the roster', () => {
   it(
     'opens every Tier 4 lock across 50 seeds',
     () => {
-      for (const def of ALL_LOCKS.filter((d) => d.tier === 4)) {
+      // The wheel packs: Tier 4's pin locks run on the contact solver now (D-233) and are opened
+      // there, by the walk, in tests/game/solverSession.test.ts.
+      for (const def of ALL_LOCKS.filter((d) => d.tier === 4 && d.family === 'combination')) {
         const r = measureDifficulty(def, realConfig(), 50)
         expect(r.solved, `${def.slug}: ${r.failures.slice(0, 2).join('; ')}`).toBe(50)
       }
@@ -330,35 +203,14 @@ describe('the top of the roster', () => {
     HEAVY_TIMEOUT,
   )
 
-  it('returns a replayable tape for the sidebar cylinder and for a disc detainer', () => {
-    // One shipped lock and one fixture: the solver's disc handling — sweeping blind for an angle
-    // it is given no way to read — is the part that would rot silently now that no lock in the
-    // roster exercises it.
-    for (const def of [lock('halberd-sidebar-cylinder'), DISC_FIXTURE]) {
+  it('returns a replayable tape for a disc detainer', () => {
+    // The solver's disc handling — sweeping blind for an angle it is given no way to read — is
+    // the part that would rot silently now that no lock in the roster exercises it. (The sidebar
+    // cylinder stood here too; it runs on the contact solver since D-230/D-233.)
+    for (const def of [DISC_FIXTURE]) {
       const r = solveLock(def, 6, realConfig())
       expect(r.opened, def.slug).toBe(true)
       expect(r.tape.length, def.slug).toBeGreaterThan(3)
     }
   })
 })
-
-/**
- * Drive every chamber to a chosen lift and let it capture, in binding order.
- *
- * Deliberately not the solver: these tests need to *choose* where each chamber sets, which is
- * the whole point when the question is whether setting it in the wrong place is detected.
- */
-function setEveryChamber(s: SimState, targetFor: (c: SimState['chambers'][number]) => number): void {
-  // 0.22, down from 0.35 with D-204: the sidebar lock's tight tolerance (0.58) pulls its
-  // spools' wall to ~0.25, and a stage that grinds above the wall never sets them. Probed:
-  // at 0.22 all six chambers set; at 0.28 two spools stay wedged. Above the 0.18 hold floor.
-  holdFor(s, tensionOnly(0.22), 0.3)
-  for (let guard = 0; guard < 6000 && !s.chambers.every((c) => c.state === 'SET'); guard += 1) {
-    // A false-set chamber is nobody's binding chamber — the groove has swallowed the ledge —
-    // so falling back to the first unset one is what keeps a spool from deadlocking this.
-    const b = s.bindingChamber >= 0 ? s.bindingChamber : s.chambers.findIndex((c) => c.state !== 'SET')
-    const c = b >= 0 ? s.chambers[b] : undefined
-    if (!c) break
-    holdFor(s, pick(b, targetFor(c), 0.22), 1 / 120)
-  }
-}

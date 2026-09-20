@@ -21,13 +21,12 @@ import {
   detentCentre,
   grooveDepthAt,
   makeConfig,
-  measureDifficulty,
   quantizeDetent,
-  step,
   validateLockDef,
   type LockDef,
   type SimState,
 } from '../../src/sim'
+import { measureDifficulty, step } from '../../src/wheels'
 import { PERFECT_CONFIG, holdAt, holdFor, makeLock, pick, tensionOnly } from './fixtures'
 
 /** Chamber indices in the order this instance's seeded deltas will bind them. */

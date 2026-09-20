@@ -474,9 +474,9 @@ test.describe('right-handed', () => {
     })
     const watcher = await bootGame(page, { frames: 3 })
     await setManual(page, true)
-    // A cutaway lock (D-226): pin locks draw the solver's side view, which does not mirror, and the
-    // arrows follow it unmirrored; the mirrored cutaway is the rate-sim families' — this sidebar one.
-    await loadLock(page, 27, 5)
+    // A pin lock in the solver's side view, which does not mirror (D-226/D-230): with the
+    // right-handed setting on, the arrows must still point the way they say on screen.
+    await loadLock(page, 22, 5)
 
     const tipX = async (): Promise<number> =>
       page.evaluate(() => globalThis.__shearline!.pickTip().x)
@@ -488,6 +488,9 @@ test.describe('right-handed', () => {
       await renderOnce(page)
     }
     // The pick starts at chamber 0 — the front pin — which mirrored is the *rightmost* on screen.
+    // The first press puts the pick in at pin 1 (leftmost, unmirrored); the second walks it right.
+    await page.keyboard.press('ArrowRight')
+    await settle()
     await page.keyboard.press('ArrowRight')
     await settle()
     const start = await tipX()

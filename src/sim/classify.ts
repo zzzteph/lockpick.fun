@@ -6,7 +6,7 @@
  * which is the entire point of the band model.
  */
 
-import { COMBO_DETENT, COMBO_DIGITS, DISC_FALSE_GATE_DEPTH, DISC_FALSE_GATE_TAPER } from './constants'
+import { DISC_FALSE_GATE_DEPTH, DISC_FALSE_GATE_TAPER } from './constants'
 import type { DriverProfile } from './profiles'
 import type { Chamber, Geometry } from './types'
 
@@ -96,37 +96,7 @@ function readDisc(c: Chamber, lift: number): ShearReading {
   return { geometry: 'SOLID', bandAtShear: -1 }
 }
 
-/** Centre of a combination wheel's detent, in lift units — where digit `digit` parks. */
-export function detentCentre(digit: number): number {
-  return (digit + 0.5) * COMBO_DETENT
-}
 
-/**
- * Snap a commanded wheel angle to the nearest detent centre it is inside.
- *
- * `floor`, not `round`: a detent is a *slot* the wheel drops into, so the whole span of one
- * digit maps to that digit's centre. The top edge of the travel belongs to the last digit —
- * without the clamp, a command at exactly `DISC_TRAVEL` would invent an eleventh detent.
- */
-export function quantizeDetent(lift: number): number {
-  const digit = Math.min(COMBO_DIGITS - 1, Math.max(0, Math.floor(lift / COMBO_DETENT)))
-  return detentCentre(digit)
-}
-
-/**
- * The lift a player should aim for to set this chamber.
- *
- * A pin stack wants the middle of the capture window, which runs *upward* from `setLift`.
- * A wafer wants the gate itself, which is centred on `setLift`. One helper so the solver and
- * the guided-mode annotations cannot disagree about it.
- */
-export function targetLiftFor(c: Chamber): number {
-  if (c.kind === 'wafer' || c.kind === 'disc') return c.setLift
-  // A sidebar chamber has a second, narrower condition inside the capture window: the gate
-  // has to line up too, so aim at the gate rather than the middle of the window.
-  if (c.sidebarGate !== null) return c.sidebarGate
-  return c.setLift + c.captureWindow * 0.5
-}
 
 /** The band of lift over which this chamber will capture. */
 export function captureRange(c: Chamber): { low: number; high: number } {
@@ -181,23 +151,6 @@ export function grooveFloorLift(c: Chamber): number {
 }
 
 /** Groove depth of the band currently at the shear line, 0 when it is a full band. */
-/**
- * The **top** of the groove the plug's ledge is sitting in — where the driver's full-diameter
- * shoulder meets the ledge and can go no further up.
- *
- * A spool caught at its waist is trapped between two shoulders: the foot below cannot pass the
- * ledge going up, the head above cannot pass it going down. That is what a false set physically
- * *is*, and until now only the downward half was modelled. See DECISIONS D-075.
- */
-export function grooveCeilingLift(c: Chamber): number {
-  if (c.bandAtShear < 0) return Number.POSITIVE_INFINITY
-  if (c.kind === 'disc') {
-    const gate = c.falseGates[c.bandAtShear]
-    if (gate === undefined) return Number.POSITIVE_INFINITY
-    return gate + c.captureWindow / 2 - 1e-4
-  }
-  return bandLiftRange(c, c.bandAtShear).max - 1e-4
-}
 
 export function grooveDepthAt(c: Chamber): number {
   if (c.bandAtShear < 0) return 0

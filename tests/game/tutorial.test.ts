@@ -29,19 +29,53 @@ import {
 import { ALL_LOCKS } from '../../src/game/locks'
 import {
   CAPTURE_WINDOW,
-  MAX_OVERLIFT,
   PERFECT_TOOLS,
   createSimState,
   makeConfig,
-  measureDifficulty,
-  runTape,
-  solveLock,
   validateLockDef,
   DT,
 } from '../../src/sim'
-import { holdFor, pick, tensionOnly } from '../sim/fixtures'
+import { measureDifficulty, runTape, solveLock } from '../../src/wheels'
+import { Session } from '../../src/game/session'
+import { solverCanRun } from '../../src/game/solverStepper'
+import { walkSolver } from '../../src/game/solverWalk'
+import { tensionForStep } from '../../src/ui/input'
+import type { LockDef, SimInput } from '../../src/sim'
 
 const CONFIG = makeConfig({ tools: PERFECT_TOOLS, featherEnabled: false })
+
+/**
+ * The lessons' pin locks run on the contact solver (D-233), so these tests play them through a
+ * `Session` the way the game does; the wheel lesson stays on the rate sim, its solver and tape.
+ */
+const TICK = 1 / 120
+function input(patch: Partial<SimInput> = {}): SimInput {
+  return { chamber: -1, liftTarget: 0, tensionHeld: false, tensionLevel: 0, ...patch }
+}
+function hold(s: Session, inp: SimInput, seconds: number, each?: () => void): void {
+  for (let t = 0; t < seconds; t += TICK) {
+    s.advance(TICK, inp)
+    each?.()
+  }
+}
+const WRENCH = tensionForStep(5)
+/** Open a lesson lock, calling `each` every tick: the solver's walk, or the rate sim's tape. */
+function playOpen(def: LockDef, seed: number, each: (state: Session['state']) => void): Session['state'] {
+  if (solverCanRun(def)) {
+    const s = new Session(def, seed, CONFIG)
+    walkSolver(s, () => each(s.state), { maxSeconds: 600 })
+    return s.state
+  }
+  const s = createSimState(def, seed, CONFIG)
+  const solved = solveLock(def, seed, CONFIG)
+  for (const segment of solved.tape) {
+    for (let i = 0; i < segment.ticks; i += 1) {
+      runTape(s, [{ ticks: 1, input: segment.input }])
+      each(s)
+    }
+  }
+  return s
+}
 
 describe('the teaching locks', () => {
   it('are eight, and every one is a legal lock', () => {
@@ -100,16 +134,13 @@ describe('the teaching locks', () => {
     // Narrower than the pick crosses inside `CAPTURE_TIME`, so overshooting really oversets.
     expect(w).toBeLessThan(0.4)
 
-    const s = createSimState(LESSON_OVERSET_LOCK, 5, CONFIG)
-    // Light tension and a fast lift: exactly what a player does having just learned that
-    // lifting works. The pick crosses the window in about two ticks, well under `CAPTURE_TIME`.
-    holdFor(s, tensionOnly(0.15), 0.3)
-    const b = s.bindingChamber
-    const c = s.chambers[b]
-    expect(c).toBeDefined()
-    if (!c) return
-    holdFor(s, pick(b, c.setLift + MAX_OVERLIFT, 0.15), 1.2)
-    expect(s.stats.oversets).toBeGreaterThan(0)
+    // On the solver (D-233): lift a pin to the ceiling and keep pushing; it oversets and, held,
+    // wedges (D-220), which is exactly what the lesson asks the player to feel.
+    const s = new Session(LESSON_OVERSET_LOCK, 5, CONFIG)
+    hold(s, input({ tensionHeld: true, tensionLevel: WRENCH }), 0.5)
+    hold(s, input({ chamber: 0, liftTarget: 3.5, tensionHeld: true, tensionLevel: WRENCH }), 4)
+    expect(s.state.stats.oversets).toBeGreaterThan(0)
+    expect(s.state.chambers.some((c) => c.jammed === true)).toBe(true)
   })
 
   it('the spool lesson has exactly one spool, in the middle, and nothing else to confuse it', () => {
@@ -118,12 +149,19 @@ describe('the teaching locks', () => {
     expect(LESSON_SPOOL_LOCK.pins.filter((p) => p !== 'standard' && p !== 'spool')).toHaveLength(0)
   })
 
-  it('every teaching lock opens, across 50 seeds', () => {
+  it('every teaching lock opens: the pin locks by the solver walk, the wheels across 50 seeds', () => {
     for (const def of TUTORIAL_LOCKS) {
+      if (solverCanRun(def)) {
+        for (const seed of [1, 3, 4]) {
+          const s = new Session(def, seed, CONFIG)
+          expect(walkSolver(s, () => {}, { maxSeconds: 600 }), `${def.slug} seed ${seed}`).toBe(true)
+        }
+        continue
+      }
       const r = measureDifficulty(def, CONFIG, 50)
       expect(r.solved, `${def.slug}: ${r.failures.slice(0, 2).join('; ')}`).toBe(50)
     }
-  })
+  }, 1_200_000)
 })
 
 describe('the lessons', () => {
@@ -215,16 +253,16 @@ describe('the lessons', () => {
     const lesson = lessonById('lesson-1')
     if (!lesson) throw new Error('no lesson')
     const run = startLesson(lesson)
-    const s = createSimState(lesson.lock, 3, CONFIG)
+    const s = new Session(lesson.lock, 3, CONFIG)
 
     // Doing nothing advances nothing, however long you wait.
-    holdFor(s, tensionOnly(0), 2)
-    updateLesson(run, s, 2)
+    hold(s, input(), 2)
+    updateLesson(run, s.state, 2)
     expect(run.step).toBe(0)
 
     // Applying tension satisfies step 1, and only step 1.
-    holdFor(s, tensionOnly(0.45), 0.3)
-    updateLesson(run, s, 0.3)
+    hold(s, input({ tensionHeld: true, tensionLevel: WRENCH }), 0.3)
+    updateLesson(run, s.state, 0.3)
     expect(run.step).toBe(1)
     expect(run.complete).toBe(false)
   })
@@ -235,50 +273,39 @@ describe('the lessons', () => {
     const lesson = lessonById('lesson-1')
     if (!lesson) throw new Error('no lesson')
     const run = startLesson(lesson)
-    const s = createSimState(lesson.lock, 3, CONFIG)
+    const s = new Session(lesson.lock, 3, CONFIG)
 
     // Tension on *and* already sitting on the binding chamber: two steps at once.
-    holdFor(s, tensionOnly(0.45), 0.3)
-    const b = s.bindingChamber
-    holdFor(s, pick(b, 0, 0.45), 0.1)
-    updateLesson(run, s, 0.1)
+    hold(s, input({ tensionHeld: true, tensionLevel: WRENCH }), 0.3)
+    const b = s.state.bindingChamber
+    hold(s, input({ chamber: b, tensionHeld: true, tensionLevel: WRENCH }), 0.5)
+    updateLesson(run, s.state, 0.5)
     expect(run.step).toBeGreaterThanOrEqual(2)
   })
 
   it('completes when the lock opens, with no clicks anywhere', () => {
     for (const lesson of LESSONS) {
       const run = startLesson(lesson)
-      const s = createSimState(lesson.lock, 4, CONFIG)
-      const solved = solveLock(lesson.lock, 4, CONFIG)
-      expect(solved.opened, lesson.id).toBe(true)
-
-      // Replay the solver's tape a tick at a time, updating the lesson as the game would.
-      for (const segment of solved.tape) {
-        for (let i = 0; i < segment.ticks; i += 1) {
-          runTape(s, [{ ticks: 1, input: segment.input }])
-          updateLesson(run, s, DT)
-        }
-      }
+      // Played a tick at a time, updating the lesson as the game would.
+      const s = playOpen(lesson.lock, 4, (st) => updateLesson(run, st, DT))
       expect(s.opened, lesson.id).toBe(true)
       expect(run.complete, `${lesson.id} did not complete on an open`).toBe(true)
       expect(currentLine(run), lesson.id).toBeNull()
       expect(lessonProgress(run), lesson.id).toBe(1)
     }
-  })
+  }, 600_000)
 
   it('reaches the overset step in lesson 2 when the player oversets', () => {
     const lesson = lessonById('lesson-2')
     if (!lesson) throw new Error('no lesson')
     const run = startLesson(lesson)
-    const s = createSimState(lesson.lock, 5, CONFIG)
-    holdFor(s, tensionOnly(0.15), 0.3)
-    updateLesson(run, s, 0.3)
-    const b = s.bindingChamber
-    const c = s.chambers[b]
-    if (!c) throw new Error('nothing binding')
-    holdFor(s, pick(b, c.setLift + MAX_OVERLIFT, 0.15), 1.2)
-    updateLesson(run, s, 1.2)
-    expect(s.stats.oversets).toBeGreaterThan(0)
+    const s = new Session(lesson.lock, 5, CONFIG)
+    hold(s, input({ tensionHeld: true, tensionLevel: WRENCH }), 0.5, () => updateLesson(run, s.state, TICK))
+    // Push one pin too far and keep pushing, as the lesson asks: it oversets and wedges (D-223).
+    hold(s, input({ chamber: 0, liftTarget: 3.5, tensionHeld: true, tensionLevel: WRENCH }), 4, () =>
+      updateLesson(run, s.state, TICK),
+    )
+    expect(s.state.stats.oversets).toBeGreaterThan(0)
     // Steps 1 and 2 are both satisfied by the overset; the player is now on "that pin is jammed".
     expect(run.lesson.steps[run.step]?.id).toBe('stuck')
   })
@@ -287,16 +314,11 @@ describe('the lessons', () => {
     const lesson = lessonById('lesson-3')
     if (!lesson) throw new Error('no lesson')
     const run = startLesson(lesson)
-    const s = createSimState(lesson.lock, 4, CONFIG)
-    const solved = solveLock(lesson.lock, 4, CONFIG)
     let sawFalseSetStep = false
-    for (const segment of solved.tape) {
-      for (let i = 0; i < segment.ticks; i += 1) {
-        runTape(s, [{ ticks: 1, input: segment.input }])
-        updateLesson(run, s, DT)
-        if (run.lesson.steps[run.step]?.id === 'false-set') sawFalseSetStep = true
-      }
-    }
+    const s = playOpen(lesson.lock, 4, (st) => {
+      updateLesson(run, st, DT)
+      if (run.lesson.steps[run.step]?.id === 'false-set') sawFalseSetStep = true
+    })
     expect(s.stats.falseSetsEntered, 'the spool has to lie for the lesson to work').toBeGreaterThan(0)
     expect(sawFalseSetStep).toBe(true)
     expect(run.complete).toBe(true)

@@ -44,21 +44,6 @@ export const OVERSET_THETA_FACTOR = 0.5
  * lock sat at ~61% of `THETA_OPEN`, inside the 55-70% band the spec asked for (D-009).
  */
 export const FALSE_SET_GAIN = 1.05
-/**
- * The pin (and wafer) chambers' gain, cut from the spec's 1.05 — DECISIONS D-202.
- *
- * The spec's band made a *last-pin* false set swing the plug 61% of the way to open (a deep
- * spool: 89%), because with every other chamber set nothing else caps θ — and on screen that
- * is not a catch, it is the lock opening. Reported from play as *"when you start turning the
- * last spool pin, the cylinder turned and I have some feeling that it should be stuck in the
- * thin part, but it does not."* The owner's sentence is the correct physics: the ledge drops
- * into the waist and wedges. At 0.40 the swings read as catches and keep their family order —
- * spool ~23% of θ_open, deep spool ~34% (still the long lie, D-079), mushroom ~22%, slim
- * ~18%, serrated ~9% (tooth-sized clicks). Mid-pick false sets are unchanged in kind: other
- * unset chambers were already capping those at their deltas. The push-through wall does not
- * move — it is a force race (D-010/D-053), not a function of this throw.
- */
-export const PIN_FALSE_SET_GAIN = 0.4
 /** Stiff spring: θ chases its target. */
 export const PLUG_TAKEUP_RATE = 24.0
 /**
@@ -87,52 +72,8 @@ export const PLUG_MAX_RATE = 1.2
  * a 0.12-deep notch can push anything.
  */
 export const COUNTER_ROTATION_FORCE = 42.8
-/**
- * The pin chambers' counter-rotation force since D-204 — the owner's ruling, chosen from the
- * three options measured in play: *"I do believe that counter rotation is not needed in our
- * game - like I put on 2 level tension and I can put everything with no problems."* At 42.8
- * every wall sat above the light steps (spool 0.55, serrated 0.60, t-pin 0.65), so a light
- * hand never met one and the whole spool fight was optional. Raised so the walls land inside
- * the playable band — spool between steps 3 and 4, mushroom around step 2, t-pin highest —
- * making the climb a *felt* fight at the tensions people actually use, and the dips genuinely
- * deep. The exact value is set by probe, not by the closed-form wall equation, because the
- * pinch dynamics and exit geometry moved the real walls off the arithmetic twice already.
- * Discs stay on `COUNTER_ROTATION_FORCE`: a wheel's gate drag is its only tell (D-197).
- */
-export const PIN_COUNTER_FORCE = 90
-/**
- * Ceiling on how much of a pin's taper feeds the counter-force — D-204's second finding.
- *
- * The force term is `F × T × (0.25 + taper)`, and at F=90 the mushroom's steep head (taper
- * well past 0.5) drove its wall to 0.16 — BELOW `T_SET_HOLD` (0.18), the tension a set pin
- * needs to stay on its ledge at all. That is not a hard lock, it is a structurally unpickable
- * one: any hand light enough to climb the mushroom shed every banked pin mid-climb, and the
- * solver's autopsy read 32 full resets and zero oversets on every failing seed. Past this cap
- * a steeper head stops adding shove — the contact saturates — which holds the mushroom's wall
- * at ~0.26: still the lowest in the catalogue (its identity — the pin that punishes a heavy
- * hand hardest), now survivably above the hold floor. Spools and t-pins sit below the cap and
- * are untouched by it.
- */
-export const TAPER_FORCE_CAP = 0.35
 /** Radians of plug rotation past δ over which the ledge fully enters the groove. */
 export const ENGAGE_RAMP = 0.003
-
-/**
- * How hard a serrated pin's teeth grip the plug edge while it is binding — D-157.
- *
- * A serrated pin's whole character is that every tooth bites: under tension the plug's edge
- * drags across each serration on the way up, and the climb *grinds*. The simulation had the
- * lies (each groove false-sets, which is the four fake clicks) but not the grind — lifting a
- * serrated pin cost exactly what lifting a standard pin cost, reported from play as *"I do
- * feel that they have no real difference to the general pin."*
- *
- * The binding lift rate divides by `1 + grip × T × grooveCount`, so at working tension a
- * four-serration pin climbs at roughly a third of a plain pin's rate, and feathering the
- * wrench — the same instinct every security pin teaches — is what frees it. Applied only to
- * profiles with three or more grooves, which is the serrated family and nothing else: a
- * spool's one waist is a wall, not a grind, and it already has its own mechanics.
- */
-export const SERRATION_GRIP = 0.8
 
 /**
  * How hard pushing a trapped driver rotates the plug **backwards**, in radians per second per
@@ -151,15 +92,6 @@ export const SERRATION_GRIP = 0.8
  * measured per profile. A constant of its own would have re-opened that tuning. See DECISIONS D-075.
  */
 export const PLUG_PUSHBACK = 0.15
-/**
- * How much of the camming a *fully engaged* ledge takes away, 0..1.
- *
- * At 0.85 a spool the plug has swung right into keeps 15% of its cammability — a very slow shove
- * rather than an impossible one, so no wrench in the catalogue is locked out of a spool lock. Ease
- * the tension and the plug rotates back, the bevel comes into contact, and it climbs in about a
- * second. Hold it hard and it is a wall. See DECISIONS D-077.
- */
-export const SPOOL_CAM_BITE = 0.6
 
 // ── §6 Tension ──────────────────────────────────────────────────────────────────────────
 
@@ -276,8 +208,6 @@ export const BIND_HARDNESS = 3.2
 export const PICK_BASE_RATE = 26.0
 /** Non-pinched chambers are just riding springs. */
 export const FREE_LIFT_MULTIPLIER = 2.2
-/** How fast a chamber the pick has left returns to rest. Spec silent; see DECISIONS D-012. */
-export const SPRING_RETURN_RATE = 34.0
 /**
  * The spring bottoms out this far above `setLift`; bounds the overset region.
  *
@@ -357,8 +287,6 @@ export const TENSION_TRAVEL_DRAG = 3.5
  * know it is an angle.
  */
 export const DISC_TRAVEL = 3.0
-/** Discs have no springs — nothing returns them. They stay exactly where you left them. */
-export const DISC_SPRING_RETURN = 0
 
 /**
  * A magnetic chamber's return rate: a crawl, not zero.
@@ -497,18 +425,6 @@ export const RESIST_OVERSET = 0.95
 export const RESIST_FREE_BASE = 0.2
 export const RESIST_FREE_WOBBLE = 0.07
 export const RESIST_FREE_HZ = 3.5
-/**
- * How much lighter a binding chamber feels while its sidebar gate is lined up.
- *
- * Without this a sidebar lock is a lottery: the gate is a 0.18mm band inside a 0.36mm capture
- * window, invisible, and missing it is only discovered after every pin is set and the plug
- * refuses to turn — at which point the only remedy is dropping tension and losing the lot.
- * It is also not how these locks are picked. The sidebar leg rides on the pin as you lift it
- * and *seats* when the gate passes under it; you feel that, and you stop there. Making the
- * tell readable on the one channel §8 already gives the player turns the sidebar from a coin
- * flip into a second, finer search. See DECISIONS D-029.
- */
-export const RESIST_SIDEBAR_DETENT = 0.18
 
 /**
  * How much one chamber's feel may differ from its neighbour's, either way (D-052).
@@ -531,18 +447,6 @@ export const RESIST_PIN_BIAS = 0.07
 export const DRAG_RATE_SPREAD = 0.15
 
 /**
- * Resistance added per millimetre of lift — the spring getting stiffer as it compresses.
- *
- * Springs obey Hooke's law: the force rises linearly with compression, so a pin held at 3mm pushes
- * back appreciably harder than the same pin at 1mm. That rising gradient is how a picker judges
- * depth with no way of seeing it, and without it depth is free information-wise: every height felt
- * identical. See DECISIONS D-070.
- */
-export const RESIST_PER_MM_LIFT = 0.085
-/** Return rate at zero compression, as a fraction of the nominal — the spring's preload. */
-export const SPRING_PRELOAD = 0.55
-
-/**
  * Plug rotation past a chamber's δ at which its driver is *fully* caught on the ledge.
  *
  * The overlap between the plug's bore and the shell's shrinks as the plug turns, so a driver set
@@ -552,31 +456,6 @@ export const SPRING_PRELOAD = 0.55
  * See DECISIONS D-071.
  */
 export const LEDGE_FULL_ENGAGE = 0.12
-
-/**
- * How far back past its own δ the plug must come before a set driver loses its ledge entirely.
- *
- * The ledge under a captured driver *is* the plug's rotation past δ — so if something drives the
- * plug back to δ, there is nothing under the driver any more and it falls into the plug. Forcing a
- * false-set spool with a light wrench does exactly that (D-075), and until this existed the chamber
- * stayed nominally SET with an open ceiling above it: the driver could be shoved to the top of its
- * travel, never jammed, and never fell. Set pins were being lost in geometry and kept in bookkeeping.
- *
- * The margin exists only so that resting *at* δ — which is where every chamber sits for the tick it
- * captures on — is not mistaken for coming back past it. Half of `MIN_DELTA_GAP`, so it can never
- * span two chambers. See DECISIONS D-081.
- */
-export const LEDGE_RELEASE_MARGIN = 0.0004
-
-/**
- * How far the pick must have a captured driver up off the plug's shoulder before it stops ratcheting.
- *
- * A set driver blocks the plug from turning back because its own body is in the corner. Lift it
- * clear and the plug can swing back underneath — twenty microns is enough to be *lifted* rather
- * than resting, and small enough that it is the deliberate shove, not float noise, that does it.
- * See DECISIONS D-081.
- */
-export const LEDGE_CLEAR_MM = 0.02
 
 /**
  * How far a lock's condition may move its tolerances, either way.

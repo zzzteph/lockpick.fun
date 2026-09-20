@@ -430,6 +430,44 @@ export function shearLineMm(P: Params): number {
   return circleY(P, P.pinRadius - 0.05)
 }
 
+/**
+ * How much of the spring and weight a magnet holds on a magnetic chamber's driver — D-230. A hair
+ * under all of it: the old physics' magnetic pin crept back at 0.12 mm/s against a sprung pin's
+ * 34 (`MAGNETIC_RETURN`, D-066) — held, not frozen.
+ */
+const MAGNET_HOLD = 0.97
+/**
+ * How long a set chamber's key pin must be HELD in its sidebar gate for the leg to drop in, s —
+ * D-230. A key pin falling back after the click passes the band in milliseconds; without a dwell
+ * that pass aligned every gate by itself and the sidebar asked nothing of the hand.
+ */
+const GATE_DWELL = 0.3
+
+/**
+ * A sidebar lock's gates on the solver — D-230. The sidebar reads the KEY pin, as a real sidebar
+ * reads the bottom pins: each gated chamber's gate is a band of key-pin-TOP heights just under the
+ * shear line, where a set chamber's key pin — free under the driver sitting on the ledge — can be
+ * lifted back up to. (Driver-foot heights inside the set window were tried first: a set driver
+ * sits on the ledge and the pick can raise it ~0.14 mm at most, so gates higher up the window were
+ * unreachable.) Placed and sized as the old physics placed its gate in the capture window: the
+ * lock's `gatePositions` DOWN from the line by that fraction of the window's height, half-width
+ * `gateWidth` in the same proportion; never touching the line itself.
+ */
+export function sidebarGates(def: GameLockDef, s: SolverState, captureWindows: readonly number[]): ({ lo: number; hi: number } | null)[] {
+  const sb = def.sidebar
+  const w = setWindow(s)
+  const H = w.to - w.from
+  return def.bitting.map((_, i) => {
+    const j = sb ? sb.gatedChambers.indexOf(i) : -1
+    if (!sb || j < 0) return null
+    const pos = sb.gatePositions?.[j] ?? sb.gatePositions?.[0] ?? 0.5
+    const cw = Math.max(1e-6, captureWindows[i] ?? 0.3)
+    const half = Math.min(0.45, sb.gateWidth / cw) * H
+    const mid = w.from - pos * H
+    return { lo: mid - half, hi: Math.min(w.from - 0.02, mid + half) }
+  })
+}
+
 export function setWindow(s: SolverState): { from: number; to: number } {
   // A guide, not a rule: the latch does the timing, the band says where to aim, and it is drawn
   // tall enough to aim at (owner: "make green space bigger"). It starts ON the drawn shear line —
@@ -618,6 +656,14 @@ export interface Engine {
   plugFree(): boolean
   /** Chamber `i` is a latched overset (D-220): wedged until the wrench comes off. */
   jammed(i: number): boolean
+  /** Chamber `i`'s sidebar gate as key-pin-top heights, mm — null on an ungated chamber (D-230). */
+  gate(i: number): { lo: number; hi: number } | null
+  /** Chamber `i`'s gate has been met while it is set: the sidebar leg is in it (D-230). */
+  aligned(i: number): boolean
+  /** Chamber `i`'s key pin is in its gate band right now (held there `GATE_DWELL` aligns it). */
+  inGate(i: number): boolean
+  /** Chamber `i` carries a magnet holding its driver (D-230). */
+  magnetic(i: number): boolean
   /**
    * True for the frame in which the click fired (`clickSet`): the hand's cue to stop lifting and
    * relax a little, so the key pin's top does not follow the driver up into the shell.
@@ -653,6 +699,17 @@ export function createEngine(def: GameLockDef, seed: number, config: SimConfig, 
    * however the pick moves. The latch clears only when the wrench comes off, which is the reset.
    */
   const overLatched: boolean[] = sol.chambers.map(() => false)
+  /** Magnetic chambers (D-230): the magnet holds each driver where the tool leaves it. */
+  const magnetic: boolean[] = sol.chambers.map((_, i) => def.magneticChambers?.includes(i) ?? false)
+  magnetic.forEach((m, i) => {
+    if (m) sol.magnetHold[i] = MAGNET_HOLD
+  })
+  /** Sidebar gates (D-230), and whether each gated chamber has met its gate while set. */
+  const gates = sidebarGates(def, sol, sim.chambers.map((c) => c.captureWindow))
+  const aligned: boolean[] = sol.chambers.map(() => false)
+  /** Seconds each gated key pin has been held in its gate band (D-230). */
+  const gateFor: number[] = sol.chambers.map(() => 0)
+  let sidebarOk = gates.every((g) => g === null)
   /** The key-pin height each latched overset is held at, mm above rest — where it wedged. */
   const overLiftAt: number[] = sol.chambers.map(() => 0)
   /**
@@ -982,6 +1039,10 @@ export function createEngine(def: GameLockDef, seed: number, config: SimConfig, 
     footAboveRim: (i) => lowestY(sol.chambers[i]!.driver) - rimCornerY(sol),
     plugFree: () => openReady,
     jammed: (i) => overLatched[i] === true,
+    gate: (i) => gates[i] ?? null,
+    aligned: (i) => aligned[i] === true,
+    inGate: (i) => gateFor[i]! > 0,
+    magnetic: (i) => magnetic[i] === true,
     openAngle: () => {
       const hold = Number.isFinite(holdAt) ? holdAt : plugAngle(sol)
       const unset = states.filter((st) => st !== 'SET').length
@@ -1069,6 +1130,9 @@ export function createEngine(def: GameLockDef, seed: number, config: SimConfig, 
     cap = Math.min(cap, falseSet)
     if (counter > 0) cap = Math.min(cap, counterCapNow(counter))
     if (pushBlocked) cap = Math.min(cap, pushCap)
+    // Every pin set but a sidebar gate unmet (D-230): the sidebar bar is still in its groove and the
+    // plug stops just past the last hold, short of the open — "the plug simply will not turn".
+    if (!sidebarOk && allSet && Number.isFinite(holdAt)) cap = Math.min(cap, holdAt + OPEN_PAST * 0.5)
     return cap
   }
   /**
@@ -1296,6 +1360,8 @@ export function createEngine(def: GameLockDef, seed: number, config: SimConfig, 
       bindAt.fill(Number.POSITIVE_INFINITY)
       holdAt = Number.POSITIVE_INFINITY
       passedNow.fill(false)
+      aligned.fill(false)
+      gateFor.fill(0)
     }
     states.forEach((st, i) => {
       if (st === 'BINDING' && i !== eng.bindingChamber) states[i] = 'FREE'
@@ -1307,6 +1373,24 @@ export function createEngine(def: GameLockDef, seed: number, config: SimConfig, 
       if (readouts[eng.bindingChamber]!.plugForce > BIND_MIN_FORCE) holdAt = th
     }
     allSet = states.every((st) => st === 'SET')
+    // The sidebar (D-230): a gated chamber's leg drops into its gate once the set chamber's key-pin
+    // top has been HELD inside the gate band for `GATE_DWELL`, and stays there until the pin drops.
+    gates.forEach((g, i) => {
+      if (!g) return
+      if (states[i] !== 'SET') {
+        aligned[i] = false
+        gateFor[i] = 0
+        return
+      }
+      const key = sol.chambers[i]!.key
+      const k = key.body * DOF
+      const top = sol.bodies.q[k + 1]! + key.topU * Math.cos(sol.bodies.q[k + 2]!)
+      gateFor[i] = top >= g.lo && top <= g.hi ? gateFor[i]! + frameDt : 0
+      if (gateFor[i] >= GATE_DWELL) aligned[i] = true
+    })
+    sidebarOk = gates.every((g, i) => g === null || aligned[i] === true)
+    // The HUD's sidebar readout (the old physics' field): down once every gate is met.
+    sim.sidebarDropped = gates.some((g) => g !== null) && sidebarOk
     // The return torque is not a wrench: the HUD sees the wrench off. A wrench the pushed-pin
     // block has taken the torque off is still the hand's wrench: the HUD keeps showing it.
     const T = pushBlocked ? commanded : Math.max(0, sol.input.tension)
@@ -1331,7 +1415,7 @@ export function createEngine(def: GameLockDef, seed: number, config: SimConfig, 
     // With every pin set and the plug past the last hold it is free — but not while the pick is
     // still pushing a pin (owner: "it should not be possible to turn the tension wrench with the
     // lockpick pushing the pin"): the plug is held there (`clampOpen`) until the pick lets go.
-    openReady = allSet && Number.isFinite(holdAt) && thNow > holdAt + OPEN_PAST - 1e-9
+    openReady = allSet && sidebarOk && Number.isFinite(holdAt) && thNow > holdAt + OPEN_PAST - 1e-9
     pickOn = pick.force >= 0.05
     sim.opened = thNow > SIM_THETA_OPEN * 0.75 || (openReady && !pickOn)
     sim.time = sol.time
@@ -1342,6 +1426,7 @@ export function createEngine(def: GameLockDef, seed: number, config: SimConfig, 
       sc.lift = Math.max(0, r.driverLift)
       sc.keyLift = Math.max(0, r.keyLift)
       sc.state = states[i]!
+      if (gates[i]) sc.sidebarAligned = aligned[i] === true
     })
   }
 

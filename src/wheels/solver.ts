@@ -11,20 +11,18 @@
  * solver.
  */
 
-import { captureRange, targetLiftFor } from './classify'
 import {
   COMBO_DETENT,
   DT,
   FEATHER_WINDOW,
-  RESIST_PRESSURE_MM,
-  STRAIN_BENT,
   T_MIN_HOLD,
-} from './constants'
-import { createSimState } from './lock'
-import { clamp } from './math'
-import { effectiveReach, step } from './step'
-import type { InputTape, TapeSegment } from './tape'
-import type { LockDef, SimConfig, SimInput, SimState } from './types'
+} from '../sim/constants'
+import { createSimState } from '../sim/lock'
+import { clamp } from '../sim/math'
+import { effectiveReach } from '../sim/tools'
+import { assertRateSimLock, step } from './step'
+import type { InputTape, TapeSegment } from '../sim/tape'
+import type { LockDef, SimConfig, SimInput, SimState } from '../sim/types'
 
 export interface SolveOptions {
   /** Give up after this much simulated time. */
@@ -60,12 +58,9 @@ export interface SolveResult {
 }
 
 const PROBE_TICKS = 3
-const STALL_TICKS = 45
 const TENSION_STEP = 0.08
 /** Ticks to dwell at one swept position: long enough for `CAPTURE_TIME` plus a margin. */
 const DWELL_TICKS = 9
-/** Ticks spent unloaded when the shaft is bowing — `STRAIN_RECOVERY` clears it fast (D-068). */
-const STRAIN_RELIEF_TICKS = 150
 
 function input(
   chamber: number,
@@ -197,12 +192,8 @@ function probeForHeaviest(rec: Recorder, tension: number, reach: number): number
       }
       continue
     }
-    const probeAt =
-      c.kind === 'disc'
-        ? c.lift
-        : c.inverted
-          ? Math.max(0, c.maxLift - RESIST_PRESSURE_MM)
-          : RESIST_PRESSURE_MM
+    // A disc is probed where it is (discs only since D-234).
+    const probeAt = c.lift
     travelTo(rec, c.index, probeAt, tension)
     rec.run(input(c.index, probeAt, tension), PROBE_TICKS)
     if (s.resistance > bestResistance) {
@@ -211,19 +202,6 @@ function probeForHeaviest(rec: Recorder, tension: number, reach: number): number
     }
   }
   return best
-}
-
-/**
- * Which families hide their geometry completely, so the solver has to hunt for it.
- *
- * A pin's height is inferable — the cutaway shows the key pin, and guided mode draws the
- * target outright. A disc detainer's gate angle and a Bramah slider's depth are readable by
- * nothing at all: both are seen face-on, with the mechanism behind the face. Sweeping until
- * something catches is the entire technique for both, and their traps only lie if something
- * is genuinely hunting for the truth. Each position tried is one `searchStep`.
- */
-function needsBlindSweep(family: string): boolean {
-  return family === 'disc-detainer' || family === 'radial-slider' || family === 'combination'
 }
 
 /**
@@ -260,141 +238,14 @@ function sweepBlind(
   return false
 }
 
-/**
- * Map every sidebar gate before picking anything, with the wrench barely loaded.
- *
- * A sidebar gate is a narrow band somewhere inside a capture window the pin crosses in a few
- * hundredths of a second, and setting the chamber anywhere else in that window leaves it
- * looking perfectly set while the plug stays locked. Guessing is hopeless: three gates at
- * even odds is one attempt in eight, and every failed attempt costs the whole lock.
- *
- * So the gates get surveyed first, with the wrench off. Nothing binds, nothing captures and
- * nothing can be lost, but the sidebar legs are sprung against their pins regardless, so
- * walking each gated chamber up through its window and watching for the light spot reads the
- * gate straight off the meter. That pass is the entire reason a sidebar lock is harder than
- * the same lock without one, and every position it tries is a `searchStep`.
- *
- * It does not make the lock free. The survey says where the gate is; hitting it afterwards,
- * under tension, with a pick that wobbles by more than half the gate's width, is a separate
- * problem — and missing is only discovered once every pin is set and the plug refuses.
- */
-function mapSidebarGates(rec: Recorder, reach: number): Map<number, number> {
-  const s = rec.state
-  const found = new Map<number, number>()
-  for (const c of s.chambers) {
-    if (c.index >= reach || c.sidebarGate === null) continue
-    const { low, high } = captureRange(c)
-    // Step by the gate's own width: fine enough that the detent cannot be stepped over,
-    // coarse enough that the search is a handful of probes rather than a hundred.
-    const stride = Math.max(0.01, c.sidebarWidth)
-    let lightest = Number.POSITIVE_INFINITY
-    const readings: { x: number; r: number }[] = []
-    travelTo(rec, c.index, low, 0)
-    for (let x = low + stride * 0.5; x < high; x += stride) {
-      rec.searchSteps += 1
-      // Long enough for the pin to arrive and the meter to settle. Wrench off throughout.
-      rec.run(input(c.index, x, 0, false), 5)
-      readings.push({ x, r: s.resistance })
-      if (s.resistance < lightest) lightest = s.resistance
-    }
-    // Sit in the *middle* of the notch, not at the first edge of it. The gate is wider than
-    // one step, so several positions read equally light — and the outermost of those is
-    // within a hundredth of a millimetre of missing, which the pick's own jitter will happily
-    // spend. Centring is what makes the survey survive a shaky hand.
-    const inNotch = readings.filter((p) => p.r <= lightest + 1e-6)
-    const first = inNotch[0]
-    const last = inNotch[inNotch.length - 1]
-    found.set(
-      c.index,
-      first && last ? (first.x + last.x) / 2 : low + (high - low) * 0.5,
-    )
-  }
-  // Let everything fall back to rest before the real attempt begins.
-  if (found.size > 0) rec.run(input(-1, 0, 0, false), Math.round(0.25 / DT))
-  return found
-}
-
-/** Work one chamber until it sets, jams, or the solver runs out of patience. */
-function workChamber(
-  rec: Recorder,
-  index: number,
-  tension: number,
-  minTension: number,
-  maxTicks: number,
-  gates: Map<number, number>,
-): { tension: number; done: boolean } {
-  const s = rec.state
-  const c = s.chambers[index]
-  if (!c) return { tension, done: true }
-  let working = tension
-  /**
-   * A lie already standing on this chamber is a fight already declared — ease before pushing
-   * (D-204). Without this, the restore-to-cruise between chambers made every revisit to a
-   * fighting pin re-pay the whole stall-and-descend ladder from the top, which is where the
-   * last few timeout seeds went. A quarter of the way up from the floor clears every wall in
-   * the catalogue while staying above the feather line.
-   */
-  if (c.state === 'FALSE_SET') {
-    working = Math.max(minTension, minTension + (working - minTension) * 0.25)
-  }
-  // A sidebar gate is unreadable geometry — aim at whatever the opening survey found.
-  const target = gates.get(index) ?? targetLiftFor(c)
-  // Get there before starting the clock: the stall detector below measures a pin that is not
-  // moving, and a pick still in transit is not a pin that is stuck.
-  travelTo(rec, index, target, working)
-  let stalled = 0
-  let lastLift = c.lift
-
-  for (let t = 0; t < maxTicks; t += 1) {
-    rec.run(input(index, target, working), 1)
-    if (c.state === 'SET' || c.state === 'OVERSET') return { tension: working, done: true }
-
-    // Absolute movement, because an inverted wafer makes progress by going *down*.
-    if (Math.abs(c.lift - lastLift) <= 1e-5) stalled += 1
-    else stalled = 0
-    lastLift = c.lift
-
-    /**
-     * Shaft loading up? Let go for a moment.
-     *
-     * The pick takes a set if you lean on something that will not move (D-068), and a solver that
-     * cannot feel that would snap its tool on the first spool wall it met. The player has this
-     * channel already — it is the bow in the shaft — so reading it here is not x-ray. Relieving at
-     * half the bend threshold leaves plenty of margin, and the recovery is fast enough that a
-     * beat of it costs almost nothing.
-     */
-    if (s.pickStrain > STRAIN_BENT * 0.5) {
-      // Until it is *actually* relieved, not for a fixed count. A flat 30 ticks bled off 0.14 of
-      // strain against a threshold of 0.5, so the loop re-entered relief immediately and spent the
-      // attempt alternating between pushing and not-quite-recovering — which showed up as a
-      // handful of wafer locks "running out of time" rather than as anything obviously wrong.
-      for (let r = 0; r < STRAIN_RELIEF_TICKS && s.pickStrain > STRAIN_BENT * 0.15; r += 1) {
-        rec.run(input(index, 0, working), 1)
-      }
-      stalled = 0
-      continue
-    }
-
-    // Not moving? A groove is wedged against the plug's ledge. Back the tension off — the
-    // counter-force scales with it, and this is the whole spool technique. HALVING toward the
-    // floor rather than stepping (D-204): with the walls down in the playable band, a fixed
-    // 0.08 ladder from cruise spent whole seconds above a mushroom's 0.16 wall and six tier-3/4
-    // locks timed out — a hand that feels a fight eases right off, it does not tiptoe.
-    if (stalled > STALL_TICKS) {
-      if (working <= minTension + 1e-9) return { tension: working, done: false }
-      working = Math.max(minTension, minTension + (working - minTension) * 0.5)
-      stalled = 0
-    }
-  }
-  return { tension: working, done: false }
-}
-
 export function solveLock(
   def: LockDef,
   seed: number,
   config: SimConfig,
   opts: SolveOptions = {},
 ): SolveResult {
+  // Wheel packs only (D-233): the rate sim no longer steps pin locks.
+  assertRateSimLock(createSimState(def, seed, config))
   const maxSeconds = opts.maxSeconds ?? 90
   const tools = config.tools
   // Still 0.42 under D-203, and deliberately: raising the cruise to the player's new home
@@ -438,7 +289,6 @@ export function solveLock(
     )
   }
 
-  let gates = mapSidebarGates(rec, reach)
   rec.run(input(-1, 0, tension), Math.round(0.35 / DT))
 
   while (!state.opened && rec.ticks < maxTicks) {
@@ -446,17 +296,6 @@ export function solveLock(
     if (state.chambers.every((c) => c.state === 'SET')) {
       rec.run(input(-1, 0, turnTension), Math.round(0.5 / DT))
       if (state.opened) break
-      if (gates.size === 0) continue
-
-      // Every pin reads set and the plug still will not go round: a sidebar gate was missed.
-      // Nothing can be salvaged — a captured driver is above the shear line and cannot be
-      // re-lifted — so the only move is the one a real picker makes, which is to let the whole
-      // thing drop and go again. The survey is redone rather than reused: the miss came from
-      // the pick's own wobble, so a fresh reading is a fresh draw, and repeating the old
-      // number would just repeat the mistake.
-      rec.run(input(-1, 0, 0, false), Math.round(0.45 / DT))
-      gates = mapSidebarGates(rec, reach)
-      rec.run(input(-1, 0, tension), Math.round(0.3 / DT))
       continue
     }
 
@@ -480,31 +319,9 @@ export function solveLock(
     if (target < 0) return finish('nothing left to work but the lock is not open')
 
     rounds += 1
-    if (needsBlindSweep(def.family)) {
-      // Nothing to aim at — work it along until it catches. Discs and combination wheels
-      // wrap (a dial has no stop); only the slider runs out of travel.
-      sweepBlind(rec, target, tension, Math.round(12 / DT), def.family !== 'radial-slider')
-      continue
-    }
-    const result = workChamber(rec, target, tension, minTension, Math.round(3.5 / DT), gates)
-    lowest = Math.min(lowest, result.tension)
-    if (!result.done) {
-      // Could not move it even at the lowest tension this wrench reaches. Ease off globally
-      // and try again — on a fresh probe it may pick a different chamber.
-      tension = Math.max(minTension, tension - TENSION_STEP)
-      lowest = Math.min(lowest, tension)
-      rec.run(input(-1, 0, tension), Math.round(0.2 / DT))
-    } else {
-      /**
-       * Back to cruise once the chamber is won — D-204. Staying at the dipped tension was
-       * survivable when dips were shallow; with the walls down a dip runs to 0.11-0.2, where
-       * the pick crosses a tier-4 capture window faster than anything can catch — the solver
-       * overset its way through the clock on six locks. Dip for the fight, come back up for
-       * the work. (The earlier revert of this line was collateral: it shipped alongside a
-       * cruise raise that froze the wheels, and the wheels never pass through this path.)
-       */
-      tension = startTension
-    }
+    // Every family the rate sim still steps is a disc family (D-234): each is swept blind — the pin
+    // worker that lifted to a readable height lived here.
+    sweepBlind(rec, target, tension, Math.round(12 / DT), true)
   }
 
   return finish(state.opened ? undefined : 'ran out of time')
@@ -639,66 +456,3 @@ export function difficultyScore(r: LockDifficulty): number {
   return work * toleranceFactor(r.toleranceQuality)
 }
 
-export function meanScoreByTier(rows: readonly LockDifficulty[]): Map<number, number> {
-  const byTier = new Map<number, number[]>()
-  for (const r of rows) {
-    const list = byTier.get(r.tier) ?? []
-    list.push(difficultyScore(r))
-    byTier.set(r.tier, list)
-  }
-  const out = new Map<number, number>()
-  for (const [tier, list] of byTier) {
-    out.set(tier, list.reduce((a, b) => a + b, 0) / Math.max(1, list.length))
-  }
-  return out
-}
-
-/** Render the difficulty table written to `screenshots/difficulty-curve.txt`. */
-export function formatDifficultyTable(rows: readonly LockDifficulty[], title: string): string {
-  const head =
-    '  # tier  lock                             solved   score    tol   mean s   max s  rounds  overset  reset  false  search'
-  const lines: string[] = [title, '='.repeat(head.length), head, '-'.repeat(head.length)]
-  rows.forEach((r, i) => {
-    lines.push(
-      [
-        String(i + 1).padStart(3),
-        String(r.tier).padStart(5),
-        `  ${r.name}`.padEnd(33).slice(0, 33),
-        `${r.solved}/${r.seeds}`.padStart(7),
-        difficultyScore(r).toFixed(2).padStart(8),
-        r.toleranceQuality.toFixed(2).padStart(7),
-        r.meanSeconds.toFixed(1).padStart(9),
-        r.maxSeconds.toFixed(1).padStart(8),
-        r.meanRounds.toFixed(1).padStart(8),
-        r.meanOversets.toFixed(2).padStart(9),
-        r.meanResets.toFixed(2).padStart(7),
-        r.meanFalseSets.toFixed(1).padStart(7),
-        r.meanSearchSteps.toFixed(1).padStart(8),
-      ].join(''),
-    )
-  })
-  lines.push('-'.repeat(head.length))
-  lines.push(
-    '',
-    `score = (rounds + ${FALSE_SET_WEIGHT} x falseSets + ${OVERSET_WEIGHT} x oversets + ` +
-      `${RESET_WEIGHT} x resets + ${SEARCH_WEIGHT} x searchSteps) x ${REFERENCE_TOLERANCE}/tol`,
-    '',
-    'Mean difficulty score by tier:',
-  )
-  const scores = meanScoreByTier(rows)
-  const seconds = new Map<number, number[]>()
-  for (const r of rows) {
-    const list = seconds.get(r.tier) ?? []
-    list.push(r.meanSeconds)
-    seconds.set(r.tier, list)
-  }
-  for (const tier of [...scores.keys()].sort((a, b) => a - b)) {
-    const list = seconds.get(tier) ?? []
-    const meanS = list.reduce((a, b) => a + b, 0) / Math.max(1, list.length)
-    lines.push(
-      `  tier ${tier}: score ${(scores.get(tier) ?? 0).toFixed(2).padStart(6)}   ` +
-        `mean ${meanS.toFixed(1)}s   (${list.length} locks)`,
-    )
-  }
-  return lines.join('\n')
-}

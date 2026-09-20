@@ -82,7 +82,8 @@ describe('the roster is data — CONTENT.md §1', () => {
       'src/render/cutaway.ts',
       'src/render/layout.ts',
       'src/sim/lock.ts',
-      'src/sim/solver.ts',
+      'src/wheels/solver.ts',
+      'src/wheels/step.ts',
     ]
     for (const rel of files) {
       const text = readFileSync(path.join(ROOT, rel), 'utf8')

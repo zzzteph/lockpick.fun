@@ -208,4 +208,12 @@ export interface SolverState {
    * tunnelling. Zero except during a strike. One entry per chamber; `Engine.strike` drives it.
    */
   strikeForce: Float64Array
+  /**
+   * A magnetic chamber's hold, 0..1: the fraction of the DRIVER's spring and weight the magnet
+   * cancels — the magnet holding the steel pin where the tool left it (D-230). Applied by scaling
+   * the spring where it acts, at the driver's top, not as a separate force: a lift at the centre
+   * against a spring pressing the top left the spring's torque unbalanced and tipped the driver
+   * over (−104°) with the pick out. Zero on every other chamber.
+   */
+  magnetHold: Float64Array
 }

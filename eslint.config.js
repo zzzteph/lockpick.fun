@@ -136,7 +136,8 @@ export default tseslint.config(
     rules: { 'no-console': 'error' },
   },
   {
-    files: ['src/sim/**/*.ts'],
+    // The wheel engine left src/sim with D-235 and keeps its purity law.
+    files: ['src/sim/**/*.ts', 'src/wheels/**/*.ts'],
     rules: simPurityRules,
   },
   {

@@ -26,8 +26,8 @@ export interface Stepper {
 /** Locks the solver has bodies for: single-row pin tumblers with no sidebar, wafer or magnet. */
 export function solverCanRun(def: LockDef): boolean {
   if (def.family !== 'pin-tumbler') return false
-  if ((def.rows ?? 1) !== 1 || def.doubleSided || def.sidebar || def.discs) return false
-  if (def.magneticChambers && def.magneticChambers.length > 0) return false
+  // Sidebars and magnets run here too since D-230 (the engine models both).
+  if ((def.rows ?? 1) !== 1 || def.doubleSided || def.discs) return false
   return def.pins.every((p) => p !== 'wafer')
 }
 

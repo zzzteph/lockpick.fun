@@ -16,6 +16,9 @@ import {
 } from './solve'
 import { BODY_PICK, BODY_PLUG, DOF, KIND_PIN, type SolverInput, type SolverState } from './types'
 
+/** The magnet's righting torque on a magnetic driver, N·mm per rad of cant (D-230). */
+const MAGNET_ALIGN = 1
+
 export function applyForces(s: SolverState): void {
   const P = s.params
   const b = s.bodies
@@ -37,10 +40,17 @@ export function applyForces(s: SolverState): void {
     const rx = -topU * Math.sin(phi)
     let F = P.springPreload + P.springK * (topY - ch.restTopY)
     if (F < 0) F = 0
+    // a magnetic chamber's magnet cancels part of it, where it acts (D-230)
+    const hold = s.magnetHold[i]!
+    F *= 1 - hold
     f[d + 1] = f[d + 1]! - F
     f[d + 2] = f[d + 2]! - F * rx
-    // weight
-    f[d + 1] = f[d + 1]! - P.pinGravity
+    // weight — a magnetic chamber's driver carried by its magnet too (D-230)
+    f[d + 1] = f[d + 1]! - P.pinGravity * (1 - hold)
+    // …and kept coaxial: the magnet pulls on the driver's top face, which rights a canted pin. With
+    // the spring's seating push nearly cancelled a floating driver was knocked over by the turning
+    // plug (121° on the Magnetic Hybrid, seed 3) — this is the part of the magnet that prevents it.
+    if (hold > 0) f[d + 2] = f[d + 2]! - hold * MAGNET_ALIGN * phi
     f[k + 1] = f[k + 1]! - P.pinGravity
     // the pick gun's blade, shoving this key pin up (zero unless a strike is on)
     f[k + 1] = f[k + 1]! + s.strikeForce[i]!

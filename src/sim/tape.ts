@@ -6,7 +6,6 @@
  * feature would store.
  */
 
-import { step } from './step'
 import { DT } from './constants'
 import { cloneRng } from './rng'
 import type { Chamber, SimEvent, SimInput, SimState } from './types'
@@ -24,21 +23,6 @@ export function totalTicks(tape: InputTape): number {
   return n
 }
 
-/** Play a tape into a state. Optionally stop early once the lock opens. */
-export function runTape(
-  state: SimState,
-  tape: InputTape,
-  opts: { stopOnOpen?: boolean; dt?: number } = {},
-): SimState {
-  const dt = opts.dt ?? DT
-  for (const segment of tape) {
-    for (let i = 0; i < segment.ticks; i += 1) {
-      step(state, segment.input, dt)
-      if (opts.stopOnOpen && state.opened) return state
-    }
-  }
-  return state
-}
 
 function cloneChamber(c: Chamber): Chamber {
   return {

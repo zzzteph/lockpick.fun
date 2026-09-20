@@ -7,7 +7,7 @@
  */
 
 import { TENSION_SLEW } from './constants'
-import type { ToolStats } from './types'
+import type { KeywayGrade, ToolStats } from './types'
 
 /** Starter Flat Wrench + Starter Short Hook — `CONTENT.md §2`. */
 export const STARTER_TOOLS: ToolStats = {
@@ -72,4 +72,25 @@ export const PERFECT_TOOLS: ToolStats = {
 
 export function withTools(base: ToolStats, patch: Partial<ToolStats>): ToolStats {
   return { ...base, ...patch }
+}
+
+/**
+ * How many chambers in from the keyway mouth the tip can actually get under.
+ *
+ * `CONTENT.md §2`: top-of-keyway wrenches leave more room for the pick (+1); bottom-of-keyway
+ * ones block the deepest chamber in a tight keyway (-1). A pick that does not fit a tight
+ * keyway loses another chamber. This is a hard limit — `PHASES.md` Phase 8 requires that
+ * reach "genuinely prevents access to deep chambers". See DECISIONS D-015.
+ */
+export function effectiveReach(tools: ToolStats, keyway: KeywayGrade): number {
+  let r = tools.reach
+  if (tools.keywayPosition === 'top') r += 1
+  if (keyway === 'tight' && !tools.fitsTightKeyway) {
+    // A pick too fat for the keyway loses a chamber, and a bottom-of-keyway wrench crowding
+    // it loses another. A pick that *does* fit is immune to both — that is what the catalogue
+    // means by "fits tight keyways", and anything less makes the phrase a lie.
+    r -= 1
+    if (tools.keywayPosition === 'bottom') r -= 1
+  }
+  return Math.max(0, r)
 }

@@ -13,14 +13,15 @@
  */
 
 import {
-  grooveCeilingLift,
   grooveDepthAt,
   grooveFloorLift,
-  quantizeDetent,
   readShearLine,
   sidebarAlignedAt,
   taperAt,
-} from './classify'
+} from '../sim/classify'
+import { quantizeDetent } from '../sim/detent'
+import { pickedButUnturned } from '../sim/state'
+import { effectiveReach } from '../sim/tools'
 import {
   BENT_JITTER_FACTOR,
   BENT_RATE_FACTOR,
@@ -28,30 +29,21 @@ import {
   CAPTURE_TIME,
   CONTINUOUS_EVENT_STRIDE,
   COUNTER_ROTATION_FORCE,
-  PIN_COUNTER_FORCE,
-  SERRATION_GRIP,
-  TAPER_FORCE_CAP,
-  DISC_SPRING_RETURN,
   DT,
-  LEDGE_CLEAR_MM,
   LEDGE_FULL_ENGAGE,
-  LEDGE_RELEASE_MARGIN,
   ENGAGE_RAMP,
   DISTURB_SLIP_GRACE,
   FALSE_SET_GAIN,
-  PIN_FALSE_SET_GAIN,
   FEATHER_WINDOW,
   FORCE_FULL_MM,
   FREE_LIFT_MULTIPLIER,
   HOLD_ENGAGE_RELIEF,
-  MAGNETIC_RETURN,
   OPEN_THETA_FRACTION,
   OVERSET_THETA_FACTOR,
   PICK_BASE_RATE,
   PICK_TRAVEL_RATE,
   PLUG_MAX_RATE,
   PLUG_MOVED_EPSILON,
-  PLUG_PUSHBACK,
   PLUG_TAKEUP_RATE,
   RESIST_BINDING_BASE,
   RESIST_BINDING_TENSION,
@@ -64,21 +56,13 @@ import {
   RESIST_FREE_HZ,
   RESIST_FREE_WOBBLE,
   RESIST_OVERSET,
-  RESIST_PER_MM_LIFT,
   RESIST_PER_SPRING,
-  RESIST_PRESSURE_MM,
   RESIST_SET,
   RESIST_SET_CONTACT,
-  RESIST_SIDEBAR_DETENT,
   SET_CONTACT_MM,
   DISTURB_FACTOR,
   SET_SLIP_GRACE,
   SIDEBAR_HELD_FRACTION,
-  SPOOL_CAM_BITE,
-  HOOK_RISE,
-  SHAFT_HALF,
-  SHANK_REACH,
-  SPRING_RETURN_RATE,
   STRAIN_BENT,
   STRAIN_BROKEN,
   STRAIN_PER_MM_SECOND,
@@ -88,40 +72,17 @@ import {
   T_FULL_TURN,
   T_MIN_HOLD,
   T_SET_HOLD,
-} from './constants'
-import { clamp, clamp01, damp, moveToward } from './math'
+} from '../sim/constants'
+import { clamp, clamp01, damp, moveToward } from '../sim/math'
 
-import { nextSigned } from './rng'
+import { nextSigned } from '../sim/rng'
 import type {
   Chamber,
   ChamberState,
-  KeywayGrade,
-  SimEvent,
   SimInput,
   SimState,
-  ToolStats,
-} from './types'
+} from '../sim/types'
 
-/**
- * How many chambers in from the keyway mouth the tip can actually get under.
- *
- * `CONTENT.md §2`: top-of-keyway wrenches leave more room for the pick (+1); bottom-of-keyway
- * ones block the deepest chamber in a tight keyway (-1). A pick that does not fit a tight
- * keyway loses another chamber. This is a hard limit — `PHASES.md` Phase 8 requires that
- * reach "genuinely prevents access to deep chambers". See DECISIONS D-015.
- */
-export function effectiveReach(tools: ToolStats, keyway: KeywayGrade): number {
-  let r = tools.reach
-  if (tools.keywayPosition === 'top') r += 1
-  if (keyway === 'tight' && !tools.fitsTightKeyway) {
-    // A pick too fat for the keyway loses a chamber, and a bottom-of-keyway wrench crowding
-    // it loses another. A pick that *does* fit is immune to both — that is what the catalogue
-    // means by "fits tight keyways", and anything less makes the phrase a lie.
-    r -= 1
-    if (tools.keywayPosition === 'bottom') r -= 1
-  }
-  return Math.max(0, r)
-}
 
 /**
  * §5 — the plug's ledge wedges against the groove's bevel and drives the pin down.
@@ -149,9 +110,9 @@ function applyCounterRotation(state: SimState, c: Chamber, T: number, dt: number
   // Pins fight at D-204's raised force; discs keep the spec's — a wheel's gate drag is
   // tuned feel the dungeon has burned us on twice, and the owner's ruling was about pins.
   // The taper cap is pin-side only for the same reason.
-  const disc = c.kind === 'disc'
-  const force = disc ? COUNTER_ROTATION_FORCE : PIN_COUNTER_FORCE
-  const taper = disc ? taperAt(c) : Math.min(taperAt(c), TAPER_FORCE_CAP)
+  // Discs only since D-234 (pins fought at D-204's raised force; a disc keeps the spec's).
+  const force = COUNTER_ROTATION_FORCE
+  const taper = taperAt(c)
   c.counterForce = force * T * (0.25 + taper) * engage
   if (c.counterForce > 0) {
     if (c.counterForce > state.stats.maxCounterForce) {
@@ -180,104 +141,14 @@ function resistanceFor(
   tension: number,
   time: number,
   pressure: number,
-  /** Commanded tip height in mm — where the hand is asking the tip to be (D-045's measure). */
-  tipMm = 0,
 ): number {
   if (!c) return 0
-  /**
-   * An overset chamber's jam is felt on **contact**, not at a distance — D-158.
-   *
-   * The key pin is pinched across the shear line with the bore below it empty (D-094), so until
-   * the tip reaches its underside there is nothing under the hand but air — and the reading said
-   * `RESIST_OVERSET` anyway, plus the full spring-compression term for a spring the tip was not
-   * touching. Reported from play: *"when you press on a key pin which was not lifted yet to the
-   * driver pin — it still shows the resistance. Which should not."* The same closing ramp a
-   * captured driver already uses (D-051, D-061), against the same field `pickForce` reads for
-   * the pin's underside. Discs and inverted wafers keep the flat read: neither has an empty
-   * bore below a jam.
-   */
-  const oversetClosing =
-    c.state === 'OVERSET' && c.kind !== 'disc' && !c.inverted
-      ? clamp01(1 - Math.max(0, c.keyLift - tipMm) / SET_CONTACT_MM)
-      : 1
-  /**
-   * How much of the split stack the key pin has closed, 0..1 — the general rule D-158's
-   * overset case was one instance of.
-   *
-   * Whenever the driver is parked above a gap — captured on the plug's ledge (SET) or trapped
-   * in its own groove (FALSE_SET) — the key pin below it is loose, and lifting it is nearly
-   * free until its top meets the driver's bottom. Reported from play as *"general physics —
-   * the pressure should be super easy if only touching the key pin and the key pin does not
-   * touch the driver pin."* The SET base already ramped on this gap (D-051); FALSE_SET read
-   * its full formula flat, and the spring term was charged in both, for a spring sitting
-   * untouched on the far side of the gap.
-   */
-  const stackClosing =
-    (c.state === 'SET' || c.state === 'FALSE_SET') && c.kind !== 'disc' && !c.inverted
-      ? clamp01(1 - Math.max(0, c.lift - c.keyLift) / SET_CONTACT_MM)
-      : 1
-  /**
-   * This chamber's own character, applied in every state because it is a property of the hardware
-   * rather than of what the pin is currently doing.
-   *
-   * Two terms standing for two different things: `resistanceBias` is the bore and the pin's fit
-   * (D-052), `springStrength` is the spring sitting on top of it (D-062). Separate because only
-   * one of them also changes how fast the pin *falls*.
-   *
-   * The spring term closes with the stack: it lives above the driver, and a loose key pin is
-   * not loading it. The bias stays — the key pin still rubs its own bore. Both are scaled by
-   * the overset closing (1 everywhere else): a tip in the empty bore below a jam touches
-   * neither (D-158).
-   */
-  const character =
-    (c.resistanceBias + (c.springStrength - 1) * RESIST_PER_SPRING * stackClosing) *
-    oversetClosing
-  /**
-   * Hooke: the spring stiffens as it compresses, so a pin held high pushes back harder (D-070).
-   *
-   * Only while the stack is **whole**, and that qualifier is doing real work.
-   *
-   * Not on a disc: a disc has no spring — `DISC_SPRING_RETURN` is literally zero — and its `lift`
-   * is an *angle*, so this would have added a quarter of a unit of resistance purely for having
-   * turned it a long way round, in exactly the channel the blind gate survey reads.
-   *
-   * And not on a SET or FALSE_SET chamber, where the driver is held by the plug's ledge rather than
-   * by the key pin: the tip is pushing a loose key pin up an empty bore and is not loading that
-   * spring at all. Reading the *driver's* height there made a false-set spool parked high at its
-   * waist report heavier than the pin that was actually binding — so the meter lied, and the
-   * solver, which simply picks the heaviest, went and worked the wrong chamber.
-   */
-  const connected = c.state !== 'SET' && c.state !== 'FALSE_SET' && c.kind !== 'disc'
-  // How far the spring has been squashed, which is not the same as `lift`: an inverted wafer's
-  // spring is *below* it and pushes up, so the wafer rests at the top of its travel and is
-  // compressed by being pushed **down**.
-  const squash = c.inverted ? c.maxLift - c.lift : c.lift
-  // The jammed stack's spring is genuinely compressed, but the tip only feels it on contact.
-  const compression = connected ? squash * RESIST_PER_MM_LIFT * oversetClosing : 0
-  const full = clamp(
-    baseResistance(c, tension, time, oversetClosing, stackClosing) + character + compression,
-    RESIST_FLOOR,
-    1,
-  )
-  const detented =
-    c.sidebarGate === null || c.state === 'SET'
-      ? full
-      : sidebarAlignedAt(c, c.lift)
-        ? Math.max(0, full - RESIST_SIDEBAR_DETENT)
-        : full
-  /**
-   * Scaled by how hard you are actually pushing.
-   *
-   * A pin under an unloaded tip has nothing to say. Everything that distinguishes a bound pin
-   * from a free one — the friction of the plug pinching it, the spring it is riding, the bevel of
-   * a groove — is a *reaction* to force, and with no force applied there is no reaction to feel.
-   * So the reading rises from the floor to its full value as the tip loads up (D-056).
-   *
-   * Floored rather than zeroed: there is a spring on top of every pin, so a tip touching one
-   * always feels something. Zero is reserved for "no chamber under the tip at all", which is how
-   * the renderer knows to draw the shaft dead straight.
-   */
-  return RESIST_FLOOR + (detented - RESIST_FLOOR) * clamp01(pressure)
+  // Discs only since D-234: the pin terms (an overset's closing gap, the stack's, the squashed
+  // spring, a sidebar's detent) are all neutral for a disc, so what is left is the chamber's own
+  // character on top of the bind.
+  const character = c.resistanceBias + (c.springStrength - 1) * RESIST_PER_SPRING
+  const full = clamp(baseResistance(c, tension, time) + character, RESIST_FLOOR, 1)
+  return RESIST_FLOOR + (full - RESIST_FLOOR) * clamp01(pressure)
 }
 
 /**
@@ -295,35 +166,17 @@ function resistanceFor(
  * exactly what lets a player survey the gates with the wrench off before a single pin is set,
  * which is the one tell those families have and the whole of D-029.
  */
-function feltPressure(c: Chamber | undefined, input: SimInput, settled: boolean): number {
+function feltPressure(c: Chamber | undefined, settled: boolean): number {
   if (!c || !settled) return 0
-  if (c.sidebarGate !== null || c.kind === 'disc') return 1
-  /**
-   * An overset chamber is loaded from **contact**, not from the keyway floor — D-158.
-   *
-   * Commanded height works as a load proxy everywhere else because the pin is resting on the
-   * tip: ask for height and you are pushing the pin by that much. Here the key pin is jammed
-   * high (D-094) with an empty bore under it, so the first `RESIST_PRESSURE_MM` of commanded
-   * height is not force against anything — and this gate is what the state word and the
-   * resistance colour hang off, so measuring it from zero made the HUD shout `overset` the
-   * moment the tip entered the bore. Reported from play, twice, which is what it took.
-   */
-  if (c.state === 'OVERSET' && !c.inverted) {
-    return clamp01((input.liftTarget - (c.keyLift - RESIST_PRESSURE_MM)) / RESIST_PRESSURE_MM)
-  }
-  // An inverted wafer rests at the *top* of its travel, so loading it means pressing down.
-  const load = c.inverted ? c.maxLift - input.liftTarget : input.liftTarget
-  return clamp01(load / RESIST_PRESSURE_MM)
+  // A disc is held at an angle by a turner, so it is loaded the moment the tool reaches it —
+  // and discs are all the rate sim steps since D-234.
+  return 1
 }
 
 function baseResistance(
   c: Chamber,
   tension: number,
   time: number,
-  /** How much of the gap to an overset stack the tip has closed, 0..1 (D-158). */
-  oversetClosing = 1,
-  /** How much of a split SET/FALSE_SET stack the key pin has closed, 0..1 (D-158). */
-  stackClosing = 1,
 ): number {
   switch (c.state) {
     case 'BINDING':
@@ -335,7 +188,8 @@ function baseResistance(
         RESIST_FALSE_BASE +
         RESIST_FALSE_TENSION * tension +
         RESIST_FALSE_WOBBLE * Math.sin(2 * Math.PI * RESIST_FALSE_HZ * time)
-      return RESIST_SET + (full - RESIST_SET) * stackClosing
+      // (A split pin stack's closing gap scaled this, D-158; a disc has no stack — D-234.)
+      return full
     }
     case 'SET': {
       /**
@@ -350,7 +204,7 @@ function baseResistance(
     case 'OVERSET':
       // Light across the empty bore, the full jammed read on contact — the same shape the SET
       // case above gives a key pin climbing toward its captured driver (D-158).
-      return RESIST_SET + (RESIST_OVERSET - RESIST_SET) * oversetClosing
+      return RESIST_OVERSET
     case 'FREE':
       return (
         RESIST_FREE_BASE +
@@ -398,7 +252,7 @@ export function holdThreshold(c: Chamber, theta: number, disturbance = 0): numbe
  * read as the lock turning, not as a ledge wedging into a waist.
  */
 function falseSetGive(c: Chamber): number {
-  return grooveDepthAt(c) * (c.kind === 'disc' ? FALSE_SET_GAIN : PIN_FALSE_SET_GAIN)
+  return grooveDepthAt(c) * FALSE_SET_GAIN
 }
 
 /** §4 — how far the plug may rotate before this chamber stops it. */
@@ -431,113 +285,9 @@ function constraintFor(c: Chamber): number {
  * then waits out its own timeout looking for a binding chamber that no longer exists. The
  * simulation was right and the picture was silent. See DECISIONS D-048.
  */
-/**
- * How high the pick's **shaft** holds a pin in front of the hook — DECISIONS D-149.
- *
- * The tool is a rigid straight strip turning about the hand. Its angle is set by the *crest*, which
- * rises `liftTarget` above rest at the chamber being worked; the shaft runs parallel to that line
- * and `HOOK_RISE` below it, and a pin rests on the shaft's **top edge**, a further `SHAFT_HALF` up.
- * So the bearing height at chamber `index` is that line, taken at the chamber's distance from the
- * hand — measured in chamber pitches, `SHANK_REACH` of them outside the lock.
- *
- * **Written twice, differently, and the two did not agree.** D-145 had this as
- * `(lift - HOOK_RISE) × xᵢ/x_pick`, which decays the *already reduced* value and so runs higher than
- * the drawn shaft everywhere except the chamber being worked. The renderer places a rigid tool, and
- * the simulation held pins on a line that was not the one being drawn: the further a chamber was
- * from the hook, the wider the gap. Reported as *"it correctly lifts the nearest pin, but for the
- * rest there is air between the lockpick and the pin."*
- *
- * Exported so the picture can be held against it — `tests/render/shank.test.ts` measures the shaft
- * the renderer actually draws and asserts it lands here, at every chamber and every lift.
- */
-export function shankLift(liftTarget: number, pick: number, index: number): number {
-  if (pick <= 0 || index >= pick) return 0
-  const alongTool = (index + SHANK_REACH) / (pick + SHANK_REACH)
-  return Math.max(0, liftTarget * alongTool - HOOK_RISE + SHAFT_HALF)
-}
 
-export function pickedButUnturned(state: SimState): boolean {
-  if (state.opened || !state.sidebarDropped) return false
-  if (!state.chambers.every((c) => c.state === 'SET')) return false
-  return state.theta < THETA_OPEN * OPEN_THETA_FRACTION
-}
 
-/**
- * The furthest back the plug can be turned — because **a set pin is a ratchet**.
- *
- * A captured driver has not merely come to rest on the ledge: it has dropped into the corner
- * between the plug's shoulder and the shell bore, and its own body is now in the way of the plug
- * coming back. So every set chamber pins the plug at its own δ, and the binding one is the
- * **largest** — θ has to satisfy all of them at once. A false-set driver blocks the same way, with
- * the shoulder above its waist against the ledge.
- *
- * The one exception is the driver the pick is actively holding *up* off its ledge. Lift it clear of
- * the plug's shoulder and the plug is free to swing back underneath it — which is the only way a set
- * pin is ever lost to counter-rotation, and why it takes a deliberate shove on that exact pin.
- *
- * This is what stops forcing a spool from quietly costing you the whole lock: the plug comes back
- * only as far as the pins you are not touching allow. An OVERSET chamber is deliberately absent —
- * a jam has its own, tighter rotation limit in `constraintFor`, and adding it here would fight it.
- * See DECISIONS D-081.
- */
-function counterRotationFloor(chambers: readonly Chamber[], pick: number): number {
-  let floor = 0
-  for (const c of chambers) {
-    // A disc is held by the sidebar leg in its gate, not by anything wedged against the plug.
-    if (c.kind === 'disc') continue
-    if (c.state === 'SET') {
-      const liftedClear = c.index === pick && c.lift > c.setLift + LEDGE_CLEAR_MM
-      if (!liftedClear && c.delta > floor) floor = c.delta
-    } else if (c.state === 'FALSE_SET' && c.delta > floor) {
-      floor = c.delta
-    }
-  }
-  return floor
-}
 
-/**
- * §7 — the plug turns back, and the pins it was holding fall.
- *
- * A captured driver is not latched behind anything: it rests on the sliver of plug that has rotated
- * out from under its bore, and that sliver *is* `θ − δ`. Take the rotation away and there is nothing
- * left underneath. So when a push drives the plug back past a set chamber's δ — which is exactly
- * what forcing a false-set spool with a light wrench does (D-075) — that chamber stops being set.
- *
- * Until this existed the chamber stayed nominally SET while its ceiling (`topStop`, D-071) opened
- * all the way up, so the driver could be shoved to the top of its travel, could not overset, and
- * would not fall: set in the bookkeeping, unsupported in the geometry. It is also the answer to
- * "why did I lose three pins for pushing one?" — because you turned the plug back under all of
- * them, which is the real cost of forcing a spool and the reason nobody does it twice.
- *
- * Called after θ is final for the tick, so §8 reads roles that already account for it.
- * See DECISIONS D-081.
- */
-function releaseUnledgedPins(state: SimState): void {
-  let dropped: number[] | null = null
-  for (const c of state.chambers) {
-    if (c.state !== 'SET') continue
-    // Discs are held by the sidebar leg in their gate, not by a ledge, and an inverted wafer's
-    // travel simply ends at its set height. Neither is resting on plug rotation.
-    if (c.kind === 'disc' || c.inverted) continue
-    if (state.theta >= c.delta - LEDGE_RELEASE_MARGIN) continue
-    c.state = 'FREE'
-    c.captureTimer = 0
-    c.counterForce = 0
-    c.belowHoldFor = 0
-    const at = state.stats.setOrder.indexOf(c.index)
-    if (at >= 0) state.stats.setOrder.splice(at, 1)
-    ;(dropped ??= []).push(c.index)
-  }
-  if (!dropped) return
-  // Same accounting as a partial slip (D-074): losing pins is only a *reset* if it took the lot.
-  if (!state.chambers.some((c) => c.state === 'SET' || c.state === 'OVERSET')) {
-    state.stats.fullResets += 1
-    state.stats.setOrder.length = 0
-    state.stats.bindOrder.length = 0
-    state.engaged = false
-  }
-  state.events.push({ type: 'RESET', kind: 'counter', dropped, time: state.time })
-}
 
 /**
  * §6 — losing tension. A full reset drops every captured driver back into the plug and costs
@@ -570,7 +320,22 @@ function dropAll(state: SimState, kind: 'full' | 'feather'): void {
 const MAX_PENDING_EVENTS = 8192
 
 /** Advance the simulation one fixed tick. Mutates and returns `state`. */
+/**
+ * The rate sim's pin tumblers are retired — D-233. Every pin lock runs on the contact solver
+ * (`src/physics/engine.ts`); what this module still steps is the combination wheel pack, whose
+ * chambers are discs. The pin code below is fenced rather than cut (the owner's choice: the pin and
+ * disc paths share one step, and surgery would put the wheels at risk), so a pin, wafer or sidebar
+ * chamber reaching it is a routing bug, and it says so instead of quietly simulating old physics.
+ */
+export const PIN_PHYSICS_RETIRED =
+  'The wheel engine steps wheel packs only (D-235): pin tumblers run on the contact solver.'
+
+export function assertRateSimLock(state: SimState): void {
+  if (state.chambers.some((c) => c.kind !== 'disc')) throw new Error(PIN_PHYSICS_RETIRED)
+}
+
 export function step(state: SimState, input: SimInput, dt: number = DT): SimState {
+  assertRateSimLock(state)
   const { config, chambers, rng } = state
   const tools = config.tools
   const n = chambers.length
@@ -642,29 +407,6 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
     state.events.push({ type: 'PICK_MOVED', from: prevPick, to: pick, time: state.time })
   }
 
-  /**
-   * ── 2b. The hook fouls what it passes, if you carry it high ──────────────────────────
-   *
-   * Chambers in a real lock are not separate rooms. The bores are walled — 0.9mm of brass at a
-   * 3.81mm pitch — but the **keyway underneath them is one continuous slot**, and a hook carried
-   * along it passes directly beneath every key pin between the mouth and the tip. Reported as
-   * *"they are not separated by any kind of walls, so it could be the case that when you
-   * incorrectly insert the lockpick you press on other pins"*, which is exactly right and was
-   * exactly not modelled: every lift in this file is gated on `c.index === pick`, so only the
-   * selected chamber could ever move.
-   *
-   * **Only while travelling, and only while raised.** D-045 says a sliding hook rides over the
-   * pins between here and there, and that stays true — for a hook riding *low*. It is the case
-   * that comment assumes away: a pick lying in the keyway is beneath everything and touches
-   * nothing, and it is lifting the hand *while* moving that drags the crest through them. So the
-   * condition is travel (`!settled`) plus a commanded lift above the hook's own height.
-   *
-   * The pins are pressed to the crest, not to the commanded lift. The hook is a wedge going past,
-   * not a jack: it carries them at its own height and lets them fall behind it. That is the
-   * difference between disturbing a lock and demolishing it, and it is why this can be a real
-   * mechanic rather than a punishment. See DECISIONS D-138.
-   */
-  const carried = Math.max(0, Math.min(input.liftTarget, tools.hookHeight))
   // A bent shaft no longer goes where you point it (D-068).
   const jitter = tools.liftJitter * (state.pickBent ? BENT_JITTER_FACTOR : 1)
   if (jitter > 0) {
@@ -726,7 +468,6 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
    * by one rule and harvested by the other — which is how you get a pin dropping a tick after
    * it was declared safe.
    */
-  const worked = pick >= 0 ? chambers[pick] : undefined
   const slipCutoff = (c: Chamber): number => {
     if (T < T_MIN_HOLD) return grace
     const own = c.state === 'SET' ? holdThreshold(c, state.theta, 0) : T_MIN_HOLD
@@ -766,11 +507,8 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
      * out — where a set pin's driver rests on a sliver of plug ledge that a shaken hand can
      * genuinely walk off. The disturbance models the hand, and the hand cannot reach a gate.
      */
-    const shaken =
-      worked && worked.index !== c.index && worked.state !== 'FALSE_SET' && c.kind !== 'disc'
-        ? state.pickContact
-        : 0
-    const threshold = c.state === 'SET' ? holdThreshold(c, state.theta, shaken) : T_MIN_HOLD
+    // (Discs only since D-234, and the hand cannot reach a gate: no neighbour shake.)
+    const threshold = c.state === 'SET' ? holdThreshold(c, state.theta, 0) : T_MIN_HOLD
     /**
      * A light hand gets its own, longer, forgiveness — and needs it (D-095).
      *
@@ -848,16 +586,7 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
   // crawls), and a meter fed the raw pulses flickers at click rate.
   const comboFamily = state.instance.def.family === 'combination'
   if (comboFamily) state.wheelTurn = Math.max(0, state.wheelTurn - dt / 0.18)
-  /**
-   * Radians per second of *backward* plug rotation demanded by pins bearing on the ledge (D-075).
-   * Accumulated here and applied after θ is integrated, so the wrench and the pick fight each other
-   * continuously rather than one winning outright on a single tick.
-   */
-  let pushback = 0
   for (const c of chambers) {
-    // Discs and inverted wafers are held at their set position outright — a disc is pinned by
-    // the sidebar leg dropped into its gate, and an inverted wafer's travel *ends* there.
-    const ceiling = c.state === 'SET' ? c.setLift : c.maxLift
     const pinched = c.index === bindingLast || c.state === 'FALSE_SET'
     const bendLoss = state.pickBent ? BENT_RATE_FACTOR : 1
     // `dragFactor` is the chamber's own friction, and it resists *motion* rather than merely
@@ -937,250 +666,9 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
       c.lift = clamp(c.lift, 0, c.maxLift)
       continue
     }
-
-    if (c.inverted) {
-      // A wafer biting from the other side of the keyway: its spring pushes it *up*, so it
-      // rests at the top of its travel and the pick's tip is a ceiling rather than a floor.
-      // Same mechanics, opposite sign (SIMULATION.md §10, double-sided wafers).
-      const rest = ceiling
-      const support =
-        c.index === pick && settled ? clamp(input.liftTarget + state.pickWobble, 0, rest) : rest
-      if (c.lift < support) c.lift = Math.min(support, c.lift + springRate(c) * dt)
-      if (c.lift > support && c.index === pick) {
-        c.lift = Math.max(support, c.lift - toolRate * dt)
-      }
-      c.counterForce = 0
-      c.lift = clamp(c.lift, 0, c.maxLift)
-      continue
-    }
-
-    /**
-     * A captured driver is caught on a *sliver* of ledge, not latched behind one.
-     *
-     * When one pin sets, the plug has taken up δ ≈ 0.005 rad, which at the bore radius is about
-     * 0.0125mm of overlap across a 2.92mm pin — four tenths of one per cent of the face. There is
-     * no catch there. Drive the key pin up hard enough and it pushes the driver straight back off
-     * it, and if you keep going the key pin itself crosses the shear line and the chamber jams
-     * overset. Losing a pin you had already set is one of the commonest mistakes in real picking.
-     *
-     * The ceiling used to be `setLift` for a SET chamber, which made "set" mean "safe forever":
-     * you could lean on a captured pin as hard as you liked and nothing happened. It is now the
-     * full travel, exactly like any other chamber. What makes a set pin *feel* safe is not a
-     * clamp — it is that the pick pushes the **key pin**, which has fallen away to the keyway
-     * floor, so dragging the tool across at a working height never reaches the driver at all.
-     * See DECISIONS D-051.
-     */
-    /**
-     * How much of the plug's ledge is actually under this driver, 0..1 (D-071).
-     *
-     * The bore overlap shrinks as the plug turns, so a driver caught at the very start of the
-     * attempt is held by a sliver and can be shoved straight back off it (D-051), while one still
-     * standing at the end has the ledge properly under it and cannot be reached at all. `θ - δ` is
-     * how far the plug has swung *since this chamber's ledge started closing*, which is exactly the
-     * quantity — and it is why the pins you set first are the ones that end up safest.
-     */
-    const engaged = clamp01((state.theta - c.delta) / LEDGE_FULL_ENGAGE)
-    const topStop =
-      c.state === 'SET' ? c.setLift + (c.maxLift - c.setLift) * (1 - engaged) : ceiling
-    /**
-     * What is actually under this pin — DECISIONS D-138.
-     *
-     * This used to read *"the one tool that can be under it: the pick, and only where it has
-     * arrived"*, and everything else got a support of **zero**. That is the assumption the whole
-     * lock was built on and it is not true of a real one: the bores are walled, but the keyway
-     * beneath them is one continuous slot, so the hook is under whichever pin it is passing
-     * whether it has arrived there or not.
-     *
-     * Two supports, then. Arrived, the pin rests on the tip at the height the hand is holding —
-     * the original rule, unchanged. **Travelling**, it rests on the hook's *crest*: the tool is
-     * going past, not stopping, so it carries the pin at its own height and leaves it behind. A
-     * hook carried low has a crest of nothing and disturbs nothing, which is why a careful
-     * insertion still costs you nothing at all.
-     *
-     * `ceiling` still exists for the disc and inverted-wafer paths above, which hold a set
-     * chamber at `setLift` outright rather than letting it be pushed off (D-051).
-     */
-    /**
-     * ...and the **shank** is under the pins between the hook and the mouth — DECISIONS D-145.
-     *
-     * D-138 gave the hook its crest while travelling. This is the other half, and it applies while
-     * the pick is standing still: a pick is a straight tool pivoting about the hand, so lifting a
-     * pin higher than the hook is tall raises the shaft behind it, and the shaft is under every pin
-     * between there and the keyway mouth. Reported from play — *"when you press the deepest pin, the
-     * handle can overlap with the first pins"* — and the drawing was right. The simulation was
-     * holding those pins at rest while a rigid tool was drawn straight through them.
-     *
-     * **Only above the hook's own rise.** Below that the knee is still down in the keyway and the
-     * shaft touches nothing, which is the whole of ordinary play: the deepest cut in the roster asks
-     * for 2.30mm and the hook stands `hookHeight` above the shaft. So this is a cost of *overlifting*
-     * specifically, and the measured difficulty curve is unchanged by it.
-     *
-     * The shaft falls away toward the mouth, so the pin that suffers is the **neighbour**, not the
-     * front of the lock — `(i + reach) / (pick + reach)` is that slope, with the hand `SHANK_REACH`
-     * chambers outside the lock providing the lever. Same geometry the renderer places the tool
-     * with, expressed in chambers rather than pixels so the simulation stays free of the drawing.
-     */
-    const shank =
-      pick < 0 || state.pickBroken || !settled || c.index >= pick
-        ? 0
-        : shankLift(input.liftTarget, pick, c.index)
-
-    const support = !(c.index === pick) || state.pickBroken
-      ? Math.min(shank, topStop)
-      : settled
-        ? clamp(input.liftTarget + state.pickWobble, 0, topStop)
-        : Math.min(carried, topStop)
-
-    // A false-set chamber is held: the plug's ledge is sitting in its groove and the
-    // full-diameter body above the groove cannot pass back down through it. Nothing but
-    // counter-rotation moves it. This is what lets false sets *accumulate* across chambers
-    // while you work the rest of the lock, which is the whole spool experience.
-    // Everything below is about the **driver**, which is what `lift` means.
-    //
-    // A captured driver rests on the plug's ledge and can settle no lower than `setLift` — the
-    // lift at which its bottom is exactly on the shear line. That floor is what makes a set pin
-    // stay set when the pick leaves, and it is also the small settle you feel on capture: the
-    // driver drops the last fraction of a millimetre onto the ledge and stops.
-    const wafer = c.kind === 'wafer'
-    const driverFloor = c.state === 'SET' ? c.setLift : 0
-    const driverSupport = Math.max(support, driverFloor)
-    const driverHeld = c.state === 'FALSE_SET'
-    if (!driverHeld && c.lift > driverSupport) {
-      c.lift = Math.max(driverSupport, c.lift - springRate(c) * dt)
-    }
-    /**
-     * Something under a pin can push it **up** — and the shank is something (D-145).
-     *
-     * This was gated on `c.index === pick` alone, which is the same assumption D-138 found in the
-     * support expression: only the chamber the tip has arrived at can be driven upward. That is
-     * fine for the hook, and it is why D-138's travelling foul works at all — the rounded pick
-     * index passes through each chamber in turn, so every pin it crosses is briefly `pick`.
-     *
-     * The shank is the case that assumption cannot express. It bears on pins that are by definition
-     * *not* the one the tip is on, for as long as the hand is held high, without the pick going
-     * anywhere. So `shank > 0` is its own reason to move: it is already zero for the pick's own
-     * chamber, for anything behind the hook, and for any lift below the hook's rise.
-     */
-    /**
-     * The serrated grind — D-157. While a many-toothed driver is pinched, every serration
-     * drags on the plug edge and the climb slows by `1 + grip × T × teeth`. The lies were
-     * already here (each groove false-sets — the four fake clicks); this is the grind that
-     * makes the profile *feel* like anything on the way up. Light tension frees it, which is
-     * the same lesson every security pin in the game teaches.
-     */
-    const grind =
-      pinched && c.profile.grooveCount >= 3
-        ? 1 / (1 + SERRATION_GRIP * T * c.profile.grooveCount)
-        : 1
-    if (!driverHeld && c.lift < driverSupport && (c.index === pick || shank > 0)) {
-      c.lift = Math.min(driverSupport, c.lift + toolRate * grind * dt)
-    }
-    /**
-     * A false-set driver is **trapped between its own shoulders** while the ledge is in its waist.
-     *
-     * The foot below cannot pass the ledge going up and the head above cannot pass it going down,
-     * which is what a false set physically is. Only the downward half used to be modelled, so a
-     * spool could be shoved straight up through its shoulder in a pure force race — reported as
-     * "once it says false set I can still push the spool; the cylinder is rotated and stuck".
-     *
-     * The way out is the bevel: bearing on the ledge drives the plug **back** against the wrench,
-     * which withdraws the ledge and raises the ceiling. `entered` is how far in it currently is,
-     * measured against this groove's own depth rather than `ENGAGE_RAMP` — the latter saturates in
-     * three thousandths of a radian, so a cap keyed to it would never release. See DECISIONS D-075.
-     */
-    if (c.state === 'FALSE_SET' && c.index === pick) {
-      const span = Math.max(1e-6, falseSetGive(c))
-      const entered = clamp01((state.theta - c.delta) / span)
-      const ceilingNow =
-        grooveCeilingLift(c) + (c.maxLift - grooveCeilingLift(c)) * (1 - entered)
-      const wanted = Math.min(support, ceilingNow)
-      if (c.lift < wanted) c.lift = Math.min(wanted, c.lift + toolRate * dt)
-      // Asking for more than the trap allows is what turns the plug back, and the wrench is what
-      // resists it. Hold hard enough and nothing gives — which is the spool wall, arrived at
-      // geometrically rather than as a race between two rates.
-      /**
-       * How fast the plug gives back is the margin by which the pick is *already* winning.
-       *
-       * `toolRate - counterForce` is the existing false-set force race, whose balance point was
-       * solved for and measured per profile (D-010, D-053): spool T≈0.55, mushroom T≈0.29, t-pin
-       * T≈0.65. Driving the pushback from that same margin means the wall stays exactly where it
-       * was measured — above it the pick is losing, nothing gives, and the driver is genuinely
-       * trapped — while below it the plug visibly rotates back as you push through, which is the
-       * sensation that was missing and the reason the wrench has a gauge.
-       *
-       * A new constant of its own would have re-opened tuning that two decisions already settled.
-       */
-      const asking = Math.min(support, c.maxLift) > ceilingNow
-      if (asking) {
-        /**
-         * …and how much good pushing does depends on how deep the ledge already is.
-         *
-         * Camming works on the *bevel* at the waist's edge. Once the plug has swung fully into the
-         * groove, the driver's shoulder is bearing on a flat plug edge with no bevel presented to
-         * it at all, and shoving harder does almost nothing — which is the report: with the other
-         * pins set and the plug swung well round, the middle spool was still pushable and should
-         * not have been.
-         *
-         * So the way in is to **relax the wrench first**. Drop tension and `θ_demand` falls below
-         * the false set's `θ_max`, the plug rotates back, the bevel comes into contact, and *then*
-         * the pin climbs. That is the real spool technique, it is what lesson 3 already tells the
-         * player to do in so many words, and until now the mechanic did not require it.
-         */
-        const bevelPresented = 1 - entered * SPOOL_CAM_BITE
-        pushback += PLUG_PUSHBACK * Math.max(0, toolRate - c.counterForce) * bevelPresented
-      }
-    }
-
-    applyCounterRotation(state, c, T, dt)
-    c.lift = clamp(c.lift, 0, c.maxLift)
-
-    // ── The key pin, which is a separate body ──
-    //
-    // A pin stack is two pieces. While the key pin is what holds the driver up they move as
-    // one, and `keyLift` is simply `lift`. The moment something *else* holds the driver — the
-    // plug's ledge under a captured pin, or the ledge wedged in a false-set groove — the key
-    // pin has nothing under it and drops away, leaving the gap that tells the player what
-    // happened. A wafer has no key pin to separate. See DECISIONS D-042.
-    // Discs returned earlier, so `kind` here is `pin` or `wafer`.
-    if (wafer) {
-      c.keyLift = c.lift
-    } else {
-      /**
-       * The same arithmetic in every state, because the geometry does not care what the state is
-       * called: the key pin rests on whatever is under it, and cannot pass the driver above it.
-       *
-       * It used to be two branches — this one for `SET` and `FALSE_SET`, and a bare
-       * `keyLift = lift` for everything else. That second line is a **teleport**. It says the key
-       * pin is wherever the driver is, which is true only when the two are touching, and it fires
-       * the instant a chamber stops being held: let the wrench go on a magnetic chamber and the
-       * driver stays up where the magnet holds it (`MAGNETIC_RETURN`, D-066) while the key pin
-       * snapped from the bottom of its bore up to meet it, across a gap of millimetres, in one
-       * tick. Reported as *"with magnetic pins, press Q and the key pin falls; release and it jumps
-       * back up to the driver."*
-       *
-       * What actually happens is the opposite and it is already modelled: the **driver** falls onto
-       * the key pin, at its own spring rate — a crawl when a magnet is holding it. The two re-unify
-       * when the driver arrives, not when the state name changes. See DECISIONS D-102.
-       */
-      const roof = c.lift
-      const want = Math.min(support, roof)
-      /**
-       * `springRate(c)`, not the bare constant — the key pin falls at *this chamber's* rate.
-       *
-       * The old branch used `SPRING_RETURN_RATE` directly, which was survivable while it only ran
-       * for `SET` and `FALSE_SET`. Applied to every state it is wrong in the one case this whole
-       * fix is about: a magnetic chamber's key pin would drop at the full sprung rate while its
-       * driver crept, which is the same stack coming apart at two different speeds. `springRate`
-       * already knows about magnets, discs and this chamber's own spring and bore.
-       */
-      if (c.keyLift > want) c.keyLift = Math.max(want, c.keyLift - springRate(c) * dt)
-      else if (c.keyLift < want && (c.index === pick || shank > 0)) {
-        // The shank is under this key pin too, and for the same reason (D-145): a tool held high
-        // bears on the pins between its hook and the mouth without being *at* any of them.
-        c.keyLift = Math.min(want, c.keyLift + toolRate * dt)
-      }
-      c.keyLift = clamp(c.keyLift, 0, roof)
-    }
+    // The pin, wafer and inverted-wafer paths lived here — spring return, the tool's floor, the
+    // key pin under a captured driver. Cut with D-234: the rate sim steps only discs now, and every
+    // disc leaves the loop through the branch above.
   }
 
   /**
@@ -1280,17 +768,11 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
   state.theta = v >= 0 ? Math.min(moved, target) : Math.max(moved, target)
   // …and then whatever the pick is shoving back out of a groove (D-075). Never past δ: at that
   // point the ledge is clear of the waist entirely and there is nothing left to push against.
-  const floor = counterRotationFloor(chambers, pick)
-  if (pushback > 0) {
-    state.theta = Math.max(floor, state.theta - pushback * dt)
-  }
   // Nothing turns the plug back through a pin that is wedged against it, whatever the reason —
   // a push on a spool, a jam tightening the limit, or the wrench simply being eased off (D-081).
-  if (state.theta < floor) state.theta = floor
   if (state.theta < 0) state.theta = 0
   state.thetaVelocity = (state.theta - prevTheta) / dt
   // θ is final for the tick, so anything the plug has just turned back out from under falls now.
-  if (state.theta < prevTheta) releaseUnledgedPins(state)
 
   // ── 8. Roles: which chamber is the plug actually pinching (§2) ────────────────────────
   const limiterChamber = limiter >= 0 ? chambers[limiter] : undefined
@@ -1374,9 +856,9 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
   // On a combination wheel the load is the *turn*: a static hand feels nothing on a real
   // one, and the drag-probe under motion is the family's whole decode (D-169).
   const contact =
-    comboFamily && felt?.kind === 'disc' ? state.wheelTurn : feltPressure(felt, input, settled)
+    comboFamily && felt?.kind === 'disc' ? state.wheelTurn : feltPressure(felt, settled)
   state.pickContact = contact
-  state.resistance = resistanceFor(felt, T, state.time, contact, settled ? input.liftTarget : 0)
+  state.resistance = resistanceFor(felt, T, state.time, contact)
   if (state.resistance > state.stats.maxResistance) state.stats.maxResistance = state.resistance
 
   /**
@@ -1396,13 +878,13 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
    * `FORCE_FULL_MM` is a little under a third of a second of held Space, so leaning hard enough to
    * peg it is a deliberate act rather than the resting state.
    */
-  const touching = felt ? (felt.kind === 'disc' ? felt.lift : felt.keyLift) : 0
+  const touching = felt ? felt.lift : 0
   const overreach =
     felt && settled ? Math.max(0, Math.min(input.liftTarget, felt.maxLift) - touching) : 0
   // An inverted wafer's tip is a ceiling rather than a floor, so overreach has the opposite sign
   // and its rest position is the *top* of travel — measured the same way, simply arriving at one
   // would read as a maximal shove. It keeps the contact measure.
-  state.pickForce = felt?.inverted ? contact : clamp01(overreach / FORCE_FULL_MM)
+  state.pickForce = clamp01(overreach / FORCE_FULL_MM)
 
   /**
    * §11 — the pick bends.
@@ -1474,34 +956,7 @@ export function step(state: SimState, input: SimInput, dt: number = DT): SimStat
   return state
 }
 
-/** A set chamber's key pin is only carrying its own weight — it falls a little slower. */
-const SET_KEY_PIN_RETURN = 22.0
 
-/**
- * Springs are strong; a chamber the pick has left drops fast. A disc detainer disc has no
- * spring at all — nothing returns it, so it stays exactly where you left it, which is what
- * makes reading a disc detainer a different job from picking a pin tumbler.
- */
-function springRate(c: Chamber): number {
-  if (c.kind === 'disc') return DISC_SPRING_RETURN
-  // A magnetic element holds its pin where the tool left it — nothing returns it (D-066).
-  if (c.magnetic) return MAGNETIC_RETURN
-  const base = c.state === 'SET' ? SET_KEY_PIN_RETURN : SPRING_RETURN_RATE
-  /**
-   * Two per-chamber terms, each a different piece of hardware: `springStrength` is the spring
-   * (D-062) and `dragFactor` is the bore (D-069) — a tight chamber returns its pin slowly as well
-   * as lifting it slowly. Both are symmetric about 1, so neither shifts the average.
-   *
-   * Hooke's law (D-070) is deliberately **not** here, only in what the pin feels like. Scaling the
-   * return by compression means a pin at rest falls at `SPRING_PRELOAD` of the nominal rate — 45%
-   * slower — and `SPRING_RETURN_RATE` is a tuned number (D-012) that the capture race depends on:
-   * how long a pin dwells inside its window against `CAPTURE_TIME` is the whole difference between
-   * a forgiving lock and a jamming one. Twelve tests moved at once when it was in here. The felt
-   * gradient is the half that gives the player a sense of depth; making the fall follow it too is a
-   * re-tuning job, not a one-line addition.
-   */
-  return base * c.springStrength * c.dragFactor
-}
 
 /** Advance `n` ticks with a constant input. */
 export function stepTicks(state: SimState, input: SimInput, n: number, dt: number = DT): SimState {
@@ -1509,9 +964,3 @@ export function stepTicks(state: SimState, input: SimInput, n: number, dt: numbe
   return state
 }
 
-/** Take the events accumulated since the last drain. */
-export function drainEvents(state: SimState): SimEvent[] {
-  const out = state.events
-  state.events = []
-  return out
-}

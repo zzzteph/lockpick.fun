@@ -17,10 +17,17 @@ import {
   profileByName,
   seconds,
   snapshotSimState,
-  stepTicks,
   totalTicks,
 } from '../../src/sim'
-import { PERFECT_CONFIG, THREE_PIN, holdFor, tensionOnly } from './fixtures'
+import { stepTicks } from '../../src/wheels'
+import { PERFECT_CONFIG, holdFor, tensionOnly } from './fixtures'
+import { lockBySlug } from '../../src/game/locks'
+
+/**
+ * A wheel pack, not a pin fixture (D-233): the rate sim now steps only wheel packs, and these are
+ * its own utilities — ticks, clones, the event queue.
+ */
+const WHEELS = lockBySlug('brasswell-3-wheel-luggage')!
 
 describe('numeric helpers', () => {
   it('clamps', () => {
@@ -90,14 +97,14 @@ describe('tapes and snapshots', () => {
   })
 
   it('stepTicks advances exactly n ticks', () => {
-    const s = createSimState(THREE_PIN, 1, PERFECT_CONFIG)
+    const s = createSimState(WHEELS, 1, PERFECT_CONFIG)
     stepTicks(s, tensionOnly(0.4), 37)
     expect(s.ticks).toBe(37)
     expect(s.time).toBeCloseTo(37 * DT, 12)
   })
 
   it('clones to an independent state', () => {
-    const s = createSimState(THREE_PIN, 1, PERFECT_CONFIG)
+    const s = createSimState(WHEELS, 1, PERFECT_CONFIG)
     holdFor(s, tensionOnly(0.5), 0.5)
     const copy = cloneSimState(s)
     expect(snapshotSimState(copy)).toBe(snapshotSimState(s))
@@ -118,7 +125,7 @@ describe('tapes and snapshots', () => {
   })
 
   it('a clone resumes identically from the same point', () => {
-    const s = createSimState(THREE_PIN, 9, PERFECT_CONFIG)
+    const s = createSimState(WHEELS, 9, PERFECT_CONFIG)
     holdFor(s, tensionOnly(0.5), 0.4)
     const a = cloneSimState(s)
     const b = cloneSimState(s)
@@ -128,7 +135,7 @@ describe('tapes and snapshots', () => {
   })
 
   it('drains events and counts by type', () => {
-    const s = createSimState(THREE_PIN, 1, PERFECT_CONFIG)
+    const s = createSimState(WHEELS, 1, PERFECT_CONFIG)
     const first = drainEvents(s)
     expect(countEvents(first, 'ATTEMPT_STARTED')).toBe(1)
     expect(s.events).toEqual([])
@@ -140,7 +147,7 @@ describe('tapes and snapshots', () => {
   })
 
   it('bounds the pending event queue on a long unattended run', () => {
-    const s = createSimState(THREE_PIN, 1, PERFECT_CONFIG)
+    const s = createSimState(WHEELS, 1, PERFECT_CONFIG)
     // 200 seconds of plug jitter with nobody draining.
     for (let i = 0; i < 24_000; i += 1) {
       stepTicks(s, tensionOnly(i % 240 < 120 ? 0.5 : 0.2), 1)

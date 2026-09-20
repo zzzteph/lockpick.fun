@@ -6,7 +6,12 @@
  */
 
 import type { LockDef, PinTypeName, SimInput, SimState, ToolStats } from '../../src/sim'
-import { DT, PERFECT_TOOLS, makeConfig, step } from '../../src/sim'
+import {
+  DT,
+  PERFECT_TOOLS,
+  makeConfig,
+} from '../../src/sim'
+import { step } from '../../src/wheels'
 
 let nextId = 1000
 

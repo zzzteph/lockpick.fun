@@ -12,13 +12,13 @@ import {
   cloneSimState,
   createSimState,
   drainEvents,
-  step,
   type LockDef,
   type SimConfig,
   type SimEvent,
   type SimInput,
   type SimState,
 } from '../sim'
+import { step } from '../wheels'
 import { createSolverStepper, solverCanRun, type Stepper } from './solverStepper'
 import type { Engine } from '../physics/engine'
 
@@ -77,7 +77,9 @@ export class Session {
    * standing behind it (`solverCanRun` decides; a lock the solver has no bodies for falls back).
    */
   private fresh(seed: number): SimState {
-    if (this.physics === 'solver' && solverCanRun(this.def)) {
+    // A pin lock is ALWAYS the solver's (D-233): the rate sim no longer steps pin tumblers, whatever
+    // `physics` says. The rate sim is left the wheel packs, which the solver has no bodies for.
+    if (solverCanRun(this.def)) {
       this.solver = createSolverStepper(this.def, seed, this.config)
       return this.solver.state
     }

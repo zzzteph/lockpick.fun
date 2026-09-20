@@ -11,19 +11,16 @@ import {
   chamberAtX,
   computeLayout,
   driverLengthPx,
-  driverPinRect,
-  keyPinRect,
   LEDGE_MAX_FRACTION,
   ledgeOffset,
   mmToY,
   plugChamberX,
   shellChamberX,
-  springSpan,
   yToMm,
 } from '../../src/render/layout'
 import { LOGICAL_WIDTH } from '../../src/render/viewport'
-import { DRIVER_LENGTH, KEYWAY_FLOOR, THETA_OPEN, createSimState } from '../../src/sim'
-import { PERFECT_CONFIG, SPOOL_LOCK, THREE_PIN, TWELVE_PIN, holdFor, pick } from '../sim/fixtures'
+import { DRIVER_LENGTH, THETA_OPEN, createSimState } from '../../src/sim'
+import { PERFECT_CONFIG, SPOOL_LOCK, THREE_PIN, TWELVE_PIN } from '../sim/fixtures'
 
 describe('millimetre mapping', () => {
   const layout = computeLayout(3, 0)
@@ -187,40 +184,9 @@ describe('plug rotation as a ledge offset', () => {
 })
 
 describe('pin geometry follows sim state — PHASES.md Phase 2', () => {
-  it('places the key pin, junction and driver top exactly where the sim says', () => {
-    const s = createSimState(THREE_PIN, 3, PERFECT_CONFIG)
-    holdFor(s, pick(1, 0.8, 0.5), 0.6)
-    const layout = computeLayout(s.chambers.length, s.theta)
-    for (const c of s.chambers) {
-      const key = keyPinRect(layout, c)
-      const driver = driverPinRect(layout, c)
-      expect(key.y + key.h).toBeCloseTo(mmToY(layout, KEYWAY_FLOOR + c.lift), 9)
-      expect(key.y).toBeCloseTo(mmToY(layout, KEYWAY_FLOOR + c.keyPinLength + c.lift), 9)
-      expect(driver.y + driver.h).toBeCloseTo(key.y, 9)
-      expect(driver.y).toBeCloseTo(
-        mmToY(layout, KEYWAY_FLOOR + c.keyPinLength + c.driverLength + c.lift),
-        9,
-      )
-      expect(driver.h).toBeCloseTo(c.driverLength * MM_TO_PX, 9)
-      // The key pin rides in the plug bore; the driver stays with the shell.
-      expect(key.x + key.w / 2).toBeCloseTo(plugChamberX(layout, c.index), 9)
-      expect(driver.x + driver.w / 2).toBeCloseTo(shellChamberX(layout, c.index), 9)
-    }
-  })
-
-  it('a set chamber draws its driver bottom at or above the shear line', () => {
-    const s = createSimState(THREE_PIN, 3, PERFECT_CONFIG)
-    holdFor(s, pick(-1, 0, 0.5), 0.3)
-    const b = s.bindingChamber
-    const c = s.chambers[b]
-    if (!c) throw new Error('expected a binding chamber')
-    holdFor(s, pick(b, c.setLift + c.captureWindow / 2, 0.5), 1.0)
-    expect(c.state).toBe('SET')
-    const layout = computeLayout(s.chambers.length, s.theta)
-    const driver = driverPinRect(layout, c)
-    expect(driver.y + driver.h).toBeLessThanOrEqual(mmToY(layout, 0) + 1e-6)
-  })
-
+  // Three tests that stepped a pin lock on the rate sim (the key pin's height, a set driver on the
+  // line, the spring's compression) left with D-233: pin locks run on the contact solver and are
+  // drawn by the side view, from the solver's own bodies.
   it('draws the driver from its band data, waist and all', () => {
     const s = createSimState(SPOOL_LOCK, 3, PERFECT_CONFIG)
     const spool = s.chambers[1]
@@ -261,19 +227,6 @@ describe('pin geometry follows sim state — PHASES.md Phase 2', () => {
       expect(bands).toHaveLength(1)
       expect(bands[0]?.w).toBeCloseTo(layout.driverWidth, 9)
     }
-  })
-
-  it('compresses the spring as the stack rises', () => {
-    const s = createSimState(THREE_PIN, 3, PERFECT_CONFIG)
-    const layout = computeLayout(s.chambers.length, 0)
-    const c = s.chambers[0]
-    if (!c) throw new Error('missing chamber')
-    const atRest = springSpan(layout, c)
-    holdFor(s, pick(0, 1.5, 0), 0.5)
-    const lifted = springSpan(layout, c)
-    expect(lifted.top).toBe(atRest.top)
-    expect(lifted.bottom).toBeLessThan(atRest.bottom)
-    expect(lifted.bottom - lifted.top).toBeLessThan(atRest.bottom - atRest.top)
   })
 
   it('draws the capture window as the band just above the shear line', () => {

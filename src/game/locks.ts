@@ -359,22 +359,6 @@ const ROSTER: LockDef[] = [
     par: 360,
     note: 'Seven chambers, every one of them a security pin, in a keyway that fits nothing.',
   },
-  {
-    id: 34,
-    slug: 'halberd-magnetic-hybrid',
-    name: 'Halberd Magnetic Hybrid',
-    tier: 4,
-    family: 'pin-tumbler',
-    // The magnets are on the two serrated chambers, so the pins a rake would help you with
-    // most are exactly the ones it cannot touch.
-    bitting: [3.15, 3.1, 3.0, 3.05, 2.9, 3.3],
-    pins: ['spool', 'serrated', 'mushroom', 'serrated', 'spool', 'spool'],
-    magneticChambers: [1, 3],
-    toleranceQuality: 0.46,
-    keyway: 'standard',
-    par: 400,
-    note: 'Two of these six are held by magnets. A rake passes straight under them.',
-  },
 
   {
     /**
@@ -441,6 +425,14 @@ export const ALL_LOCKS: readonly LockDef[] = ROSTER
  * id in `CONTENT.md` is either present above or listed here.
  */
 export const DEFERRED_LOCKS: readonly { id: number; name: string; reason: string }[] = [
+  {
+    id: 34,
+    name: 'Halberd Magnetic Hybrid',
+    reason:
+      'CUT from the roster at the owner request, kept in the engine. On the contact solver its ' +
+      'magnets were rebuilt (a held driver, a righting torque), but the lock stayed unreliable ' +
+      'to open by script across seeds after hours of tuning. See DECISIONS D-232.',
+  },
   /**
    * The three disc detainers, cut together.
    *
