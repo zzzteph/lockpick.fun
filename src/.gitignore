@@ -1,0 +1,19 @@
+# Godot's import cache and editor state — regenerated on open.
+.godot/
+*.translation
+# Exported builds.
+build/
+
+# ── The workshop, not the game ──────────────────────────────────────────────────────────
+# Instruments from building it: probes, traces and benches written to chase one question, the
+# scripts that take screenshots, and the generators that made the test data on one machine (they
+# carry that machine's paths). None of it is needed to build, run, play or verify the game — the
+# tests that verify it are everything else under `tests/`, and those are kept.
+# Only under a `tests/` folder: the bench is also a screen of the game.
+**/tests/probe_*
+**/tests/bench_*
+**/tests/trace_*
+**/tests/shot_*
+**/tests/shot.gd
+**/tests/shot.gd.uid
+**/tests/*.gen.ts.txt

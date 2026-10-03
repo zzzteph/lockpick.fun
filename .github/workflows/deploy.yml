@@ -1,5 +1,11 @@
 # Build, verify, publish to Pages, and roll the download — on every push to main.
 #
+# What is published: the game (`src/`, a Godot project, exported for the web) at the root of the
+# site, and the original browser version (`old/`, built into `old/dist/`) beside it at /classic/.
+#
+# A note on the paragraph below and on the D-numbers further down: they are the history of the
+# browser version's deploy, from when it was the whole repository.
+#
 # The job this replaces uploaded `path: '.'`, the whole repository, to Pages. The root
 # `index.html` ends in `<script type="module" src="/src/main.ts">`, and a browser cannot execute
 # TypeScript — so every deploy this workflow ran served a blank canvas and a console error. It
@@ -25,6 +31,12 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
+# The engine the site's game is exported with, as its release is tagged and as its export
+# templates' folder is named.
+env:
+  GODOT_VERSION: 4.7.2-stable
+  GODOT_TEMPLATES: 4.7.2.stable
+
 jobs:
   build:
     name: verify and build
@@ -35,17 +47,77 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ── The game: the Godot project in `src/` ──
+      #
+      # The editor and its web templates are fetched once and cached: the template archive is
+      # over a gigabyte and only the web ones are wanted from it.
+      - name: Restore Godot and its web templates
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}-web
+
+      - name: Fetch Godot and its web templates
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}"
+          TEMPLATES=~/.local/share/godot/export_templates/${GODOT_TEMPLATES}
+          mkdir -p ~/godot "$TEMPLATES"
+          curl -fsSL "$BASE/Godot_v${GODOT_VERSION}_linux.x86_64.zip" -o /tmp/godot.zip
+          unzip -q /tmp/godot.zip -d ~/godot
+          curl -fsSL "$BASE/Godot_v${GODOT_VERSION}_export_templates.tpz" -o /tmp/templates.tpz
+          unzip -q -j /tmp/templates.tpz 'templates/web_*' 'templates/version.txt' -d "$TEMPLATES"
+          rm /tmp/godot.zip /tmp/templates.tpz
+
+      # What is deployed is what was tested: the rules against their reference vectors, every
+      # menu screen against the accessibility rules, the whole loop through the real app with a
+      # scripted hand on the locks, and — because the site is where a phone meets the game —
+      # locks opened by touch events alone.
+      - name: Verify the game
+        run: |
+          set -euo pipefail
+          GODOT=~/godot/Godot_v${GODOT_VERSION}_linux.x86_64
+          # The first run on a fresh checkout builds the class cache; its exit code is not a verdict.
+          "$GODOT" --headless --path src --import || true
+          "$GODOT" --headless --path src -s res://game/tests/run.gd
+          "$GODOT" --headless --path src --fixed-fps 60 -s res://tests/audit_ui.gd
+          "$GODOT" --headless --path src --fixed-fps 60 -s res://tests/flow_app.gd
+          "$GODOT" --headless --path src --fixed-fps 60 -s res://tests/touch_pick.gd
+          "$GODOT" --headless --path src --fixed-fps 60 -s res://tests/gun_strike.gd
+          "$GODOT" --headless --path src --fixed-fps 60 -s res://tests/walk_discs.gd -- 3 all
+          "$GODOT" --headless --path src --fixed-fps 60 -s res://tests/discs_play.gd
+          "$GODOT" --headless --path src --fixed-fps 60 -s res://tests/feedback_form.gd
+
+      - name: Export the game for the web
+        run: |
+          set -euo pipefail
+          GODOT=~/godot/Godot_v${GODOT_VERSION}_linux.x86_64
+          mkdir -p site
+          "$GODOT" --headless --path src --export-release Web "$PWD/site/index.html"
+          test -f site/index.html
+          test -f site/index.js
+          test -f site/index.wasm
+          test -f site/index.pck
+
+      # ── The original browser version, in `old/` ──
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: old/package-lock.json
 
       - name: Install dependencies
+        working-directory: old
         run: npm ci
 
       # Chromium only — the suite runs nowhere else. `--with-deps` pulls the system libraries a
       # headless browser needs on a bare runner.
       - name: Install Chromium
+        working-directory: old
         run: npx playwright install --with-deps chromium
 
       # typecheck, lint, unit tests, build, browser tests.
@@ -55,15 +127,15 @@ jobs:
       # D-038 applied to a machine those entries did not anticipate. It stays in `npm run verify`
       # for a real one. See DECISIONS D-119.
       - name: Verify
+        working-directory: old
         run: npm run verify:ci
 
       # `verify:ci` already built. Nothing is rebuilt here on purpose: what gets deployed is the
       # same bytes that were tested, rather than a second build that ought to match.
       - name: Check the bundle came out
         run: |
-          test -f dist/index.html
-          test -f dist/CNAME
-          test -n "$(ls dist/assets/*.js 2>/dev/null)"
+          test -f old/dist/index.html
+          test -n "$(ls old/dist/assets/*.js 2>/dev/null)"
 
       # The zip is named for the version rather than the commit, so a download in somebody's
       # folder still says which build it is (D-126). The sha stays in the release notes.
@@ -71,14 +143,30 @@ jobs:
         id: package
         run: |
           set -euo pipefail
-          VERSION=$(node -p "require('./package.json').version")
+          VERSION=$(node -p "require('./old/package.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          cd dist && zip -qr "../shear-line-v${VERSION}.zip" . && cd ..
+          (cd old/dist && zip -qr "../../shear-line-v${VERSION}.zip" .)
           ls -la shear-line-*.zip
+
+      # ── The site ──
+      #
+      # The game at the root; the browser version beside it at /classic/ (its saves live in this
+      # address's own storage, so it has to stay at this address to find them); the domain; and
+      # the worker that retires the site-wide one the browser version used to register
+      # (src/web/sw.js says why).
+      - name: Assemble the site
+        run: |
+          set -euo pipefail
+          mkdir -p site/classic
+          cp -r old/dist/. site/classic/
+          cp src/web/CNAME src/web/sw.js site/
+          test -f site/classic/index.html
+          test -f site/classic/sw.js
+          du -sh site site/classic
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: ./dist
+          path: ./site
 
       - uses: actions/upload-artifact@v4
         with:
@@ -114,7 +202,7 @@ jobs:
       # be hundreds of releases of a game nobody is versioning yet. Deleted and recreated so the
       # tag follows `main` instead of pointing at whichever commit first made it.
       #
-      # It is what a browser game's release should be: `dist/` is portable to `file://` (D-037), so
+      # It is what a browser game's release should be: `old/dist/` is portable to `file://` (D-037), so
       # unzip and open `index.html` is the whole of the install.
       - name: Update the rolling release
         env:
@@ -123,11 +211,11 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo 'The current build of SHEAR LINE, from the latest commit on `main`.'
+            echo 'SHEAR LINE, from the latest commit on `main`.'
             echo
-            echo 'Play it in the browser at **https://lockpick.fun** — or download the zip below,'
-            echo 'unpack it and open `index.html`. It needs no server, no install and no network:'
-            echo 'everything you see and hear is generated in code.'
+            echo 'Play it in the browser at **https://lockpick.fun**. The zip below is the classic'
+            echo 'browser version (also at https://lockpick.fun/classic/): unpack it and open'
+            echo '`index.html`. It needs no server, no install and no network.'
             echo
             echo 'This release is replaced on every push. For a build that will not move under you,'
             echo 'use a tagged version.'
