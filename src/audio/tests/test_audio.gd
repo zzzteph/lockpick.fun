@@ -510,6 +510,11 @@ func _test_mixer() -> void:
 	sfx.voice_started.connect(func(key: String, bus: StringName) -> void: started.append([key, String(bus)]))
 	await _wait_ready()
 
+	# A browser is told to let the engine mix: left at a web export's default the site is silent,
+	# and nothing else here can notice (`sfx.gd` says why). 0 is "Stream".
+	_same(int(ProjectSettings.get_setting("audio/general/default_playback_type.web", -1)), 0,
+		"in a browser the engine mixes the sound itself")
+
 	# Buses: made at runtime, wired as the web's graph is.
 	var sends := {
 		SfxNode.BUS_OUT: &"Master", SfxNode.BUS_MASTER: SfxNode.BUS_OUT, SfxNode.BUS_MECHANICAL: SfxNode.BUS_MASTER,

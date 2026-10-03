@@ -19,6 +19,10 @@ boot_splash/bg_color=Color(0.957, 0.945, 0.918, 1)
 boot_splash/image="res://assets/brand/splash.png"
 config/icon="res://assets/brand/icon.png"
 
+[audio]
+
+general/default_playback_type.web=0
+
 [autoload]
 
 Sfx="*res://audio/sfx.gd"

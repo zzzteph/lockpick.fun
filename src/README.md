@@ -17,7 +17,7 @@ Godot_v4.7.2-stable_win64.exe --path src --editor   # open in the editor
 The first run after a checkout needs the class cache: `--headless --path src --import`.
 
 The save is `user://save.json` (`%APPDATA%\Godot\app_userdata\SHEAR LINE\`). It uses the web
-game's save format, so a web export pastes straight into Settings → Import.
+game's save format.
 
 ## Controls
 
@@ -180,7 +180,7 @@ one that has gone over the top is dashed). The same drawings, posed, are Help's.
 | `game/` | Rules and records: save, progress, ranks, achievements, blitz, share codes, editor model, feedback |
 | `screens/` | One script per screen; `screens/pick/` is the pick screen |
 | `ui/` | Palette and type (`Pal`), widgets (`Kit`), the screen base class (`GameScreen`) |
-| `audio/` | The synthesised sound |
+| `audio/` | The synthesised sound. In a browser the engine has to mix it itself: `audio/general/default_playback_type.web=0` in `project.godot` — without it the web build is silent (the top of `audio/sfx.gd` says why) |
 | `assets/brand/` | The game's own mark and loading picture: `icon.png` (window, browser tab, home screen), `icon.ico` (the Windows exe), `splash.png` (the loading screen) |
 | `tests/`, `*/tests/` | Headless tests |
 | `web/` | What the published site needs beside the export: the domain and the worker that retires the old one |

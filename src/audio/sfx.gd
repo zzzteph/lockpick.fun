@@ -19,6 +19,14 @@ extends Node
 ## The buses are made here at runtime, so the project needs no bus layout. Four more sit behind
 ## the ones drawn above — SfxHum, SfxSpring and SfxScrape into SfxMechanical, SfxBed into
 ## SfxAmbient — each a sustained voice's own filter.
+##
+## In a browser the engine must be told to mix all of this itself: `project.godot` sets
+## `audio/general/default_playback_type.web` to 0, "Stream". A web export's own default is
+## "Sample", which hands each sound to the browser to play — and played that way these streams,
+## made while the game runs, come out as nothing at all: measured at the page's output, a flat
+## zero with every button pressed, and the limiter and the filters above would not exist there
+## either. Nothing that runs outside a browser can hear the difference, so `tests/test_audio.gd`
+## checks the setting itself.
 
 ## Emitted as each one-shot starts, with the key of the sound that was played.
 signal voice_started(key: String, bus: StringName)

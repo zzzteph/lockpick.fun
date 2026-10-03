@@ -1,7 +1,6 @@
 extends GameScreen
-## Settings, in two columns under five headings: how the game plays and how it looks down the
-## left; the mixing desk, the controller and the save down the right. Every change is saved as
-## it is made. The save itself goes out and comes back through the clipboard.
+## Settings, in two columns under four headings: how the game plays and how it looks down the
+## left; the mixing desk and the controller down the right. Every change is saved as it is made.
 
 ## The two columns, and the gutter between them.
 const COL_W := 860.0
@@ -12,7 +11,6 @@ const PAIR_W := 420.0
 const PAIR_H := 44.0
 const SLIDER_W := 520.0
 const SWITCH_H := 40.0
-const SAVE_H := 46.0
 
 # ── Down the left: Play, then Display. Each y is the top of its control. ──
 const PLAY_Y := 150.0
@@ -23,7 +21,7 @@ const THEME_Y := DISPLAY_HEAD_Y + 78.0
 const DISPLAY_Y := THEME_Y + 118.0
 const MOTION_Y := DISPLAY_Y + PAIR_H + 30.0
 
-# ── Down the right: Sound, Controller, Save. ──
+# ── Down the right: Sound, then Controller. ──
 const SOUND_Y := PLAY_Y
 const SLIDERS_Y := SOUND_Y + 56.0
 const SLIDER_PITCH := 62.0
@@ -32,8 +30,6 @@ const TONES_Y := MUTE_Y + SWITCH_H + 8.0
 const SUBTITLES_Y := TONES_Y + SWITCH_H + 36.0
 const CONTROLLER_Y := SUBTITLES_Y + SWITCH_H + 50.0
 const VIBRATE_Y := CONTROLLER_Y + 48.0
-const SAVE_HEAD_Y := VIBRATE_Y + SWITCH_H + 80.0
-const SAVE_Y := SAVE_HEAD_Y + 48.0
 
 ## [caption, settings key, spoken name].
 const SLIDERS: Array = [
@@ -44,9 +40,6 @@ const SLIDERS: Array = [
 
 var _display: Array[Button] = []
 var _fullscreen := false
-var _import: Button
-## The clipboard text a first press on Import found to be a save; a second press loads it.
-var _armed := ""
 
 
 func build() -> void:
@@ -107,16 +100,6 @@ func build() -> void:
 	# ── Controller ──
 	_switch(RIGHT_X, VIBRATE_Y, "vibrate", "haptics", "rumble through a controller's motors")
 
-	# ── Save ──
-	var save_w := maxf(280.0, Kit.caption_width("Replace save?") + 28.0)
-	var export := Kit.button(self, Rect2(RIGHT_X, SAVE_Y, save_w, SAVE_H), "Export save",
-		func() -> void: app.copy_text(app.progress.export_text(), "the save to the clipboard"))
-	Kit.describe(export, "Export save", "copies the save to the clipboard")
-	_armed = ""
-	_import = Kit.button(self, Rect2(RIGHT_X + save_w + 20.0, SAVE_Y, save_w, SAVE_H), "Import save", _import_pressed)
-	Kit.describe(_import, "Import save", "reads a save back from the clipboard; a second press replaces yours")
-	_import.focus_exited.connect(_disarm)
-
 	var first: Button = level_cells[level]
 	if app.memo.get("settings_focus", "") == "theme":
 		first = theme_cells[maxi(0, themes.find(str(s["theme"])))]
@@ -170,9 +153,6 @@ func paint() -> void:
 	if not Haptics.is_supported():
 		_note(RIGHT_X + 39.0, VIBRATE_Y + SWITCH_H - 6.0, "no controller is connected — its motors are what would vibrate")
 
-	_heading(RIGHT_X, SAVE_HEAD_Y, "save")
-	_note(RIGHT_X, SAVE_Y + SAVE_H, "export copies the save to the clipboard; import reads one back from it")
-
 
 ## A group's heading: heavier than a control's label, and ruled off across its column.
 func _heading(x: float, y: float, text: String) -> void:
@@ -205,58 +185,6 @@ func _process(delta: float) -> void:
 func _is_fullscreen() -> bool:
 	var mode := get_window().mode
 	return mode == Window.MODE_FULLSCREEN or mode == Window.MODE_EXCLUSIVE_FULLSCREEN
-
-
-## Import replaces the whole save and cannot be undone, and the clipboard can hold anything —
-## so it takes two presses. The first reads the clipboard and says what it found; the second,
-## on the same button, loads it. Moving to any other control disarms it.
-func _import_pressed() -> void:
-	if _armed == "":
-		_offer(DisplayServer.clipboard_get())
-	else:
-		_load_offered()
-
-
-func _offer(text: String) -> void:
-	if text.strip_edges() == "":
-		app.status = "import failed: the clipboard is empty"
-		return
-	var found := SaveStore.decode(text)
-	if not found.ok():
-		app.status = "import failed: %s" % found.problem.replace("that file", "the clipboard")
-		return
-	var opened := 0
-	for record: Dictionary in (found.data["records"] as Dictionary).values():
-		if record["opens"] > 0:
-			opened += 1
-	_armed = text
-	_import.text = "REPLACE SAVE?"
-	_import.accessibility_name = "Replace save?"
-	_import.theme_type_variation = "Primary"
-	app.status = "the clipboard holds a save with %d locks opened and %d trophies — press again to replace yours" % [
-		opened, (found.data["achievements"] as Array).size()]
-
-
-func _load_offered() -> void:
-	var problem: String = app.progress.import_text(_armed)
-	_armed = ""
-	app.status = "save imported" if problem == "" else "import failed: %s" % problem
-	# Every control here was built from the old save: build the screen again from the new one.
-	# A save that brings another theme with it is rebuilt by the app as it changes the ink.
-	var same_theme: bool = Pal.theme_name == str(app.progress.settings["theme"])
-	app.apply_settings()
-	if same_theme:
-		app.refresh.call_deferred()
-
-
-func _disarm() -> void:
-	if _armed == "":
-		return
-	_armed = ""
-	_import.text = "IMPORT SAVE"
-	_import.accessibility_name = "Import save"
-	_import.theme_type_variation = ""
-	app.status = ""
 
 
 ## Reached from the pause panel, backing out goes back to it — not past the lock to the menu.
