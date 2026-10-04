@@ -1,33 +1,67 @@
 # SHEAR LINE
 
-**A lockpicking simulator that doesn't roll dice.**
+A lockpicking simulator. Play it in the browser at **[lockpick.fun](https://lockpick.fun)**.
 
-**Play it now at [lockpick.fun](https://lockpick.fun)**
+![Ironhold Spool Trainer: one pin set, a spool caught at the shear line](.github/screenshot.png)
 
-Every lock here is a real mechanism, simulated. Picking has no hidden success chance and no progress
-bar: a pin sets because you lifted it to the shear line while the plug was pinching it, and a spool
-that drops the plug into a false set is a waist and a rim doing what they do.
+In most games lockpicking is a minigame with a dice roll behind it. Here the lock itself is
+simulated: pins, springs, a plug and a tension wrench. A pin sets when you lift it to the shear line
+while the plug is binding it. A spool gives you a false set. Push a pin too far and it oversets.
+There is no success chance anywhere.
 
-## What is in here
+## What's in it
 
-| | |
+- 27 locks: 21 pin tumblers (the harder ones have spools, serrated pins, mushrooms and T-pins),
+  3 combination locks and 3 disc detainers
+- a tutorial of 10 short lessons
+- Lock Blitz: 5 minutes, open as many locks as you can
+- a snap gun that works on 6 of the plain locks
+- a lock editor, with codes for sharing a lock you built
+- trophies, two themes, and a help section with pictures
+
+![Vantage Disc Detainer 6 with three of six gates found](.github/discs.png)
+
+There are two levels. Training colours the pins and shows which one is binding. Normal shows the
+same lock without the hints. Each lock gives you a rank for your time.
+
+## Controls
+
+On the keyboard:
+
+| key | |
 |---|---|
-| [`src/`](src/README.md) | **The game.** A Godot 4.7 project (GDScript, 2D): the pin lock is engine physics bodies, and binding, setting, false sets and oversets are what those bodies do. Exports for the browser, Windows and Linux. |
-| [`old/`](old/README.md) | The original browser version (TypeScript and a canvas), with its own contact solver, its tests and its tools. No longer developed; still playable at [lockpick.fun/classic](https://lockpick.fun/classic/). |
-| `.github/workflows/deploy.yml` | Tests both, exports the game for the web and publishes the site on every push to `main`. |
+| Q (hold) | tension wrench |
+| ← → | move the pick |
+| Space (hold) | lift the pin, or turn the disc |
+| 1 to 0 | wrench pressure |
+| C (hold) | ease the plug back |
+| R | restart |
+| Esc | pause |
 
-## Running the game
+Hold the wrench first. Without tension nothing binds and nothing sets.
 
-With Godot 4.7.2 (`G` is its executable):
+Mouse, controller and touch work too, see [src/README.md](src/README.md#controls).
+
+## Feedback
+
+There is a Feedback button in the game. You can also
+[open an issue](https://github.com/zzzteph/lockpick.fun/issues/new) or come to the
+[Discord](https://discord.gg/V9ce457mup).
+
+## The repository
+
+- `src/` is the game, a Godot 4.7 project. Details are in [src/README.md](src/README.md).
+- `old/` is the first version, written in TypeScript. It is not developed anymore but still runs
+  at [lockpick.fun/classic](https://lockpick.fun/classic/). See [old/README.md](old/README.md).
+- `.github/workflows/deploy.yml` runs the tests and publishes the site on every push to `main`.
+
+To run from source you need Godot 4.7.2:
 
 ```
-G --headless --path src --import    # once after a checkout
-G --path src                        # play
-G --path src --editor               # open in the editor
+godot --headless --path src --import    # once, after cloning
+godot --path src
 ```
-
-Controls, how the lock works, the builds and the tests are in [`src/README.md`](src/README.md).
 
 ## Licence
 
-MIT — see [`LICENSE`](LICENSE).
+MIT, see [LICENSE](LICENSE).
